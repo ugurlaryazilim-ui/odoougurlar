@@ -68,7 +68,7 @@ class SocialMediaAccount(models.Model):
         }
         
         try:
-            resp = requests.post(subscribe_url, data=sub_data).json()
+            resp = requests.post(subscribe_url, data=sub_data, timeout=30).json()
             if resp.get('success'):
                 raise exceptions.UserError("BAŞARILI! Facebook sayfanız Odoo tetikleyicisine başarıyla bağlandı. Artık mesajlar Odoo'ya düşecek.")
             else:

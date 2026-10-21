@@ -45,7 +45,7 @@ class MetaOAuthController(http.Controller):
 
             # 1. Exchange code for user access token
             token_url = f"https://graph.facebook.com/v19.0/oauth/access_token?client_id={app_id}&redirect_uri={redirect_uri}&client_secret={app_secret}&code={code}"
-            token_resp = requests.get(token_url).json()
+            token_resp = requests.get(token_url, timeout=30).json()
             
             user_access_token = token_resp.get('access_token')
             if not user_access_token:
@@ -54,7 +54,7 @@ class MetaOAuthController(http.Controller):
 
             # 2. Get Long-lived User Token
             long_token_url = f"https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id={app_id}&client_secret={app_secret}&fb_exchange_token={user_access_token}"
-            long_token_resp = requests.get(long_token_url).json()
+            long_token_resp = requests.get(long_token_url, timeout=30).json()
             long_user_token = long_token_resp.get('access_token')
             if not long_user_token:
                 return f"Error getting long-lived token: {long_token_resp}"
@@ -73,7 +73,7 @@ class MetaOAuthController(http.Controller):
                     
                 # Query the page directly using the user token
                 page_url = f"https://graph.facebook.com/v19.0/{page_id}?fields=name,access_token,instagram_business_account&access_token={long_user_token}"
-                page_resp = requests.get(page_url).json()
+                page_resp = requests.get(page_url, timeout=30).json()
                 responses_log.append(f"Page {page_id}: {page_resp}")
                 
                 page_token = page_resp.get('access_token')
@@ -95,7 +95,7 @@ class MetaOAuthController(http.Controller):
                         'subscribed_fields': 'messages,messaging_postbacks,feed',
                         'access_token': page_token
                     }
-                    sub_resp = requests.post(subscribe_url, data=sub_data).json()
+                    sub_resp = requests.post(subscribe_url, data=sub_data, timeout=30).json()
                     _logger.info("Webhook Subscribe Response for Page %s: %s", page_id, sub_resp)
                 except Exception as e:
                     _logger.error("Error subscribing webhook: %s", e)
