@@ -646,6 +646,89 @@ class TestApprovalGate(TransactionCase):
         self._ctrl(self.reviewer, 'heartbeat_review_lock', saving.id, lock_token='r')
         self.assertEqual(saving.review_lock_time, old)
 
+    # --- J10 düzeltme #3: kilit alanları model düzeyinde (D-J10-5), review'a dolaylı giriş (B-J10-1) ---
+    def test_operator_lock_fields_and_token_closed(self):
+        # D-J10-5: kilit/jeton yalnız controller'da korunuyordu; operatör ORM ile okuyup yazabiliyordu
+        session, _approved, _pending = self._review_pair()
+        self._lock(session)
+        op = session.with_user(self.operator)
+        future = datetime(2099, 1, 1)
+        for vals in ({'review_lock_token': 'x'}, {'review_locked_by': self.operator.id},
+                     {'review_lock_time': future}):
+            with self.subTest(vals=vals), self.assertRaises(AccessError):
+                op.write(vals)
+        with self.assertRaises(AccessError):
+            op.read(['review_lock_token'])
+        Op = self.Session.with_user(self.operator)
+        creates = {
+            'vals': lambda: Op.create({'product_id': self.product.id, 'review_locked_by': self.operator.id,
+                                       'review_lock_time': future}),
+            'context': lambda: Op.with_context(default_review_locked_by=self.operator.id).create(
+                {'product_id': self.product.id}),
+        }
+        for label, create in creates.items():
+            with self.subTest(label), self.assertRaises(AccessError):
+                create()
+        self.assertEqual((session.review_locked_by, session.review_lock_token), (self.reviewer, 'tok-a'))
+        # review_data operatöre jeton döndürmez (süresi dolmuş kilit: veri döner)
+        session.write({'review_lock_time': datetime(2020, 1, 1)})
+        res = self._ctrl(self.operator, 'get_review_data', session.id)
+        self.assertNotIn('error', res)
+        self.assertNotIn('tok-a', repr(res))
+        # operatörün meşru durum yazımı, kilit temizliğinde jeton okumaya takılmaz
+        draft = self._session(state='draft')
+        draft.write({'review_locked_by': self.reviewer.id, 'review_lock_token': 'eski'})
+        draft.with_user(self.operator).write({'state': 'photos_ready'})
+        self.assertFalse(draft.review_locked_by or draft.review_lock_token)
+
+    def test_t5_leaked_token_cannot_reopen_stale_screen(self):
+        # D-J10-5 T5: operatör jetonu okuyup iptal döngüsünden sonra geri yazınca eski ekran onaylıyordu
+        session, _approved, pending = self._review_pair()
+        token = self._lock(session)
+        rev = session.with_user(self.reviewer)
+        rev.action_cancel()
+        rev.action_reset_draft()
+        pending.with_user(self.operator).write({'generated_image': self._image((10, 10, 220))})
+        session.write({'state': 'review'})   # sistem
+        with self.assertRaises(AccessError):
+            session.with_user(self.operator).write({'review_locked_by': self.reviewer.id,
+                                                    'review_lock_token': token,
+                                                    'review_lock_time': datetime.now()})
+        res = self._ctrl(self.reviewer, 'approve_generation', pending.id, lock_token=token)
+        self.assertIn('eski', res['error'])
+        self.assertFalse(pending.is_approved)
+
+    def test_future_lock_time_does_not_block_reviewer(self):
+        # D-J10-5 (a): geleceğe yazılmış kilit süresi hiç dolmaz; onaycıyı kalıcı dışarıda bırakırdı
+        session, _approved, _pending = self._review_pair()
+        other = new_test_user(self.env, login='ais_rev3_j10', groups='ugurlar_ai_studio.group_ai_studio_reviewer')
+        session.write({'review_locked_by': other.id, 'review_lock_token': 'x',
+                       'review_lock_time': datetime(2099, 1, 1)})
+        res = self._ctrl(self.reviewer, 'get_review_data', session.id, lock_token='tok-r')
+        self.assertNotIn('error', res)
+        res = self._ctrl(self.reviewer, 'acquire_review_lock', session.id, lock_token='tok-r')
+        self.assertTrue(res.get('locked_by_self'), res)
+        self.assertEqual((session.review_locked_by, session.review_lock_token), (self.reviewer, 'tok-r'))
+
+    def test_operator_cannot_create_or_auto_enter_review(self):
+        # B-J10-1: review'a giriş create/default_state/copy ya da otomatik geçişle operatöre açık kalmasın
+        Op = self.Session.with_user(self.operator)
+        draft = Op.create({'product_id': self.product.id})   # meşru yol (popup / form)
+        self.assertEqual(draft.state, 'draft')
+        attacks = {
+            'vals': lambda: Op.create({'product_id': self.product.id, 'state': 'review'}),
+            'default_state': lambda: Op.with_context(default_state='review').create({'product_id': self.product.id}),
+            'copy': lambda: draft.copy({'state': 'review'}),
+        }
+        for label, attack in attacks.items():
+            with self.subTest(label), self.assertRaises(AccessError):
+                attack()
+        processing = self._session(state='processing')   # tüm üretimler 'done'
+        processing.with_user(self.operator).action_review_generations()
+        self.assertEqual(processing.state, 'processing')
+        processing.with_user(self.reviewer).action_review_generations()
+        self.assertEqual(processing.state, 'review')
+
     def test_y3_poc_flow_product_gets_reviewer_image(self):
         # A4 Y3 PoC: onaydan sonra operatör görseli değiştiremez, arkayı onaylayamaz; ürün onaylananı alır
         session, approved, pending = self._review_pair()

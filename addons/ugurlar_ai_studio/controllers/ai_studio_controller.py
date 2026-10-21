@@ -781,7 +781,7 @@ class AiStudioController(http.Controller):
         Yalnız 'review'da istenir: diğer durumlarda kilit alınmaz (acquire_review_lock) ve complete reddeder.
         """
         return session.state == 'review' and not (
-            lock_token and session.review_lock_token == lock_token
+            lock_token and session.sudo().review_lock_token == lock_token
             and session.review_locked_by == request.env.user)
 
     @staticmethod
@@ -801,11 +801,12 @@ class AiStudioController(http.Controller):
         domain = Session._review_queue_domain()
         if exclude_ids:
             domain.append(('id', 'not in', [int(i) for i in exclude_ids]))
-        lock_limit = fields.Datetime.now() - timedelta(minutes=self.REVIEW_LOCK_TIMEOUT_MINUTES)
+        now = fields.Datetime.now()
+        lock_limit = now - timedelta(minutes=self.REVIEW_LOCK_TIMEOUT_MINUTES)
         user = request.env.user
         for session in Session.search(domain, order='id asc', limit=20):
             locked_by_other = (session.review_locked_by and session.review_locked_by != user
-                               and session.review_lock_time and session.review_lock_time > lock_limit)
+                               and session.review_lock_time and lock_limit < session.review_lock_time <= now)
             if not locked_by_other:
                 return session
         return Session
@@ -836,12 +837,14 @@ class AiStudioController(http.Controller):
             from datetime import timedelta
 
             # Mevcut kilit kontrolü
+            lock_token_now = session.sudo().review_lock_token
             if session.review_locked_by and session.review_lock_time:
                 lock_age = now - session.review_lock_time
-                if lock_age < timedelta(minutes=self.REVIEW_LOCK_TIMEOUT_MINUTES):
+                # NEDEN (D-J10-5): gelecekteki kilit zamanı hiç dolmaz; geçersiz sayılır, devralınır
+                if timedelta(0) <= lock_age < timedelta(minutes=self.REVIEW_LOCK_TIMEOUT_MINUTES):
                     # Kilit aktif (5dk henüz dolmamış)
                     # 1. Eğer jeton tam eşleşiyorsa (aynı sekme/yenileme) -> kilit süresini uzat
-                    if lock_token and session.review_lock_token == lock_token:
+                    if lock_token and lock_token_now == lock_token:
                         session.sudo().write({'review_lock_time': now})
                         return {'success': True, 'locked_by_self': True}
                     
@@ -849,7 +852,7 @@ class AiStudioController(http.Controller):
                     #    (Sayfa yenilemesi, tarayıcı çökmesi vb. sonrası kendi kilidinin takılmasını önler)
                     if session.review_locked_by.id == current_user.id:
                         _logger.info('Oturum %s: aynı kullanıcı (%s) kilidi devraldı (eski token: %s -> yeni: %s)',
-                                     session.id, current_user.name, session.review_lock_token, lock_token)
+                                     session.id, current_user.name, lock_token_now, lock_token)
                         session.sudo().write({
                             'review_lock_time': now,
                             'review_lock_token': lock_token or '',
@@ -861,7 +864,7 @@ class AiStudioController(http.Controller):
                     lock_seconds = int(lock_age.total_seconds() % 60)
                     locker_name = session.review_locked_by.name or 'Başka bir kullanıcı'
                     _logger.warning('Oturum %s KİLİTLİ! İnceleyen: %s (token: %s). İsteyen: %s (token: %s)',
-                                    session.id, locker_name, session.review_lock_token, current_user.name, lock_token)
+                                    session.id, locker_name, lock_token_now, current_user.name, lock_token)
                     return {
                         'success': False,
                         'locked': True,
@@ -897,7 +900,7 @@ class AiStudioController(http.Controller):
 
             current_user = request.env.user
             # Token eşleşiyorsa VEYA aynı kullanıcıysa VEYA yöneticiyse kilidi kaldır
-            if (lock_token and session.review_lock_token == lock_token) or \
+            if (lock_token and session.sudo().review_lock_token == lock_token) or \
                (session.review_locked_by and session.review_locked_by.id == current_user.id) or \
                current_user.has_group('ugurlar_ai_studio.group_ai_studio_manager'):
                 _logger.info('Oturum %s kilidi BIRAKILDI: kullanıcı %s', session.id, current_user.name)
@@ -923,7 +926,7 @@ class AiStudioController(http.Controller):
             if not self._review_lock_writable(session):
                 return {'success': True, 'read_only': True}
 
-            if (lock_token and session.review_lock_token == lock_token) or \
+            if (lock_token and session.sudo().review_lock_token == lock_token) or \
                (session.review_locked_by and session.review_locked_by.id == request.env.user.id):
                 session.sudo().write({'review_lock_time': fields.Datetime.now()})
                 return {'success': True}
@@ -945,10 +948,10 @@ class AiStudioController(http.Controller):
             from datetime import timedelta
             if session.review_locked_by and session.review_lock_time:
                 lock_age = now - session.review_lock_time
-                if lock_age < timedelta(minutes=self.REVIEW_LOCK_TIMEOUT_MINUTES):
+                if timedelta(0) <= lock_age < timedelta(minutes=self.REVIEW_LOCK_TIMEOUT_MINUTES):
                     # Kilit aktif — aynı kullanıcı her zaman geçebilir
                     is_same_user = session.review_locked_by.id == request.env.user.id
-                    is_same_token = lock_token and session.review_lock_token == lock_token
+                    is_same_token = lock_token and session.sudo().review_lock_token == lock_token
                     if not is_same_user and not is_same_token:
                         locker_name = session.review_locked_by.name or 'Başka bir kullanıcı'
                         return {

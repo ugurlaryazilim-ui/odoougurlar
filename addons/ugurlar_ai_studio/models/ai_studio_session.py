@@ -190,6 +190,9 @@ CLEAR_FAL_REQUEST = {'fal_request_id': False, 'fal_app': False, 'submitted_at': 
 
 # Kuyruğun hangi ürün(ler)e yazacağını belirler; yetkisiz değişim onayları düşürür (J10 KK2).
 APPROVAL_TARGET_FIELDS = frozenset({'product_id', 'apply_to_siblings', 'session_type'})
+# İnceleme kilidi: jeton onaycı uçlarında "bu ekran güncel" kanıtıdır (J10 D-J10-3/D-J10-5); yalnız controller
+# (sudo) ve durum değişimi temizliği yazar.
+REVIEW_LOCK_FIELDS = frozenset({'review_locked_by', 'review_lock_time', 'review_lock_token'})
 
 
 def _is_client_timeout(exc):
@@ -948,10 +951,13 @@ class AiStudioSession(models.Model):
         readonly=True,
         copy=False,
     )
+    # DIKKAT: operatör jetonu okuyamamalı (D-J10-5); kodda okuma sudo() ile yapılır, yoksa operatör yolunda
+    # alan erişimi AccessError verir.
     review_lock_token = fields.Char(
         string='Kilit Jetonu',
         readonly=True,
         copy=False,
+        groups='ugurlar_ai_studio.group_ai_studio_reviewer',
     )
 
     # --- AI Ayarları ---
@@ -1016,7 +1022,9 @@ class AiStudioSession(models.Model):
         """Profesyonel inceleme popup'ini acar."""
         self.ensure_one()
         # Eğer oturum işleniyor durumunda kalmış ama tüm generation'lar bittiyse otomatik onaya geçir
-        if self.state in ('preprocessing', 'processing') and self.generation_ids and all(g.state == 'done' for g in self.generation_ids):
+        # NEDEN (J10 B-J10-1): yalnız onay yetkilisi; operatör kendi 'done' yaptığı üretimle AI'sız review'a girerdi.
+        if self.state in ('preprocessing', 'processing') and self.generation_ids \
+                and all(g.state == 'done' for g in self.generation_ids) and self._is_approval_authority():
             self.sudo().write({
                 'state': 'review',
                 'date_review_start': fields.Datetime.now(),
@@ -1025,7 +1033,8 @@ class AiStudioSession(models.Model):
         from datetime import timedelta
         if self.review_locked_by and self.review_lock_time:
             lock_age = now - self.review_lock_time
-            if lock_age < timedelta(minutes=5) and self.review_locked_by.id != self.env.uid:
+            # NEDEN: gelecekteki kilit zamanı hiç dolmaz (D-J10-5); geçersiz say
+            if timedelta(0) <= lock_age < timedelta(minutes=5) and self.review_locked_by.id != self.env.uid:
                 lock_minutes = int(lock_age.total_seconds() // 60)
                 lock_seconds = int(lock_age.total_seconds() % 60)
                 raise UserError(_(
@@ -2194,12 +2203,10 @@ class AiStudioSession(models.Model):
 
         gen_vals_list = []
         for session in valid_sessions:
+            # NEDEN: kilit alanları burada yazılmaz (operatöre kapalı, D-J10-5); durum değişimi write()'ta temizler
             session.write({
                 'state': 'preprocessing',
                 'date_processing_start': fields.Datetime.now(),
-                'review_locked_by': False,
-                'review_lock_time': False,
-                'review_lock_token': False,
             })
             session.generation_ids.unlink()
 
@@ -4141,6 +4148,10 @@ class AiStudioSession(models.Model):
             raise AccessError(_('Oturumu ürüne kaydetmeye yalnız onaycı veya yönetici alabilir.'))
         if 'reviewer_id' in vals:
             raise AccessError(_('Onayıcı alanını yalnız onaycı veya yönetici değiştirebilir.'))
+        # NEDEN (J10 D-J10-5): kilit yazılabilseydi operatör onaycıyı kalıcı kilitler ya da sızan jetonu geri
+        # yazıp onaycının eski ekranını yeniden "güncel" yapardı.
+        if REVIEW_LOCK_FIELDS & set(vals):
+            raise AccessError(_('İnceleme kilidini yalnız onaycı veya yönetici değiştirebilir.'))
         # NEDEN (J10 KK4): 'done' onaycının kararıdır (D1-kalan: operatör review→done yazabiliyordu).
         # 'review'dan çıkış da kapalı: review→draft→içerik değiştir→review döngüsü onayı atlatırdı.
         if 'state' in vals and (vals['state'] == 'done'
@@ -4192,6 +4203,10 @@ class AiStudioSession(models.Model):
             return
         if self.filtered(lambda r: r.state == 'saving' or r.reviewer_id):
             raise AccessError(_('Oturumu ürüne kaydetmeye ve onayıcı atamaya yalnız onaycı veya yönetici yetkilidir.'))
+        # NEDEN (J10 D-J10-5, B-J10-1): kilit alanları ve 'draft' dışı başlangıç (create/default_state/copy ile
+        # doğrudan review) write'taki denetimlerin create kapısı. sudo: jeton alanı operatöre okunmaz.
+        if self.sudo().filtered(lambda r: r.state != 'draft' or any(r[f] for f in REVIEW_LOCK_FIELDS)):
+            raise AccessError(_('Oturum yalnız taslak olarak ve inceleme kilidi olmadan oluşturulabilir.'))
 
     # Onaydan sonra ('saving'/'done') içerik değişmesin (A4 O1/Y2/O2): kilit kayıt kuralında
     # (security/ai_studio_security.xml, *_operator_edit) — create/o2m/context default/ek yollarının hepsinde
@@ -4217,7 +4232,8 @@ class AiStudioSession(models.Model):
         # olmalı; yoksa iptal → taslak → yeniden review sonrası açık kalan eski ekran onay verebilir.
         unlock = self.browse()
         if 'state' in vals and 'review_lock_token' not in vals:
-            unlock = self.filtered(lambda s: s.state != vals['state'] and (s.review_locked_by or s.review_lock_token))
+            unlock = self.sudo().filtered(
+                lambda s: s.state != vals['state'] and (s.review_locked_by or s.review_lock_token))
         res = super(AiStudioSession, self).write(vals)
         if unlock:
             unlock.sudo().write({'review_locked_by': False, 'review_lock_time': False, 'review_lock_token': False})
