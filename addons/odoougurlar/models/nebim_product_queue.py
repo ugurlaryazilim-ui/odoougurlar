@@ -180,34 +180,51 @@ class NebimProductQueue(models.Model):
             return
 
         processor = self.env['odoougurlar.product.processor']
-        processor._init_cache()  # Batch başında cache yükle
+        # JSON bir kez ayrıştırılır; cache yalnız bu partideki ad/barkodlar için yüklenir
+        # (tüm product_product.barcode ve tüm nitelik değerleri her partide okunmaz).
+        # Bozuk JSON burada yutulur, döngüde aynı json.loads kaydı hataya düşürür.
+        parsed = {}
+        for record in pending:
+            try:
+                parsed[record.id] = json.loads(record.raw_data)
+            except Exception:
+                pass
+        processor._init_cache([row for rows in parsed.values() for row in rows])
 
         batch_created = 0
         batch_updated = 0
         batch_failed = 0
 
-        for record in pending:
-            try:
-                record.sudo().write({'state': 'processing'})
-                with self.env.cr.savepoint():
-                    variants = json.loads(record.raw_data)
-                    result = processor._process_product_group(record.item_code, variants)
-                    record.sudo().write({
-                        'state': 'done',
-                        'result': result,
-                    })
-                    if result == 'created':
-                        batch_created += 1
-                    else:
-                        batch_updated += 1
+        try:
+            for record in pending:
+                try:
+                    record.sudo().write({'state': 'processing'})
+                    with self.env.cr.savepoint():
+                        variants = parsed[record.id] if record.id in parsed else json.loads(record.raw_data)
+                        result = processor._process_product_group(
+                            record.item_code, variants, defer_last_sync=True)
+                        record.sudo().write({
+                            'state': 'done',
+                            'result': result,
+                        })
+                        if result == 'created':
+                            batch_created += 1
+                        else:
+                            batch_updated += 1
 
-            except Exception as e:
-                record.sudo().write({
-                    'state': 'error',
-                    'error_message': str(e),
-                })
-                batch_failed += 1
-                _logger.error("Kuyruk hatası [%s]: %s", record.item_code, str(e))
+                except Exception as e:
+                    record.sudo().write({
+                        'state': 'error',
+                        'error_message': str(e),
+                    })
+                    batch_failed += 1
+                    _logger.error("Kuyruk hatası [%s]: %s", record.item_code, str(e))
+
+            # Partideki mevcut ürünlerin nebim_last_sync'i tek UPDATE (commit'ten önce)
+            processor._flush_last_sync()
+        finally:
+            # Kısıtlı cache'i bırak: kuyruk dışı çağıranlar tam cache yükler
+            processor._reset_cache()
 
         # Batch commit
         self.env.cr.commit()
