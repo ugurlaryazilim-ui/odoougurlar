@@ -680,13 +680,28 @@ class SaleOrder(models.Model):
                 _logger.warning("Sipariş onayında Nebim auto-sync hatası (sipariş yine de onaylandı): %s", e)
         return res
 
+    def _nebim_safe_write(self, order, vals):
+        """Tanı/durum alanını yaz; hata ana transaction'ı bozmadan loglanır.
+
+        NEDEN: ORM write geç flush edilir; savepoint olmadan `try/except: pass` hatayı
+        yakalamaz, flush başka yerde patlar. Savepoint çıkışında flush yapılır, hata burada
+        yakalanıp geri alınır.
+        """
+        try:
+            with self.env.cr.savepoint():
+                order.write(vals)
+        except Exception:
+            _logger.warning("Nebim durum alanı yazılamadı (%s)", order.name, exc_info=True)
+
     def _auto_nebim_sync(self, order):
         """Sipariş onayında otomatik Cari ve Sipariş Nebim'e gönder.
         
         Duplikasyon Koruması:
         - Bağımsız cursor ile committed DB state kontrolü (rollback-proof)
         - Email-bazlı cari dedup (aynı email ile mevcut cari kodu varsa yeniden kullanır)
-        - API sonuçları bağımsız cursor ile kaydedilir (ana transaction rollback yapsa bile kalıcı)
+        - API sonuçları bağımsız cursor ile kaydedilir; bu cursor kendi commit'ini yaptığı için
+          sonuç, ana transaction sonradan rollback etse de DB'de kalır. Ancak ana transaction'ın
+          kendi yazdıkları (ör. savepoint rollback'i ile geri alınanlar) kalıcı değildir.
         """
         ICP = self.env['ir.config_parameter'].sudo()
         customer_enabled = ICP.get_param('odoougurlar.nebim_sync_customer_enabled', 'False') == 'True'
@@ -830,12 +845,9 @@ class SaleOrder(models.Model):
                     "Auto-sync: '%s' için marketplace mapping bulunamadı! "
                     "Ayarlar > Nebim > Pazaryeri Eşleştirmeleri'nde '%s' kuralı tanımlayın.",
                     marketplace_name, marketplace_name)
-                try:
-                    order.write({
-                        'nebim_customer_response': f'[Auto-Sync] HATA: "{marketplace_name}" için marketplace mapping bulunamadı!'
-                    })
-                except Exception:
-                    pass
+                self._nebim_safe_write(order, {
+                    'nebim_customer_response': f'[Auto-Sync] HATA: "{marketplace_name}" için marketplace mapping bulunamadı!'
+                })
                 return
 
             # ═══════════════════════════════════════════════════════════════════
@@ -878,24 +890,20 @@ class SaleOrder(models.Model):
                                     'nebim_customer_sent': True,
                                     'nebim_order_response': f'[Auto-Sync] ERKEN DEDUP: Nebim\'de mevcut ({check_val})'
                                 })
-                                # Bağımsız cursor ile de kaydet (rollback koruması)
-                                try:
-                                    self.env.cr.execute(
-                                        "UPDATE sale_order SET nebim_order_sent = true, "
-                                        "nebim_customer_sent = true WHERE id = %s", [order_id])
-                                except Exception:
-                                    pass
+                                # NEDEN: Burada eskiden "bağımsız cursor" diye aynı cr ile tekrar UPDATE
+                                # vardı; aynı transaction olduğundan ORM write'ın kopyasıydı ve hata
+                                # verirse transaction'ı zehirliyordu. Kaldırıldı. Gerçek ayrı cursor
+                                # kullanılmaz: sipariş satırı bu transaction'da kilitli/commit'lenmemiş,
+                                # ayrı cursor UPDATE'i kilitte bekleyip ana transaction ile kilitlenirdi.
                                 return
                 except Exception as e:
                     # Kontrol yapılamadıysa göndermek mükerrer sipariş riski: bu turda gönderme.
                     # Sipariş "Paketle ve Faturala"da (ya da sonraki onayda) yeniden denenir.
                     _logger.warning("Erken Nebim sipariş kontrol hatası (%s): %s — gönderim ertelendi",
                                     order.name, e)
-                    try:
-                        order.write({'nebim_order_response': f'[Auto-Sync] Nebim kontrolü yapılamadı, '
-                                                             f'gönderim ertelendi: {e}'})
-                    except Exception:
-                        pass
+                    self._nebim_safe_write(order, {
+                        'nebim_order_response': f'[Auto-Sync] Nebim kontrolü yapılamadı, '
+                                                f'gönderim ertelendi: {e}'})
                     return
                 # Bu değerler az önce Nebim'de yok çıktı: sync_order aynı kontrolleri tekrarlamasın
                 nebim_checked_refs = tuple(early_ref_checks)
@@ -953,18 +961,15 @@ class SaleOrder(models.Model):
                             nebim_partner.invalidate_recordset(
                                 ['nebim_customer_sent', 'nebim_customer_code', 'nebim_address_id'])
                     except Exception:
-                        pass
+                        _logger.warning("Auto-sync Cari SQL güncellemesi başarısız (%s)", order.name, exc_info=True)
 
                 except Exception as e:
                     _logger.error("Auto-sync Cari hatası (%s): %s", order.name, e)
-                    try:
-                        request_json = getattr(e, 'request_json', '')
-                        write_vals = {'nebim_customer_response': f'[Auto-Sync] CARİ HATA: {str(e)}'}
-                        if request_json:
-                            write_vals['nebim_customer_request'] = request_json
-                        order.write(write_vals)
-                    except Exception:
-                        pass
+                    request_json = getattr(e, 'request_json', '')
+                    write_vals = {'nebim_customer_response': f'[Auto-Sync] CARİ HATA: {str(e)}'}
+                    if request_json:
+                        write_vals['nebim_customer_request'] = request_json
+                    self._nebim_safe_write(order, write_vals)
             else:
                 # CARİ zaten gönderilmiş — mevcut kodu al
                 resolved_cust_code = order.nebim_customer_code or order.partner_id.nebim_customer_code
@@ -1004,20 +1009,12 @@ class SaleOrder(models.Model):
                         order.sudo().write({'nebim_order_sent': True})
                         _logger.info("Auto-sync Sipariş başarılı: %s", order.name)
 
-                        # ═══ KATMAN 3: Bağımsız cursor ile kalıcı kayıt ═══
-                        try:
-                            self.env.cr.execute(
-                                "UPDATE sale_order SET nebim_order_sent = true "
-                                "WHERE id = %s", [order_id])
-                        except Exception:
-                            pass
+                        # NEDEN: "Bağımsız cursor" UPDATE'i kaldırıldı (aynı cr, yukarıdaki ORM
+                        # write'ın tekrarıydı; gerçek ayrı cursor kilitlenme riski taşır, bkz. ERKEN DEDUP).
 
                 except Exception as e:
                     _logger.error("Auto-sync Sipariş hatası (%s): %s", order.name, e)
-                    try:
-                        order.write({'nebim_order_response': f'[Auto-Sync] HATA: {str(e)}'})
-                    except Exception:
-                        pass
+                    self._nebim_safe_write(order, {'nebim_order_response': f'[Auto-Sync] HATA: {str(e)}'})
 
         except Exception as e:
             _logger.error("Auto-sync Nebim genel hata (%s): %s", order.name, e)

@@ -1,8 +1,15 @@
 import logging
+import re
 import time
+from urllib.parse import parse_qs, urlparse
+
 import requests
 
 _logger = logging.getLogger(__name__)
+
+# NEDEN: sayfa başına 250 × 20 = 5000 sipariş; 3 günlük pencere için bol, takılı bir Link zincirinde sonsuz döngüye karşı sigorta.
+MAX_PAGES = 20
+_NEXT_LINK_RE = re.compile(r'<([^>]+)>;\s*rel="next"')
 
 
 class ShopifyAPIClient:
@@ -47,9 +54,9 @@ class ShopifyAPIClient:
 
             if resp.status_code == 200 or resp.status_code == 201:
                 try:
-                    return {'success': True, 'data': resp.json()}
+                    return {'success': True, 'data': resp.json(), 'link': resp.headers.get('Link', '')}
                 except Exception:
-                    return {'success': True, 'data': resp.text}
+                    return {'success': True, 'data': resp.text, 'link': ''}
             elif resp.status_code == 401:
                 return {'success': False, 'error': '401 Unauthorized: Access Token hatalı.'}
             elif resp.status_code == 404:
@@ -78,15 +85,26 @@ class ShopifyAPIClient:
             params['financial_status'] = financial_status
 
         all_orders = []
-        result = self._request('GET', 'orders.json', params=params)
-        if not result.get('success'):
-            return result
+        for _page in range(MAX_PAGES):
+            result = self._request('GET', 'orders.json', params=params)
+            if not result.get('success'):
+                if not all_orders:
+                    return result
+                # NEDEN: ilk sayfalar elde; atmak yerine kısmi döndür, eksik kalanlar 5 dk sonra pencereden tekrar gelir.
+                _logger.error("Shopify sayfalama yarıda kesildi (%d sipariş alındı): %s",
+                              len(all_orders), result.get('error'))
+                break
+            all_orders.extend(result['data'].get('orders', []))
 
-        orders = result['data'].get('orders', [])
-        all_orders.extend(orders)
-
-        # Pagination — Shopify Link header
-        # Not: İlk sayfa genellikle yeterli, gerekirse pagination eklenir
+            # Pagination — Shopify Link header (rel="next")
+            next_link = _NEXT_LINK_RE.search(result.get('link') or '')
+            page_info = parse_qs(urlparse(next_link.group(1)).query).get('page_info') if next_link else None
+            if not page_info:
+                break
+            # DIKKAT: page_info ile yalnız limit gönderilebilir; status/created_at_min vb. eklenirse Shopify 400 döner.
+            params = {'limit': params['limit'], 'page_info': page_info[0]}
+        else:
+            _logger.warning("Shopify sipariş sayfa sınırına (%d) ulaşıldı; kalan siparişler çekilmedi.", MAX_PAGES)
         return {'success': True, 'data': all_orders}
 
     def get_order(self, order_id):

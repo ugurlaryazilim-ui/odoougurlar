@@ -362,9 +362,12 @@ class TrendyolOrder(models.Model):
 
         old_so = record.sale_order_id
         if old_so and old_so.state != 'cancel':
-            if old_so.picking_ids.filtered(lambda p: p.state == 'done'):
-                record.write({'error_message': f"{reason}; {old_so.name} sevk edildiği için otomatik "
-                                               f"güncellenmedi, elle kontrol edin."})
+            blocker = self._cancel_blocker(old_so)
+            if blocker:
+                msg = f"{reason}; {old_so.name} {blocker} için otomatik güncellenmedi, elle kontrol edin."
+                if record.error_message != msg:
+                    old_so.message_post(body=msg)
+                    record.write({'error_message': msg})
                 return True
             old_so._action_cancel()
 

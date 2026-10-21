@@ -3,6 +3,7 @@ import json
 import logging
 
 from odoo import http
+from odoo.exceptions import AccessError, MissingError
 from odoo.http import request, content_disposition
 
 _logger = logging.getLogger(__name__)
@@ -22,7 +23,22 @@ class ProductExportController(http.Controller):
 
     @http.route('/ugurlar/product/export', type='http', auth='user', methods=['POST'], csrf=True)
     def export_products(self, **kwargs):
-        data = json.loads(kwargs.get('data', '{}'))
+        # NEDEN: auth='user' portal kullanıcısını da içerir; istemci alan adlarını kendi seçtiği için
+        # (maliyet fiyatı vb.) yalnız iç kullanıcıya açık
+        if not request.env.user.has_group('base.group_user'):
+            return request.make_response(
+                'Forbidden', headers=[('Content-Type', 'text/plain')], status=403,
+            )
+        def _bad_request(msg):
+            return request.make_response(msg, headers=[('Content-Type', 'text/plain')], status=400)
+
+        # NEDEN: istemci girdisi; bozuk JSON/şema/alan/id 500 yerine 400 dönmeli
+        try:
+            data = json.loads(kwargs.get('data', '{}'))
+        except ValueError:
+            return _bad_request('Invalid data')
+        if not isinstance(data, dict):
+            return _bad_request('Invalid data')
         res_model = data.get('res_model', 'product.product')
         if res_model not in ('product.product', 'product.template'):
             res_model = 'product.product'
@@ -31,21 +47,38 @@ class ProductExportController(http.Controller):
         field_defs = data.get('fields', [])
 
         if not ids:
-            return request.make_response(
-                'No IDs provided',
-                headers=[('Content-Type', 'text/plain')],
-                status=400,
-            )
+            return _bad_request('No IDs provided')
+        if (not isinstance(ids, list) or not all(isinstance(i, int) and not isinstance(i, bool) for i in ids)
+                or not isinstance(field_defs, list)
+                or not all(isinstance(f, dict) and isinstance(f.get('name'), str) for f in field_defs)):
+            return _bad_request('Invalid ids or fields')
 
         # Ürünleri oku
         field_names = [f['name'] for f in field_defs]
-        products = request.env[res_model].sudo().browse(ids).read(field_names)
+        # NEDEN: sudo yok — kullanıcının kendi alan/kayıt hakları geçerli; yetkisiz alan 403 döner
+        try:
+            records = request.env[res_model].browse(ids)
+            # NEDEN: read() olmayan id'yi sessizce atlar (200 + eksik/boş dosya); açıkça 400 verilir
+            if len(records.exists()) != len(set(ids)):
+                return _bad_request('Invalid field or id')
+            products = records.read(field_names)
+        except AccessError:
+            return request.make_response(
+                'Forbidden', headers=[('Content-Type', 'text/plain')], status=403,
+            )
+        except (ValueError, MissingError):
+            # geçersiz alan adı (ValueError) veya olmayan kayıt id'si (MissingError)
+            return _bad_request('Invalid field or id')
 
         # XLSX oluştur
         output = io.BytesIO()
 
         if xlsxwriter:
-            workbook = xlsxwriter.Workbook(output, {'in_memory': True})
+            # DIKKAT: strings_to_formulas=False — "=..." ile başlayan ürün adı/etiket Excel'de formül
+            # olarak çalışmasın (formül enjeksiyonu). Kaldırmayın.
+            workbook = xlsxwriter.Workbook(output, {
+                'in_memory': True, 'strings_to_formulas': False, 'strings_to_urls': False,
+            })
             sheet = workbook.add_worksheet('Ürünler')
 
             # Stiller — wrap_text KAPALI
@@ -90,7 +123,9 @@ class ProductExportController(http.Controller):
 
             # Header
             for col_idx, fdef in enumerate(field_defs):
-                sheet.write(0, col_idx, fdef.get('label', fdef['name']), header_fmt)
+                # NEDEN: write_string — "{=...}" dizi formülü ve "external:\\host" köprüsü yazılmasın;
+                # label str olmayabilir (istemci girdisi), str() 500'ü önler.
+                sheet.write_string(0, col_idx, str(fdef.get('label', fdef['name'])), header_fmt)
                 width = col_widths.get(fdef['name'], 15)
                 sheet.set_column(col_idx, col_idx, width)
 
@@ -119,9 +154,9 @@ class ProductExportController(http.Controller):
                         try:
                             sheet.write_number(row_idx, col_idx, float(value or 0), money_fmt if ftype == 'monetary' else float_fmt)
                         except (ValueError, TypeError):
-                            sheet.write(row_idx, col_idx, str(value), text_fmt)
+                            sheet.write_string(row_idx, col_idx, str(value), text_fmt)
                     else:
-                        sheet.write(row_idx, col_idx, str(value) if value else '', text_fmt)
+                        sheet.write_string(row_idx, col_idx, str(value) if value else '', text_fmt)
 
             # Freeze header
             sheet.freeze_panes(1, 0)
@@ -144,7 +179,7 @@ class ProductExportController(http.Controller):
             no_wrap = Alignment(wrap_text=False, vertical='center')
 
             for col_idx, fdef in enumerate(field_defs, start=1):
-                cell = ws.cell(row=1, column=col_idx, value=fdef.get('label', fdef['name']))
+                cell = ws.cell(row=1, column=col_idx, value=str(fdef.get('label', fdef['name'])))
                 cell.fill = header_fill
                 cell.font = header_font
                 cell.alignment = no_wrap
@@ -158,6 +193,8 @@ class ProductExportController(http.Controller):
                     elif value is False:
                         value = ''
                     cell = ws.cell(row=row_idx, column=col_idx, value=value)
+                    if isinstance(value, str):
+                        cell.data_type = 's'  # NEDEN: "=" ile başlayan metin formül sayılmasın
                     cell.alignment = no_wrap
 
             ws.freeze_panes = 'A2'

@@ -1,0 +1,89 @@
+import io
+import json
+import zipfile
+from unittest.mock import patch
+
+from odoo.exceptions import AccessError
+from odoo.http import Request
+from odoo.tests import HttpCase, tagged
+
+
+@tagged('post_install', '-at_install')
+class TestProductExportAccess(HttpCase):
+    """/ugurlar/product/export yalnız iç kullanıcıya açık; okuma sudo'suz yapılır."""
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        Users = cls.env['res.users'].with_context(no_reset_password=True)
+        cls.internal = Users.create({
+            'name': 'Export İç', 'login': 'export_internal', 'password': 'export_internal',
+            'group_ids': [(6, 0, [cls.env.ref('base.group_user').id])],
+        })
+        cls.portal = Users.create({
+            'name': 'Export Portal', 'login': 'export_portal', 'password': 'export_portal',
+            'group_ids': [(6, 0, [cls.env.ref('base.group_portal').id])],
+        })
+        cls.product = cls.env['product.product'].create({
+            'name': 'Export Ürün', 'default_code': 'EXP-1', 'standard_price': 42.0,
+        })
+
+    def _export(self, login, fields=None):
+        self.authenticate(login, login)
+        payload = {
+            'res_model': 'product.product',
+            'ids': [self.product.id],
+            'fields': fields or [{'name': 'default_code', 'label': 'Kod', 'type': 'char'}],
+        }
+        return self.url_open('/ugurlar/product/export', data={
+            'data': json.dumps(payload), 'csrf_token': Request.csrf_token(self),
+        })
+
+    def test_internal_user_gets_xlsx(self):
+        res = self._export('export_internal')
+        self.assertEqual(res.status_code, 200)
+        self.assertIn('spreadsheetml', res.headers['Content-Type'])
+        self.assertTrue(res.content.startswith(b'PK'))  # xlsx = zip
+
+    def test_portal_user_is_forbidden(self):
+        # alan listesi istemciden geldiği için maliyet fiyatı da istenebilir
+        res = self._export('export_portal', [{'name': 'standard_price', 'type': 'monetary'}])
+        self.assertEqual(res.status_code, 403)
+        self.assertFalse(res.content.startswith(b'PK'))
+
+    def test_invalid_field_and_id_return_400_not_500(self):
+        res = self._export('export_internal', [{'name': 'yok_boyle_alan', 'type': 'char'}])
+        self.assertEqual(res.status_code, 400)
+        self.product = self.env['product.product'].browse(999999999)  # olmayan id
+        res = self._export('export_internal')
+        self.assertEqual(res.status_code, 400)
+
+    def test_formula_strings_are_not_written_as_formulas(self):
+        self.product.name = '=1+1'
+        res = self._export('export_internal', [{'name': 'display_name', 'type': 'char'}])
+        self.assertEqual(res.status_code, 200)
+        with zipfile.ZipFile(io.BytesIO(res.content)) as z:
+            sheet = z.read('xl/worksheets/sheet1.xml').decode()
+        self.assertNotIn('<f>', sheet)
+
+    def test_array_formula_and_urls_stay_plain_strings(self):
+        for text in ('{=1+1}', 'http://x', 'external:\\\\host'):
+            self.product.name = text
+            res = self._export('export_internal', [{'name': 'display_name', 'label': text, 'type': 'char'}])
+            self.assertEqual(res.status_code, 200)
+            with zipfile.ZipFile(io.BytesIO(res.content)) as z:
+                sheet = z.read('xl/worksheets/sheet1.xml').decode()
+                self.assertNotIn('<f', sheet)
+                self.assertNotIn('hyperlink', sheet)
+                self.assertNotIn('xl/worksheets/_rels/sheet1.xml.rels', z.namelist())
+
+    def test_non_string_label_does_not_500(self):
+        res = self._export('export_internal', [{'name': 'default_code', 'label': 123, 'type': 'char'}])
+        self.assertEqual(res.status_code, 200)
+
+    def test_access_error_on_read_returns_403_not_500(self):
+        # NEDEN: sudo kalkınca kullanıcı hakkı olmayan alan AccessError verir; 500 değil 403 beklenir
+        Model = type(self.env['product.product'])
+        with patch.object(Model, 'read', side_effect=AccessError('yetkisiz alan')):
+            res = self._export('export_internal')
+        self.assertEqual(res.status_code, 403)

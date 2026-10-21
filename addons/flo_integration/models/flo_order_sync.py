@@ -41,12 +41,14 @@ class FloOrderSync(models.Model):
         error_count = 0
         
         # Flo API Türkiye saatinde çalışır — sorgu tarihlerini Türkiye saatine çevir
+        # DIKKAT: naive TR saati flo_api'de sunucu (UTC) saatiyle epoch'a çevrilir → epoch ~3 sa ileri kayar.
+        # API gerçek epoch bekliyorsa zararsız (bitiş ileride kalır); doğrulanmadan değiştirme (denetim G3/R1).
         now_turkey = datetime.now(pytz.UTC).astimezone(IST).replace(tzinfo=None)
         start_date = now_turkey - timedelta(days=store.order_day_range or 1)
         end_date = now_turkey + timedelta(minutes=5)  # küçük güvenlik marjı
-        
+
         _logger.info("Flo [%s] sipariş çekme (TR saati): %s → %s", store.name, start_date, end_date)
-        
+
         page = 1
         total_pages = 1
         
@@ -107,10 +109,14 @@ class FloOrderSync(models.Model):
         if not order_number:
             return 'skipped'
 
-        existing_flo = self.search([('order_number', '=', order_number)], limit=1)
-        
+        # NEDEN: store_id olmadan yalnız order_number ile aramak, iki mağazada aynı numara gelirse
+        # yanlış kayda yazar.
+        existing_flo = self.search([
+            ('store_id', '=', store.id), ('order_number', '=', str(order_number)),
+        ], limit=1)
+
         order_status = order_json.get('shipmentPackageStatus', '')
-        
+
         if existing_flo:
             update_vals = {'order_status': order_status}
             cargo_tracking = order_json.get('cargoTrackingNumber', '')
@@ -119,6 +125,10 @@ class FloOrderSync(models.Model):
             cargo_provider = order_json.get('cargoProviderName', '')
             if cargo_provider and not existing_flo.cargo_provider:
                 update_vals['cargo_provider'] = cargo_provider
+            # NEDEN: koşulsuz write her 5 dk'da tüm pencereyi write_date'e bulayıp 'updated' sayıyordu.
+            update_vals = {k: v for k, v in update_vals.items() if (existing_flo[k] or '') != (v or '')}
+            if not update_vals:
+                return 'unchanged'
             existing_flo.write(update_vals)
             return 'updated'
 

@@ -73,7 +73,9 @@ class ShopifyOrderSync(models.Model):
                     pass
 
             try:
-                status = self._process_order_json(order_json, store)
+                # NEDEN: tek DB hatası (InFailedSqlTransaction) tüm turun commit'ini düşürüyordu; sipariş başına savepoint.
+                with self.env.cr.savepoint():
+                    status = self._process_order_json(order_json, store)
                 if status == 'created':
                     created_count += 1
                 elif status == 'updated':
@@ -91,6 +93,12 @@ class ShopifyOrderSync(models.Model):
         return {'created': created_count, 'updated': updated_count, 'errors': error_count}
 
     # ─── Process Single Order ────────────────────────────
+
+    def _sale_order_retry_due(self, shopify_order):
+        """SO'su olmayan sipariş için yeniden deneme zamanı geldi mi? (kaydın yaşının yarısı kadar bekle, 4 dk–6 sa)"""
+        now = fields.Datetime.now()
+        wait = min(max((now - shopify_order.create_date) / 2, timedelta(minutes=4)), timedelta(hours=6))
+        return now - shopify_order.write_date >= wait
 
     def _process_order_json(self, order_json, store):
         """Gelen tekil JSON'u işler, ShopifyOrder ve SaleOrder yaratır."""
@@ -114,22 +122,35 @@ class ShopifyOrderSync(models.Model):
                 ful = fulfillments[0]
                 update_vals['cargo_tracking_number'] = ful.get('tracking_number', '')
                 update_vals['cargo_provider'] = ful.get('tracking_company', '')
-            existing.write(update_vals)
+            # NEDEN: koşulsuz write her 5 dk'da tüm pencereyi write_date'e bulayıp 'updated' sayıyordu.
+            update_vals = {k: v for k, v in update_vals.items() if (existing[k] or '') != (v or '')}
+            changed = bool(update_vals)
+            if changed:
+                existing.write(update_vals)
 
-            # ─── RETRY: sale_order yoksa yeniden oluşturmayı dene ───
-            if not existing.sale_order_id and not order_json.get('cancelled_at'):
+            # ─── RETRY: sale_order yoksa yeniden oluşturmayı dene (backoff'lu) ───
+            if (not existing.sale_order_id and not order_json.get('cancelled_at')
+                    and self._sale_order_retry_due(existing)):
                 _logger.info("Shopify %s: sale_order yok, yeniden oluşturuluyor...",
                              existing.order_number)
+                sale_order = False
                 try:
-                    sale_order = self._create_odoo_sale_order(existing, order_json, store)
-                    if sale_order:
-                        _logger.info("Shopify → Odoo sipariş (retry) oluşturuldu: %s → %s",
-                                     existing.order_number, sale_order.name)
+                    # NEDEN: başarısız deneme savepoint'le geri alınır; shopify.order kaydı ve diğer işler bozulmaz.
+                    with self.env.cr.savepoint():
+                        sale_order = self._create_odoo_sale_order(existing, order_json, store)
                 except Exception as e:
                     _logger.error("Shopify sale.order retry hatası (%s): %s",
                                   existing.order_number, e, exc_info=True)
+                if sale_order:
+                    changed = True
+                    _logger.info("Shopify → Odoo sipariş (retry) oluşturuldu: %s → %s",
+                                 existing.order_number, sale_order.name)
+                else:
+                    # NEDEN: yeni stored alan yasak; write_date "son deneme" işaretçisi (Odoo ORM aynı değerle
+                    # write'ta da write_date'i günceller). DIKKAT: kaldırılırsa SO oluşmayan sipariş her turda yeniden denenir.
+                    existing.write({'order_status': existing.order_status})
 
-            return 'updated'
+            return 'updated' if changed else 'unchanged'
 
         # Sipariş tarihi dönüşümü (Shopify ISO 8601 → UTC)
         order_date = False
@@ -271,7 +292,8 @@ class ShopifyOrderSync(models.Model):
 
         # Odoo Sale Order oluştur
         try:
-            sale_order = self._create_odoo_sale_order(shopify_order, order_json, store)
+            with self.env.cr.savepoint():
+                sale_order = self._create_odoo_sale_order(shopify_order, order_json, store)
             if sale_order:
                 _logger.info("Shopify → Odoo sipariş oluşturuldu: %s → %s",
                              shopify_order.order_number, sale_order.name)

@@ -24,7 +24,9 @@ _STALE_CHECK_AFTER = timedelta(hours=6)    # açık siparişler en geç bu aral�
 _STALE_CHECK_LIMIT = 20                    # her turda yoklanacak en fazla sipariş
 _STALE_LOOKBACK = timedelta(days=180)      # sipariş no ile sorgu en fazla 6 ay geriye gider
 _ACCEPT_RETRY_AFTER = timedelta(minutes=30)
-_ACCEPT_STATUS = 12                        # Siparişiniz Hazırlanıyor
+_CANCEL_MARK = 'Otomatik iptal edilmedi'      # error_message öneki; iptal taraması işaretli kaydı atlar
+_CANCEL_RETRY_AFTER = timedelta(hours=24)
+_ACCEPT_STATUS = 12                       # Siparişiniz Hazırlanıyor
 
 
 def _digits(value):
@@ -419,8 +421,10 @@ class PazaramaOrderSync(models.Model):
                 self.error_message = msg
                 old.message_post(body=msg)
             return
-        if old.picking_ids.filtered(lambda p: p.state == 'done'):
-            msg = f"{reason}: {old.name} sevk edildiği için otomatik güncellenmedi; elle kontrol edin."
+        # NEDEN: yalnız picking bakılırsa posted faturalı SO iptal edilip Nebim'den de silinirdi
+        blocker = self._cancel_blocker(old)
+        if blocker:
+            msg = f"{reason}: {old.name} {blocker} için otomatik güncellenmedi; elle kontrol edin."
             if self.error_message != msg:
                 self.error_message = msg
                 old.message_post(body=msg)
@@ -670,25 +674,54 @@ class PazaramaOrderSync(models.Model):
 
     # ─── İPTAL YÖNETİMİ ────────────────────────────────────────
 
+    # NEDEN: Idefix/Amazon'daki _cancel_blocker kopyası; bu modül odoougurlar'a bağlı değil, ortak yardımcı için
+    # yeni bağımlılık eklemek canlıda kurulum sırası riski doğurur (deploy-new-dependency).
+    def _cancel_blocker(self, so):
+        """Otomatik iptali engelleyen durum (sevk edilmiş / faturası kesilmiş) — yoksa False."""
+        if so.picking_ids.filtered(lambda p: p.state == 'done'):
+            return 'sevk edildiği'
+        if so.invoice_ids.filtered(lambda m: m.state == 'posted'):
+            return 'faturası kesildiği'
+        return False
+
     @api.private
     def _cancel_odoo_order(self, pazarama_order, store=None):
-        """Odoo siparişini iptal et."""
+        """Odoo siparişini iptal eder. Gerçekten iptal edildiyse True döner.
+
+        Sevk edilmiş / faturası kesilmiş siparişe dokunulmaz (iptal Nebim'den de siler); engel ve hata
+        pazarama_order.error_message'a _CANCEL_MARK ile yazılır, tarama bunları _CANCEL_RETRY_AFTER boyunca atlar.
+        """
         store = store or pazarama_order.store_id
         if store and not store.auto_cancel:
-            return
+            return False
         so = pazarama_order.sale_order_id
-        if so and so.state not in ('cancel', 'done'):
-            try:
-                with self.env.cr.savepoint():
-                    so._action_cancel()
-                _logger.info("Pazarama — Odoo sipariş iptal edildi: %s (PZ: %s)", so.name, pazarama_order.order_number)
-            except Exception as e:
-                _logger.warning("Pazarama — Sipariş iptal hatası: %s - %s", so.name, e)
+        if not so or so.state in ('cancel', 'done'):
+            return False
+        blocker = self._cancel_blocker(so)
+        if blocker:
+            msg = (f"{_CANCEL_MARK}: Pazarama siparişi {pazarama_order.order_number} iptal edildi ancak "
+                   f"{so.name} {blocker} için iptal edilmedi; elle kontrol edin.")
+            if pazarama_order.error_message != msg:
+                so.message_post(body=msg)
+                _logger.warning("Pazarama — %s", msg)
+            pazarama_order.error_message = msg  # değişmese de yazılır: write_date geri çekilme süresini başlatır
+            return False
+        try:
+            with self.env.cr.savepoint():
+                so._action_cancel()
+        except Exception as e:
+            _logger.warning("Pazarama — Sipariş iptal hatası: %s - %s", so.name, e)
+            pazarama_order.error_message = f"{_CANCEL_MARK}: iptal hatası ({so.name}): {e}"[:500]
+            return False
+        if _CANCEL_MARK in (pazarama_order.error_message or ''):
+            pazarama_order.error_message = False
+        _logger.info("Pazarama — Odoo sipariş iptal edildi: %s (PZ: %s)", so.name, pazarama_order.order_number)
+        return True
 
     @api.private
     def _cancel_pending_orders(self, store):
         """Veritabanındaki iptal Pazarama siparişlerini tara,
-        bağlı Odoo sale order henüz iptal edilmemişse iptal et."""
+        bağlı Odoo sale order henüz iptal edilmemişse iptal et. Gerçekten iptal edilenlerin sayısını döner."""
         if not store.auto_cancel:
             return 0
         cancelled_orders = self.search([
@@ -696,7 +729,7 @@ class PazaramaOrderSync(models.Model):
             ('order_status', 'in', list(PAZARAMA_CANCEL_STATUSES)),
             ('sale_order_id', '!=', False),
             ('sale_order_id.state', 'not in', ['cancel', 'done']),
+            '|', ('error_message', 'not like', _CANCEL_MARK),
+            ('write_date', '<', fields.Datetime.now() - _CANCEL_RETRY_AFTER),
         ])
-        for pz_order in cancelled_orders:
-            self._cancel_odoo_order(pz_order, store)
-        return len(cancelled_orders)
+        return sum(1 for pz_order in cancelled_orders if self._cancel_odoo_order(pz_order, store))

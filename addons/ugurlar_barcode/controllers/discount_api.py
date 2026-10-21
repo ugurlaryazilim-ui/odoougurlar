@@ -16,6 +16,16 @@ NEBIM_CUSTOMER_CONN_ERROR_TEXT = "Nebim'e iletilemedi, müşteri aranamadı. Ba�
 NEBIM_CUSTOMER_RULE_ERROR_TEXT = "Nebim müşteri aramasını reddetti. Ayrıntı sistem kaydında, yöneticiye bildirin."
 
 
+def _num(value, default=0.0):
+    """Nebim satırında alan None/boş/sayısal olmayan gelebilir; float(None) 500 verirdi."""
+    if value is None or value == '':
+        return default
+    try:
+        return float(value)
+    except (TypeError, ValueError):
+        return default
+
+
 class DiscountApiController(BarcodeApiBase):
     """Satış İndirimleri API'si."""
 
@@ -95,14 +105,14 @@ class DiscountApiController(BarcodeApiBase):
                 continue
                 
             barcode = row.get('Barcode', '')
-            qty = row.get('Quantity', 1)
-            retail_price = float(row.get('RetailPrice', 0.0))
-            discount_amount = float(row.get('DiscountAmount', 0.0))
-            final_total = float(row.get('FinalLineTotal', 0.0))
+            qty = _num(row.get('Quantity'), 1)
+            retail_price = _num(row.get('RetailPrice'))
+            discount_amount = _num(row.get('DiscountAmount'))
+            final_total = _num(row.get('FinalLineTotal'))
             # Vadeli fiyat alanları
-            installment_price = float(row.get('RetailInstallmentPrice', 0.0))
-            installment_discount = float(row.get('InstallmentDiscountAmount', 0.0))
-            installment_final = float(row.get('InstallmentFinalLineTotal', 0.0))
+            installment_price = _num(row.get('RetailInstallmentPrice'))
+            installment_discount = _num(row.get('InstallmentDiscountAmount'))
+            installment_final = _num(row.get('InstallmentFinalLineTotal'))
             campaign_name = row.get('CampaignName', '')
             upsell_message = row.get('UpsellMessage', '')
             color_name = row.get('ColorName', '')

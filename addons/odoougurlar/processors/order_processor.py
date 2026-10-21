@@ -195,10 +195,11 @@ class OrderProcessor(models.AbstractModel):
                                 _logger.info("Adres ID Nebim SP'den çekildi: %s → %s", customer_code, addr_id)
                                 # Partner'ı da güncelle (gelecek siparişler için)
                                 try:
-                                    sale_order.partner_id.sudo().write({'nebim_address_id': addr_id})
-                                    sale_order.sudo().write({'nebim_address_id': addr_id})
+                                    with self.env.cr.savepoint():
+                                        sale_order.partner_id.sudo().write({'nebim_address_id': addr_id})
+                                        sale_order.sudo().write({'nebim_address_id': addr_id})
                                 except Exception:
-                                    pass
+                                    _logger.warning("nebim_address_id yazılamadı (%s)", sale_order.name, exc_info=True)
                 except Exception as e:
                     _logger.warning("Adres ID SP sorgusu hatası: %s", e)
         
