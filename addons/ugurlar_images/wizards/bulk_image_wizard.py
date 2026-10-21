@@ -248,9 +248,14 @@ class BulkImageWizard(models.TransientModel):
         """ZIP dosyasını açar, her görseli barkodla eşler ve ürüne atar."""
         self.ensure_one()
 
-        if not self.zip_file:
+        # NEDEN: bin_size ile yalnız attachment boyutu okunur; self.zip_file tüm ZIP'in base64
+        # kopyasını belleğe alır (tepe ~2,4x ZIP boyutu)
+        if not self.with_context(bin_size=True).zip_file:
             raise UserError('Lütfen bir ZIP dosyası seçin!')
 
+        # EKIP-BORC: worker istek ortasında öldürülürse (watchdog/OOM) bu log ayrı cursor'da
+        # 'running' kalır; temizlik yok. Yükseltme yolu: eşiği aşmış 'running' ZIP loglarını
+        # 'error'a çeviren küçük bir cron.
         log_id = self._save_log({
             'name': f'ZIP Yükleme: {self.zip_filename or "dosya.zip"}',
             'sync_type': 'zip',

@@ -32,18 +32,23 @@ AI_QUEUE_CRONS = ('ugurlar_ai_studio.cron_ai_queue_1', 'ugurlar_ai_studio.cron_a
 # yalnız turlar arasında sıfırlanır; iki kuyruk slotu aynı turda art arda koşabilir. Bu
 # yüzden bütçe iş başına değil tur başınadır (bkz. _cron_round_cursor): bütçe dolduktan
 # sonra yeni iş alınmaz, oturum işi yeni görünüme başlamaz. Tek görünüm (hazırlık +
-# try-on 180 sn + denetim/yeniden üretim) en kötü ~15 dk → tur ≤ 900 + hazırlık + 900 < 2400.
-QUEUE_JOB_BUDGET_SECONDS = 900
+# try-on 180 sn + denetim/yeniden üretim) en kötü ~15 dk → AI işleri turda ≤ 600 + 900 =
+# 1500 sn. Turdaki diğer cron'ların (Nebim vb.) süresi bu bütçeye dahil DEĞİL; onlara kalan
+# pay 2400 - 1500 = 900 sn. Bütçeyi büyütmek bu payı yer (pay için limit_time_real_cron).
+QUEUE_JOB_BUDGET_SECONDS = 600
 _queue_limit_warned = False
 
 
 def _cron_round_cursor():
     """Şu an koşan ir.cron turunun cron_cr'ı (tur kimliği); cron dışında None."""
     # DIKKAT: Odoo 19 çekirdek iç yapısına bağlı (base/models/ir_cron.py
-    # _process_jobs_loop(cron_cr, ...)). Sürüm yükseltmesinde çerçeve bulunamazsa None döner
-    # ve bütçe iş başına uygulanır (eski davranış); test_round_cursor_found_in_core_loop yakalar.
+    # _process_jobs_loop(cron_cr, ...)). Metot kaldırılır/yeniden adlandırılır/sarmalanırsa
+    # (__code__ yok) ya da çerçeve bulunamazsa None döner ve bütçe iş başına uygulanır; burada
+    # istisna kuyruğu tümden durdururdu. test_round_cursor_found_in_core_loop değişikliği yakalar.
     from odoo.addons.base.models.ir_cron import IrCron
-    code = IrCron._process_jobs_loop.__code__
+    code = getattr(getattr(IrCron, '_process_jobs_loop', None), '__code__', None)
+    if code is None:
+        return None
     frame = sys._getframe(1)
     while frame is not None:
         if frame.f_code is code:
@@ -2506,7 +2511,7 @@ class AiStudioSession(models.Model):
             # 'pending' kalırsa kuyruk oturumu her tur yeniden alır ve ücretli analizi tekrarlar
             unknown = generations.filtered(lambda g: g.photo_type not in VIEW_ORDER)
             if unknown:
-                unknown.write({'state': 'failed', 'is_retryable': False,
+                unknown.write({'state': 'failed', 'is_retryable': False, 'error_type': 'invalid_input',
                                'error_message': _('Fotoğraf tipi belirsiz; üretim yapılamadı.')})
                 cr.commit()
                 generations -= unknown
@@ -2600,7 +2605,7 @@ class AiStudioSession(models.Model):
             front_failed = False
             started_views = 0
             for gen in ordered_gens:
-                photo_type = gen.photo_type or 'front'
+                photo_type = gen.photo_type
                 set_usage_context(generation_id=gen.id)
                 # Her iterasyonda sıfırla: çakışma kurtarması önceki görünümün
                 # sonucunu (ör. ön yüz görselini) bu generation'a yazmamalı.

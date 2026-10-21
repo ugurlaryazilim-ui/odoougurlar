@@ -679,7 +679,7 @@ class TestAiStudioModels(TransactionCase):
         analyze.assert_not_called()
         provider.return_value.upload_image.assert_not_called()
         self.env.invalidate_all()
-        self.assertEqual(unknown.state, 'failed')
+        self.assertEqual((unknown.state, unknown.error_type), ('failed', 'invalid_input'))
         self.assertEqual(session.state, 'review')
         self.assertFalse(self.Session._queue_has_work(), 'işlenemeyen iş kuyruğu yeniden tetiklememeli')
 
@@ -712,8 +712,25 @@ class TestAiStudioModels(TransactionCase):
         self.assertIs(seen[0], round_cr)
         self.assertIsNone(_cron_round_cursor())
 
+    def test_round_cursor_none_when_core_loop_missing(self):
+        # D-1: çekirdek metodu kaldırılır/sarmalanırsa istisna kuyruğu tümden durdurmamalı
+        from odoo.addons.base.models.ir_cron import IrCron
+        self._queue_env()
+        session, _gens = self._processing_session('front')
+        Session = type(self.Session)
+        # None: metot kaldırıldı; object(): __code__ taşımayan sarmalayıcı
+        for replacement in (None, object()):
+            with self.subTest(replacement=replacement), \
+                    patch.object(IrCron, '_process_jobs_loop', replacement), \
+                    patch.object(self.env.cr, 'commit'), \
+                    patch.object(Session, '_queue_run_job', autospec=True) as run:
+                self.assertIsNone(_cron_round_cursor())
+                self.Session._cron_process_queue(slot=1)
+                run.assert_called_once()
+            self._release_lease(session)
+
     def test_round_budget_shared_between_jobs(self):
-        # Watchdog tur başına sıfırlanır: aynı turdaki ikinci kuyruk işi yeni 900 sn almamalı
+        # Watchdog tur başına sıfırlanır: aynı turdaki ikinci kuyruk işi yeni bütçe almamalı
         self._queue_env()
         session, _gens = self._processing_session('front')
         Session = type(self.Session)

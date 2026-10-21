@@ -185,6 +185,18 @@ class TestBulkImageWizard(TransactionCase):
         self.assertLess(large - small, 3 * len(png),
                         f'tepe bellek barkoda bağlı büyüyor: N=5 {small}, N=20 {large}, görsel {len(png)}')
 
+    def test_varlik_kontrolu_icerigi_okumaz(self):
+        # B4: "dosya seçildi mi" kontrolü tüm ZIP'i base64 olarak belleğe almamalı
+        wiz = self._wizard({'P-A_1.png': _png()})
+        self.env.flush_all()
+        self.env.invalidate_all()
+        Att = type(self.env['ir.attachment'])
+        with patch.object(Att, '_compute_datas', autospec=True) as datas, \
+                patch.object(type(wiz), '_run_import', side_effect=UserError('dur')), \
+                self.assertRaises(UserError):
+            self._import(wiz)
+        datas.assert_not_called()
+
     def test_gecersiz_zip(self):
         wiz = self.env['ugurlar.bulk.image.wizard'].create({
             'zip_file': base64.b64encode(b'zip degil'), 'zip_filename': 't.zip'})
