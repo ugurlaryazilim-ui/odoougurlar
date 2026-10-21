@@ -1,4 +1,5 @@
 import logging
+import math
 from datetime import timedelta
 from odoo import api, fields, models, _
 from odoo.exceptions import UserError
@@ -108,28 +109,34 @@ class MarketplaceQuestion(models.Model):
         for rec in self:
             rec.answer_char_count = len(rec.answer_text or '')
 
+    def _remaining_time_vals(self, now):
+        """Tek kayıt için kalan süre değerleri (compute ve cron ortak)."""
+        self.ensure_one()
+        if self.status == 'waiting' and self.question_date:
+            # 3 iş günü = ~72 saat (basit hesaplama)
+            deadline = self.question_date + timedelta(hours=72)
+            hours = (deadline - now).total_seconds() / 3600
+            # NEDEN: remaining_hours tam saate indirildi; kesirli değer her dakika değişip cron'un her
+            # bekleyen soruya her turda UPDATE atmasına yol açıyordu. Ekranda zaten int(hours) gösteriliyor;
+            # liste renklendirmesi (< 24) tam sayı eşiği olduğu için floor ile aynı sonucu verir.
+            vals = {'remaining_hours': float(max(math.floor(hours), 0))}
+            if hours <= 0:
+                vals['remaining_time_display'] = '⏰ Süre doldu!'
+            elif hours < 24:
+                vals['remaining_time_display'] = f'🔴 {int(hours)} saat kaldı'
+            elif hours < 48:
+                vals['remaining_time_display'] = f'🟡 {int(hours/24)} gün {int(hours%24)} saat'
+            else:
+                vals['remaining_time_display'] = f'🟢 {int(hours/24)} gün {int(hours%24)} saat'
+            return vals
+        return {'remaining_hours': 0.0, 'remaining_time_display': ''}
+
     @api.depends('question_date', 'status')
     def _compute_remaining_time(self):
         """Trendyol 3 iş günü cevap süresi var. Kalan süreyi hesapla."""
         now = fields.Datetime.now()
         for rec in self:
-            if rec.status == 'waiting' and rec.question_date:
-                # 3 iş günü = ~72 saat (basit hesaplama)
-                deadline = rec.question_date + timedelta(hours=72)
-                diff = deadline - now
-                hours = diff.total_seconds() / 3600
-                rec.remaining_hours = max(hours, 0)
-                if hours <= 0:
-                    rec.remaining_time_display = '⏰ Süre doldu!'
-                elif hours < 24:
-                    rec.remaining_time_display = f'🔴 {int(hours)} saat kaldı'
-                elif hours < 48:
-                    rec.remaining_time_display = f'🟡 {int(hours/24)} gün {int(hours%24)} saat'
-                else:
-                    rec.remaining_time_display = f'🟢 {int(hours/24)} gün {int(hours%24)} saat'
-            else:
-                rec.remaining_hours = 0
-                rec.remaining_time_display = ''
+            rec.update(rec._remaining_time_vals(now))
 
     def _compute_customer_question_count(self):
         """Aynı müşterinin diğer sorularının sayısını hesapla."""
@@ -305,9 +312,13 @@ class MarketplaceQuestion(models.Model):
     @api.model
     def _cron_update_remaining_time(self):
         """Bekleyen soruların kalan sürelerini yeniden hesapla."""
-        waiting = self.search([('status', '=', 'waiting')])
-        if waiting:
-            waiting._compute_remaining_time()
+        now = fields.Datetime.now()
+        for rec in self.search([('status', '=', 'waiting')]):
+            vals = rec._remaining_time_vals(now)
+            # NEDEN: yalnız değişen kayda yaz; eskiden her turda tüm bekleyenlere UPDATE gidiyordu.
+            if rec.remaining_hours != vals['remaining_hours'] \
+                    or rec.remaining_time_display != vals['remaining_time_display']:
+                rec.write(vals)
 
     def action_generate_ai_answer(self):
         """AI ile cevap önerisi oluştur."""

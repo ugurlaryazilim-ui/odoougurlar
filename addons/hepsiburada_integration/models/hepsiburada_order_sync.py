@@ -1,6 +1,7 @@
 import json
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
+from email.utils import parsedate_to_datetime
 
 from odoo import models, fields, api
 
@@ -63,6 +64,30 @@ def _tr_now():
     return datetime.utcnow() + timedelta(hours=3)
 
 
+class _RateLimited(Exception):
+    """HB 429 döndü; geri çekilme süresi session._hb_retry_after'da."""
+
+
+# 429'da Retry-After yoksa/bozuksa varsayılan; uzun bekleme isteği cron'u tutmasın diye üst sınır
+_BACKOFF_DEFAULT = 60
+_BACKOFF_MAX = 900
+# Hiçbir şey değişmeyen turlarda last_sync en fazla bu sıklıkta yazılır ("sağlıklı" göstergesi)
+_LAST_SYNC_HEARTBEAT = timedelta(minutes=15)
+
+
+def _retry_after_seconds(res):
+    """Retry-After (saniye ya da HTTP tarihi) → [1, _BACKOFF_MAX] saniye."""
+    value = (getattr(res, 'headers', None) or {}).get('Retry-After')
+    try:
+        secs = int(value)
+    except (TypeError, ValueError):
+        try:
+            secs = (parsedate_to_datetime(value) - datetime.now(timezone.utc)).total_seconds()
+        except (TypeError, ValueError):
+            secs = _BACKOFF_DEFAULT
+    return min(max(int(secs), 1), _BACKOFF_MAX)
+
+
 class HepsiburadaOrderSync(models.AbstractModel):
     _name = 'hepsiburada.order.sync'
     _description = 'Hepsiburada Sipariş Senkronizasyonu'
@@ -76,7 +101,50 @@ class HepsiburadaOrderSync(models.AbstractModel):
             return
 
         for store in stores:
-            self._sync_store_orders(store)
+            # NEDEN: bir mağazanın hatası (API, veri, DB) diğer mağazaların turunu durdurmasın; savepoint
+            # o mağazanın yarım işini geri alır.
+            try:
+                with self.env.cr.savepoint():
+                    self._sync_store_orders(store)
+            except Exception as e:
+                self.env.invalidate_all(flush=False)
+                _logger.exception("HB sipariş senkronizasyonu mağaza hatası [%s]: %s", store.name, e)
+
+    @api.private
+    def _hb_get(self, session, url, **kwargs):
+        """session.get + 429 yönetimi. 429 alınırsa bu session'daki sonraki istekler hiç gönderilmez
+        (HB'yi daha çok yormamak için); geri çekilme süresi tur sonunda `_store_backoff` ile saklanır.
+
+        NEDEN: cron içinde time.sleep yok; o tur kalan işi atlar, sonraki tur süre dolana dek mağazayı atlar.
+        Bayrak session'da tutulur: her çağrı yeri 429'u zaten 'istek hatası' diye yutuyor, böylece
+        çağıran kodun hata yollarına dokunmadan zincirleme istek durur."""
+        if getattr(session, '_hb_retry_after', None):
+            raise _RateLimited(f"HB 429 geri çekilme aktif: {url}")
+        res = session.get(url, **kwargs)
+        if res.status_code == 429:
+            session._hb_retry_after = _retry_after_seconds(res)
+            raise _RateLimited(f"HB 429 (Retry-After {session._hb_retry_after} sn): {url}")
+        return res
+
+    @api.private
+    def _backoff_key(self, store):
+        return f'hepsiburada_integration.backoff.{store.id}'
+
+    @api.private
+    def _backoff_active(self, store):
+        until = self.env['ir.config_parameter'].sudo().get_param(self._backoff_key(store))
+        return bool(until) and fields.Datetime.now() < fields.Datetime.to_datetime(until)
+
+    @api.private
+    def _store_backoff(self, store, session):
+        """Turda 429 görüldüyse mağazayı Retry-After süresince sonraki turlarda atla. True → 429 vardı."""
+        secs = getattr(session, '_hb_retry_after', None)
+        if not secs:
+            return False
+        until = fields.Datetime.now() + timedelta(seconds=secs)
+        self.env['ir.config_parameter'].sudo().set_param(self._backoff_key(store), fields.Datetime.to_string(until))
+        _logger.warning("HB 429 [%s]: %d sn geri çekilme (sonraki turlar atlanır).", store.name, secs)
+        return True
 
     @api.model
     def _store_domain(self, store):
@@ -119,6 +187,9 @@ class HepsiburadaOrderSync(models.AbstractModel):
         iptal taraması (son 1 gün, 1 istek) en fazla 5 dk'da bir, geçmiş statü taraması (~9 istek) 15 dk'da bir.
         """
         store = store.sudo()
+        if not force and self._backoff_active(store):
+            _logger.debug("HB [%s]: 429 geri çekilmesi sürüyor, tur atlandı.", store.name)
+            return
         started = fields.Datetime.now()
         clean_merchant, clean_user, clean_pass = store._get_clean_credentials()
 
@@ -156,6 +227,8 @@ class HepsiburadaOrderSync(models.AbstractModel):
         #    (aynı siparişin paketleri farklı sayfalara düşse de birlikte gruplanır)
         packages, fetch_error = self._fetch_open_packages(store, session, clean_merchant)
         if fetch_error:
+            if self._store_backoff(store, session):
+                return  # 429: hata kaydı açma, süre dolunca kendiliğinden devam eder
             _logger.error("HB paket listesi alınamadı [%s]: %s", store.name, fetch_error)
             self._new_log(store, started).mark_error(fetch_error)
             return
@@ -193,15 +266,21 @@ class HepsiburadaOrderSync(models.AbstractModel):
             self.env.invalidate_all(flush=False)
             _logger.exception("HB iptal tarama hatası: %s", e)
 
-        try:
-            with self.env.cr.savepoint():
-                store.write({'last_sync': fields.Datetime.now()})
-        except Exception as _e:
-            _logger.warning("HB mağaza last_sync güncelleme atlandı: %s", _e)
+        self._store_backoff(store, session)  # geçmiş taramada 429 görüldüyse sonraki turlar atlansın
+        # NEDEN: last_sync eskiden her dakika ORM write (write_date + tetikleyiciler) idi. Artık iş olduysa
+        # (yeni sipariş/kalem, iptal, hata) ya da son yazımdan 15 dk geçtiyse yazılır.
+        did_work = bool(error_count or cancel_count or log_msgs or self._max_ids() != ids_before)
+        if did_work or force or not store.last_sync \
+                or fields.Datetime.now() - store.last_sync >= _LAST_SYNC_HEARTBEAT:
+            try:
+                with self.env.cr.savepoint():
+                    store.write({'last_sync': fields.Datetime.now()})
+            except Exception as _e:
+                _logger.warning("HB mağaza last_sync güncelleme atlandı: %s", _e)
         if cancel_count:
             log_msgs.append(f"{cancel_count} siparişte iptal işlendi.")
         # NEDEN: dakikalık cron boş turlarda log doldurmasın (günde 1440 satır/mağaza); iş = yeni sipariş/kalem, iptal, hata
-        if force or error_count or cancel_count or log_msgs or self._max_ids() != ids_before:
+        if force or did_work:
             details_txt = "\n".join(log_msgs) if log_msgs else "Tüm kayıtlar sorunsuz aktarıldı."
             try:
                 with self.env.cr.savepoint():
@@ -230,7 +309,7 @@ class HepsiburadaOrderSync(models.AbstractModel):
         for page in range(max_pages):
             params = dict(extra_params or {}, limit=limit, offset=page * limit)
             try:
-                res = session.get(url, params=params, timeout=30)
+                res = self._hb_get(session, url, params=params, timeout=30)
             except Exception as e:
                 _logger.warning("HB istek hatası %s: %s", url, e)
                 return None
@@ -239,7 +318,11 @@ class HepsiburadaOrderSync(models.AbstractModel):
             if res.status_code != 200:
                 _logger.debug("HB HTTP %s %s: %s", res.status_code, url, res.text[:300])
                 return None
-            data = res.json()
+            try:
+                data = res.json()
+            except ValueError:
+                _logger.warning("HB geçersiz JSON yanıtı %s: %s", url, (res.text or '')[:200])
+                return None
             page_items = data if isinstance(data, list) else (data or {}).get('items', [])
             if not page_items:
                 break
@@ -284,12 +367,15 @@ class HepsiburadaOrderSync(models.AbstractModel):
         for page in range(_OPEN_MAX_PAGES):
             params = {'limit': _OPEN_PAGE_LIMIT, 'offset': page * _OPEN_PAGE_LIMIT}
             try:
-                response = session.get(url, params=params, timeout=30)
+                response = self._hb_get(session, url, params=params, timeout=30)
             except Exception as e:
                 return None, f"API İstek Hatası: {e}"
             if response.status_code != 200:
                 return None, f"API Hatası HTTP {response.status_code}: {response.text[:500]}"
-            data = response.json()
+            try:
+                data = response.json()
+            except ValueError:
+                return None, f"API geçersiz JSON yanıtı: {(response.text or '')[:200]}"
             items = data if isinstance(data, list) else (data or {}).get('items', [])
             if not items:
                 break
@@ -419,9 +505,9 @@ class HepsiburadaOrderSync(models.AbstractModel):
         url = f"https://{domain}/orders/merchantId/{merchant_id}/orderNumber/{order_no}"
 
         try:
-            res = session.get(url, timeout=30)
+            res = self._hb_get(session, url, timeout=30)
             if res.status_code == 200:
-                return res.json()
+                return res.json()  # bozuk JSON aşağıdaki except'e düşer ve loglanır
             _logger.debug("HB sipariş detayı alınamadı (%s): HTTP %s", order_no, res.status_code)
         except Exception as e:
             _logger.error("Eksik Sipariş (No: %s) full detay API hatası: %s", order_no, e)
