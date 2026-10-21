@@ -14,7 +14,7 @@ from datetime import timedelta
 from PIL import Image, ImageDraw, Image as PILImage
 
 from odoo import models, fields, api, _
-from odoo.exceptions import UserError
+from odoo.exceptions import AccessError, UserError
 
 from ..services.garment_analyzer import (
     clear_usage_recorder, design_hint, set_usage_context, set_usage_recorder,
@@ -1106,6 +1106,7 @@ class AiStudioSession(models.Model):
     def create(self, vals_list):
         """Otomatik sıra numarası ata."""
         for vals in vals_list:
+            self._check_saving_transition(vals)
             if vals.get('name', '/') == '/':
                 vals['name'] = self.env['ir.sequence'].next_by_code(
                     'ai.studio.session'
@@ -2435,6 +2436,17 @@ class AiStudioSession(models.Model):
         """
         session = self.browse(session_id)
         if session.state != 'saving':
+            return
+        # NEDEN: kuyruk sistem yetkisiyle yazar; 'saving' yalnız complete_session'ın onay denetiminden geçtiyse
+        # güvenilir (write kilidine ek olarak, DB'ye doğrudan/sudo ile yazılmış durumlara karşı).
+        reviewer = session.reviewer_id.sudo()
+        if not (reviewer and reviewer.has_group('ugurlar_ai_studio.group_ai_studio_reviewer')
+                and not session.generation_ids.filtered(lambda g: g.state in ('pending', 'processing'))):
+            _logger.warning('Ürüne kaydetme reddedildi: oturum %s onaycı denetiminden geçmemiş '
+                            '(reviewer=%s); incelemeye döndü.', session_id, reviewer.id)
+            session.write({'state': 'review'})
+            session.message_post(body=_('Ürüne kaydetme reddedildi: oturum onaycı tarafından tamamlanmamış. '
+                                        'Onaycı "Tamamla" ile yeniden başlatmalı.'))
             return
         try:
             with self.env.cr.savepoint():
@@ -4019,7 +4031,20 @@ class AiStudioSession(models.Model):
         if self._queue_has_work():
             self._trigger_ai_queue()
 
+    def _check_saving_transition(self, vals):
+        """'saving' kuyrukta cron yetkisiyle ürüne yazdırır; yalnız onaycı/yönetici (complete_session) veya
+        sunucu kodu (su) bu duruma geçirebilir.
+
+        NEDEN: context bayrağı kullanılmadı; RPC istemcisi context'i kendi verebilir, grup denetimi verilemez.
+        DIKKAT: operatörün perm_write'ı var; bu denetim kalkarsa onay adımı RPC ile atlanır.
+        """
+        if vals.get('state') != 'saving' or self.env.su:
+            return
+        if not (self.env.is_admin() or self.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer')):
+            raise AccessError(_('Oturumu ürüne kaydetmeye yalnız onaycı veya yönetici alabilir.'))
+
     def write(self, vals):
+        self._check_saving_transition(vals)
         res = super(AiStudioSession, self).write(vals)
         if 'state' in vals:
             for record in self:
