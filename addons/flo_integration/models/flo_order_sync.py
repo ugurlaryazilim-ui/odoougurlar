@@ -1,11 +1,14 @@
 
 import json
 import logging
+import pytz
 from datetime import datetime, timedelta
 
 from odoo import api, fields, models
 
 _logger = logging.getLogger(__name__)
+
+IST = pytz.timezone('Europe/Istanbul')
 
 # Flo'nun kabul ettiği sipariş statüleri (string)
 FLO_VALID_ORDER_STATUSES = ('Created', 'Picking')
@@ -37,13 +40,14 @@ class FloOrderSync(models.Model):
         updated_count = 0
         error_count = 0
         
-        # NEDEN: Flo startDate/endDate gerçek UNIX epoch'tur (orderDate yanıtı da öyle); pencere UTC'de
-        # kurulur. Eskiden TR saati naive geçilip sunucu UTC'sinde epoch'a çevriliyordu → 3 saat kayma.
-        now_utc = fields.Datetime.now()
-        start_date = now_utc - timedelta(days=store.order_day_range or 1)
-        end_date = now_utc + timedelta(minutes=5)  # küçük güvenlik marjı
+        # Flo API Türkiye saatinde çalışır — sorgu tarihlerini Türkiye saatine çevir
+        # DIKKAT: naive TR saati flo_api'de sunucu (UTC) saatiyle epoch'a çevrilir → epoch ~3 sa ileri kayar.
+        # API gerçek epoch bekliyorsa zararsız (bitiş ileride kalır); doğrulanmadan değiştirme (denetim G3/R1).
+        now_turkey = datetime.now(pytz.UTC).astimezone(IST).replace(tzinfo=None)
+        start_date = now_turkey - timedelta(days=store.order_day_range or 1)
+        end_date = now_turkey + timedelta(minutes=5)  # küçük güvenlik marjı
 
-        _logger.info("Flo [%s] sipariş çekme (UTC): %s → %s", store.name, start_date, end_date)
+        _logger.info("Flo [%s] sipariş çekme (TR saati): %s → %s", store.name, start_date, end_date)
 
         page = 1
         total_pages = 1
@@ -67,7 +71,9 @@ class FloOrderSync(models.Model):
                 order_date_ts = order_json.get('orderDate')
                 if order_date_ts:
                     try:
-                        order_dt = datetime.utcfromtimestamp(int(order_date_ts))
+                        # UNIX timestamp → UTC → Türkiye saati (start_date Türkiye saatinde)
+                        _utc_dt = datetime.utcfromtimestamp(int(order_date_ts))
+                        order_dt = pytz.UTC.localize(_utc_dt).astimezone(IST).replace(tzinfo=None)
                         if order_dt < start_date:
                             _logger.debug(
                                 "Eski sipariş atlandı (orderDate=%s < startDate=%s): %s",
