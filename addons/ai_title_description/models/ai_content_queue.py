@@ -1,6 +1,7 @@
 # -*- coding: utf-8 -*-
-from odoo import models, fields, api
+from odoo import models, fields, api, _
 import logging
+import time
 import traceback
 
 _logger = logging.getLogger(__name__)
@@ -67,13 +68,32 @@ class AIContentQueue(models.Model):
                 ('product_tmpl_id.barcode', operator, value),
                 ('product_tmpl_id.product_variant_ids.barcode', operator, value)]
 
+    # "Şimdi İşle"de HTTP isteği içinde senkron işlenecek en çok kayıt; kalanı cron kuyruğuna gider
+    SYNC_PROCESS_LIMIT = 3
+    # Cron çalışmasının süre bütçesi (sn): kayıt başı ~90 sn'ye kadar çıkabilen AI çağrılarıyla
+    # 10 kayıtlık parti cron worker'ını dakikalarca tutuyordu
+    CRON_TIME_BUDGET = 100
+
     @api.model
-    def _cron_process_queue(self, batch_size=10, only_ids=None):
+    def _trigger_queue_cron(self):
+        """Kuyruk cron'unu hemen (bir sonraki cron turunda) çalıştırır; aralığı beklemez."""
+        cron = self.env.ref('ai_title_description.ir_cron_ai_content_queue', raise_if_not_found=False)
+        if cron:
+            cron.sudo()._trigger()
+
+    @api.model
+    def _cron_process_queue(self, batch_size=10, only_ids=None, time_budget=None):
         """Kuyruktan batch_size kadar ürün alıp AI içerik üretir.
 
         only_ids verilirse yalnızca o kuyruk kayıtları işlenir ("Şimdi İşle").
+        Süre bütçesi (sn): yeni kayda başlamadan önce kontrol edilir; dolduysa durur ve iş
+        kaldıysa kendini _trigger() ile yeniden tetikler. Varsayılan: cron çağrısında
+        CRON_TIME_BUDGET, only_ids'li ("Şimdi İşle") çağrıda yok (zaten ≤ SYNC_PROCESS_LIMIT kayıt).
         """
         from datetime import timedelta
+        started = time.monotonic()
+        # DIKKAT: cron kaydı noupdate=1; bütçe XML'e değil buraya bağlı (-u ile güncellenmez)
+        budget = time_budget if time_budget is not None else (None if only_ids else self.CRON_TIME_BUDGET)
         # 0. 20 dakikadan fazla 'processing' kalan takılı kayıtları sıfırla
         stuck_threshold = fields.Datetime.now() - timedelta(minutes=20)
         stuck_records = self.search([
@@ -136,7 +156,13 @@ class AIContentQueue(models.Model):
         va = VisionAnalyzer()
 
         processed = 0
+        attempted_ids = []
+        budget_hit = False
         for record in records:
+            if budget and time.monotonic() - started >= budget:
+                budget_hit = True
+                break
+            attempted_ids.append(record.id)
             record.state = 'processing'
             self.env.cr.commit()
 
@@ -310,24 +336,37 @@ class AIContentQueue(models.Model):
                 processed += 1
 
             except Exception as e:
-                self.env.cr.execute('ROLLBACK TO SAVEPOINT ai_queue_sp')
-                # Google ücretlendirdi ama içerik kullanılamadı: harcama loglansın (bütçeye girsin)
-                self.env['ai.content.log']._log_failed_calls(
-                    record.product_tmpl_id, provider_type, model_name, record.mode,
-                    getattr(provider, 'failed_calls', None))
-                record.attempts += 1
                 err_msg = f"{str(e)}\n{traceback.format_exc()}"
                 _logger.error("Kuyruk [%s] ürün [%s] hata: %s", record.id, record.product_tmpl_id.name, e)
-
-                if record.attempts >= record.max_attempts:
-                    record.state = 'error'
-                else:
-                    record.state = 'pending'
+                # NEDEN: hata yalıtımı — geri alma/log/durum yazımı bile patlasa bozuk kayıt
+                # cron'u durdurmaz; tam geri alma yapılıp kayıt hata durumuna düşürülür.
+                try:
+                    self.env.cr.execute('ROLLBACK TO SAVEPOINT ai_queue_sp')
+                    self.env.invalidate_all()
+                    # Google ücretlendirdi ama içerik kullanılamadı: harcama loglansın (bütçeye girsin)
+                    with self.env.cr.savepoint():
+                        self.env['ai.content.log']._log_failed_calls(
+                            record.product_tmpl_id, provider_type, model_name, record.mode,
+                            getattr(provider, 'failed_calls', None))
+                except Exception:
+                    _logger.exception("Kuyruk [%s]: hata sonrası temizlik başarısız, tam geri alma.", record.id)
+                    self.env.cr.rollback()
+                    self.env.invalidate_all()
+                record = self.browse(record.id)
+                record.attempts += 1
+                record.state = 'error' if record.attempts >= record.max_attempts else 'pending'
                 record.error_message = err_msg
 
             self.env.cr.commit()
 
         _logger.info("AI Kuyruk: %s/%s ürün başarıyla işlendi.", processed, len(records))
+        # Süre bütçesi doldu: bu turda denenmeyen bekleyen kayıt kaldıysa cron'u hemen yeniden tetikle.
+        # NEDEN: denenip hata ile 'pending'e dönenler hariç tutulur; yoksa API kesintisinde
+        # cron aralıksız kendini tetikleyip aynı hatalı kayıtları döverdi.
+        if budget_hit and self.search_count(
+                [('state', '=', 'pending'), ('id', 'not in', attempted_ids)] +
+                ([('id', 'in', list(only_ids))] if only_ids else []), limit=1):
+            self._trigger_queue_cron()
 
     def action_reset_to_pending(self):
         """Kuyruk kaydını yeniden 'bekliyor' durumuna getirir (deneme sayısı ve maks deneme sıfırlanır)."""
@@ -340,13 +379,35 @@ class AIContentQueue(models.Model):
             })
 
     def action_process_now(self):
-        """Seçili kuyruk kayıtlarını hemen senkron olarak işler (yalnız bunları)."""
+        """Seçili kuyruk kayıtlarından en çok SYNC_PROCESS_LIMIT tanesini hemen (senkron) işler.
+
+        NEDEN: kayıt başı ~90 sn'lik AI çağrısı HTTP worker'ını kilitliyordu (sınırsız kayıt).
+        Fazlası 'pending' kalır ve kuyruk cron'u _trigger() ile hemen başlatılır.
+        """
         todo = self.filtered(lambda r: r.state != 'done')
         if not todo:
             return True  # boşken limit=0 "sınırsız" olur ve tüm kuyruk işlenirdi
         todo.write({'state': 'pending'})
-        self._cron_process_queue(batch_size=len(todo), only_ids=todo.ids)
-        return True
+        now_ids = todo.ids[:self.SYNC_PROCESS_LIMIT]
+        queued = len(todo) - len(now_ids)
+        self._cron_process_queue(batch_size=len(now_ids), only_ids=now_ids)
+        if queued:
+            self._trigger_queue_cron()
+        message = _('%(done)d kayıt şimdi işlendi.', done=len(now_ids))
+        if queued:
+            message = _('%(done)d kayıt şimdi işlendi, %(queued)d kayıt kuyruğa alındı '
+                        '(arka planda sırayla işlenecek).', done=len(now_ids), queued=queued)
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'title': _('Şimdi İşle'),
+                'message': message,
+                'type': 'warning' if queued else 'success',
+                'sticky': False,
+                'next': {'type': 'ir.actions.client', 'tag': 'soft_reload'},
+            },
+        }
 
     def action_cancel(self):
         """Seçili kuyruk kayıtlarını durdurur / iptal eder."""

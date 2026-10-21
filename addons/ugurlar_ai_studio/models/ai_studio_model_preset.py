@@ -1,6 +1,5 @@
 import logging
 import base64
-import threading
 import time
 
 from odoo import models, fields, api, _
@@ -123,6 +122,8 @@ class AiStudioModelPreset(models.Model):
     )
     mannequin_generation_state = fields.Selection([
         ('idle', 'Bekliyor'),
+        # Kuyruk cron'u (ai.studio.session._cron_process_queue) sıradan alıp 'generating' yapar
+        ('queued', 'Sırada'),
         ('generating', 'Oluşturuluyor...'),
         ('done', 'Tamamlandı'),
         ('failed', 'Başarısız'),
@@ -327,7 +328,8 @@ class AiStudioModelPreset(models.Model):
         """
         if not (self.env.is_admin() or self.env.user.has_group('ugurlar_ai_studio.group_ai_studio_manager')):
             raise UserError(_('Bu işlem için AI Stüdyo yönetici yetkisi gereklidir.'))
-        presets = self.filtered(lambda p: p.mannequin_prompt and p.mannequin_generation_state != 'generating')
+        presets = self.filtered(lambda p: p.mannequin_prompt
+                                and p.mannequin_generation_state not in ('queued', 'generating'))
         if not presets:
             raise UserError(_('Yeniden üretilecek preset yok (manken promptu olan ve şu an üretimde olmayan preset seçin).'))
 
@@ -342,21 +344,9 @@ class AiStudioModelPreset(models.Model):
             previous_link = preset.library_mannequin_id
             preset.action_save_to_library()  # yedek
             preset.library_mannequin_id = previous_link  # yedek, preset'in kaynağı olmasın
-        presets.write({'mannequin_generation_state': 'generating'})
-
-        jobs = [(p.id, p.mannequin_prompt, p.gender, p.body_type, p.background_type) for p in presets]
-        uid = self.env.uid
-
-        def _run_all():
-            for preset_id, prompt, gender, body_type, bg_type in jobs:
-                self._generate_mannequin_thread(preset_id, prompt, api_key, gender, body_type,
-                                                bg_type, provider_type, uid)
-
-        def _start():
-            thread = threading.Thread(target=_run_all)
-            thread.daemon = True
-            thread.start()
-        self.env.cr.postcommit.add(_start)
+        # Kuyruk cron'u presetleri sırayla alır (HTTP worker'ında thread açılmaz)
+        presets.write({'mannequin_generation_state': 'queued'})
+        self.env['ai.studio.session']._trigger_ai_queue()
 
         return {
             'type': 'ir.actions.client',
@@ -398,18 +388,11 @@ class AiStudioModelPreset(models.Model):
                     'Ayarlar → AI Stüdyo menüsünden girin.'
                 ))
 
-        self.mannequin_generation_state = 'generating'
-
-        # Arka planda çalıştır (commit sonrası)
-        def _start_mannequin_thread():
-            thread = threading.Thread(
-                target=self._generate_mannequin_thread,
-                args=(self.id, self.mannequin_prompt, api_key,
-                      self.gender, self.body_type, self.background_type, provider_type, self.env.uid),
-            )
-            thread.daemon = True
-            thread.start()
-        self.env.cr.postcommit.add(_start_mannequin_thread)
+        if self.mannequin_generation_state in ('queued', 'generating'):
+            raise UserError(_('Bu preset için manken üretimi zaten sırada / sürüyor.'))
+        # Kuyruk cron'u alır (HTTP worker'ında thread açılmaz)
+        self.mannequin_generation_state = 'queued'
+        self.env['ai.studio.session']._trigger_ai_queue()
 
         return {
             'type': 'ir.actions.client',
@@ -529,6 +512,43 @@ class AiStudioModelPreset(models.Model):
             f"with the same hair, face, body and skin tone. {self.MANNEQUIN_STYLE}"
         )
 
+    @api.model
+    def _queue_claim_mannequin(self):
+        """Sıradaki manken işini atomik olarak 'generating' yap (commit ETMEZ). Yoksa False."""
+        from psycopg2 import errors as pg_errors
+        cr = self.env.cr
+        try:
+            with cr.savepoint():
+                # NEDEN: iki kuyruk slotu aynı preseti almasın (kilitli satır atlanır)
+                cr.execute("""
+                    UPDATE ai_studio_model_preset SET mannequin_generation_state = 'generating',
+                           write_date = (now() at time zone 'UTC')
+                     WHERE id = (SELECT id FROM ai_studio_model_preset
+                                  WHERE mannequin_generation_state = 'queued'
+                                  ORDER BY write_date, id LIMIT 1 FOR NO KEY UPDATE SKIP LOCKED)
+                       AND mannequin_generation_state = 'queued'
+                 RETURNING id""", log_exceptions=False)  # beklenen yarış ERROR logu basmasın
+                row = cr.fetchone()
+        except (pg_errors.SerializationFailure, pg_errors.LockNotAvailable):
+            return False
+        if row:
+            self.browse(row[0]).invalidate_recordset(['mannequin_generation_state'])
+        return row and row[0]
+
+    @api.model
+    def _run_mannequin_job(self, preset_id):
+        """Kuyruk işi: presetin güncel tarifiyle mankeni üret (kendi cursor'larını açar)."""
+        preset = self.browse(preset_id)
+        provider_type = self.env['ir.config_parameter'].sudo().get_param(
+            'ugurlar_ai_studio.default_provider', 'fashn')
+        api_key = self.env['ai.studio.session']._get_active_api_key()
+        args = (preset.id, preset.mannequin_prompt, api_key, preset.gender, preset.body_type,
+                preset.background_type, provider_type, self.env.uid)
+        # DIKKAT: okumalar cron cursor'ında transaction açar; ~10 dk'lık üretim boyunca
+        # idle-in-transaction snapshot kalmasın (iş kendi cursor'larını açar)
+        self.env.cr.commit()
+        self._generate_mannequin_thread(*args)
+
     def _generate_mannequin_thread(self, preset_id, prompt, api_key,
                                     gender, body_type, bg_type, provider_type, uid):
         """Thread içinde AI manken oluştur — SaaS tarzı consistency ile."""
@@ -563,8 +583,9 @@ class AiStudioModelPreset(models.Model):
                     # Kullanıcının Türkçe manken tarifi İngilizce prompta çevrilmeden girmesin
                     if prompt and prompt.strip():
                         prompt = env['ai.studio.generation']._translate_prompt(prompt) or prompt
-            except Exception:
-                pass
+            except Exception as tr_err:
+                _logger.warning('Manken promptu çevrilemedi, Türkçe haliyle kullanılacak (preset=%s): %s',
+                                preset_id, tr_err)
 
             outfit = self.MANNEQUIN_OUTFITS.get(garment_type, self.MANNEQUIN_OUTFITS['tops'])
             # Aynı kişi/kıyafet tarifi tüm açılarda; açı _build_full_prompt'ta eklenir

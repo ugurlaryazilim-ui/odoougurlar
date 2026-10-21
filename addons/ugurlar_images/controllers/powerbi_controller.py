@@ -1,4 +1,5 @@
 import base64
+import gzip
 import hashlib
 import hmac
 import json
@@ -46,6 +47,43 @@ DEFAULT_SIZE = '512'
 # Cache süresi (saniye) — 1 saat
 CACHE_MAX_AGE = 3600
 
+# Liste ucu sayfalama: `limit` verilmezse (eski Power BI raporları) tüm liste döner.
+# NEDEN: varsayılanı kısıtlamak mevcut raporları sessizce eksik veriyle bırakır (KK-5 geri uyum).
+# Rapor sorguları limit/offset'e geçirildikten sonra ayar ile varsayılan sayfa boyutu açılabilir.
+LIMIT_PARAM = 'ugurlar_images.powerbi_default_limit'
+MAX_LIMIT = 10000
+
+# Aynı süzgeç liste sorgusunda ve ETag/toplam sorgusunda kullanılır (sapmasın diye tek yerde).
+# NEDEN: yalnız görseli olan (varyant ya da şablon) aktif ürünler listelenir.
+_LIST_FROM_WHERE = """
+    FROM product_product pp
+    JOIN product_template pt ON pt.id = pp.product_tmpl_id
+    WHERE pp.active = true
+      AND (
+        EXISTS (
+            SELECT 1 FROM ir_attachment ia
+            WHERE ia.res_model = 'product.product'
+              AND ia.res_field = 'image_variant_1920'
+              AND ia.res_id = pp.id
+        )
+        OR EXISTS (
+            SELECT 1 FROM ir_attachment ia
+            WHERE ia.res_model = 'product.template'
+              AND ia.res_field = 'image_1920'
+              AND ia.res_id = pt.id
+        )
+      )
+"""
+
+
+def _etag_matches(etag):
+    """If-None-Match başlığı etag ile eşleşiyor mu (tırnaklı, W/ ve eski tırnaksız biçimleri kabul eder)."""
+    header = request.httprequest.headers.get('If-None-Match', '')
+    candidates = {
+        part.strip().removeprefix('W/').strip('"') for part in header.split(',')
+    }
+    return etag in candidates
+
 
 class PowerBIController(http.Controller):
     """
@@ -69,7 +107,9 @@ class PowerBIController(http.Controller):
         )
         if not stored_token:
             return False
-        return hmac.compare_digest(str(token), str(stored_token))
+        # NEDEN: compare_digest iki str'den biri ASCII dışıysa TypeError atar (?token=ğ → 500);
+        # bytes karşılaştırması her girdiyle 403'e düşer.
+        return hmac.compare_digest(str(token).encode(), str(stored_token).encode())
 
     def _json_error(self, message, status=403):
         """Standart JSON hata yanıtı."""
@@ -90,10 +130,12 @@ class PowerBIController(http.Controller):
         methods=['GET'],
         csrf=False,
     )
-    def powerbi_product_list(self, token=None, size=None, **kwargs):
+    def powerbi_product_list(self, token=None, size=None, limit=None, offset=None, **kwargs):
         """
-        Power BI için tüm varyantların listesini JSON olarak döndürür.
-        Performans için doğrudan SQL kullanır — görsel binary yüklemez.
+        Power BI için varyantların listesini JSON dizisi olarak döndürür.
+
+        `limit`/`offset` verilirse sayfalı döner (X-Total-Count, X-Next-Offset başlıkları);
+        verilmezse eski davranış: tüm liste. Doğrudan SQL kullanır — görsel binary yüklemez.
         """
         if not self._validate_token(token):
             return self._json_error('Geçersiz veya eksik API anahtarı.', 403)
@@ -104,43 +146,66 @@ class PowerBIController(http.Controller):
                 'Geçersiz boyut. Gecerli: 128, 256, 512, 1024, 1920', 400
             )
 
-        base_url = request.env['ir.config_parameter'].sudo().get_param(
-            'web.base.url', ''
-        )
+        try:
+            params = request.env['ir.config_parameter'].sudo()
+            if limit is None:
+                limit = params.get_param(LIMIT_PARAM, '0')
+            limit = int(limit)
+            offset = int(offset or 0)
+            if limit < 0 or offset < 0:
+                raise ValueError
+        except (TypeError, ValueError):
+            return self._json_error('Geçersiz limit/offset.', 400)
+        limit = min(limit, MAX_LIMIT)
+        base_url = params.get_param('web.base.url', '')
 
         try:
-            # Doğrudan SQL — sadece görseli olan ürünleri getir
-            # ir_attachment tablosundan varyant veya şablon görseli kontrolü
-            request.env.cr.execute("""
+            cr = request.env.cr
+            # NEDEN: ETag, JSON üretilmeden önce ucuz bir toplamla hesaplanır; değişmediyse 304
+            # ağır sorgu + 18 MB serileştirme + gzip hiç yapılmaz.
+            cr.execute(
+                "SELECT COUNT(*), MAX(GREATEST(pp.write_date, pt.write_date))"
+                + _LIST_FROM_WHERE
+            )
+            total, last_write = cr.fetchone()
+            etag = hashlib.md5(
+                ('%s|%s|%s|%s|%s|%s|%s' % (
+                    total, last_write, size, limit, offset, base_url,
+                    hashlib.sha256(str(token).encode()).hexdigest(),
+                )).encode()
+            ).hexdigest()
+            headers = {
+                'Content-Type': 'application/json; charset=utf-8',
+                'Access-Control-Allow-Origin': '*',
+                'Cache-Control': 'public, max-age=300',
+                'ETag': '"%s"' % etag,
+                'Vary': 'Accept-Encoding',
+                'X-Total-Count': str(total),
+            }
+            if _etag_matches(etag):
+                return Response(status=304, headers={
+                    k: v for k, v in headers.items() if k != 'Content-Type'
+                })
+
+            sql = ("""
                 SELECT
                     pp.id AS product_id,
                     pp.product_tmpl_id AS template_id,
                     pp.barcode,
                     pp.default_code,
                     COALESCE(pt.name->>'tr_TR', pt.name->>'en_US', pt.name->>'tr') AS template_name
-                FROM product_product pp
-                JOIN product_template pt ON pt.id = pp.product_tmpl_id
-                WHERE pp.active = true
-                  AND (
-                    -- Varyantın kendi görseli var mı?
-                    EXISTS (
-                        SELECT 1 FROM ir_attachment ia
-                        WHERE ia.res_model = 'product.product'
-                          AND ia.res_field = 'image_variant_1920'
-                          AND ia.res_id = pp.id
-                    )
-                    OR
-                    -- Şablonun görseli var mı?
-                    EXISTS (
-                        SELECT 1 FROM ir_attachment ia
-                        WHERE ia.res_model = 'product.template'
-                          AND ia.res_field = 'image_1920'
-                          AND ia.res_id = pt.id
-                    )
-                  )
-                ORDER BY pp.id
-            """)
-            rows = request.env.cr.dictfetchall()
+                """ + _LIST_FROM_WHERE + " ORDER BY pp.id")
+            sql_params = []
+            if limit:
+                sql += " LIMIT %s OFFSET %s"
+                sql_params = [limit, offset]
+                next_offset = offset + limit
+                headers['X-Next-Offset'] = str(next_offset) if next_offset < total else ''
+            elif offset:
+                sql += " OFFSET %s"
+                sql_params = [offset]
+            cr.execute(sql, sql_params)
+            rows = cr.dictfetchall()
 
             data = []
             for row in rows:
@@ -168,34 +233,17 @@ class PowerBIController(http.Controller):
                     'image_url': image_url,
                 })
 
-            json_bytes = json.dumps(data, ensure_ascii=False).encode('utf-8')
-
-            # ETag kontrolü (Veri değişmemişse 304 Not Modified dön)
-            etag = hashlib.md5(json_bytes).hexdigest()
-            if_none_match = request.httprequest.headers.get('If-None-Match', '')
-            if if_none_match == etag:
-                return Response(status=304)
+            # Kompakt ayraç: aynı veri, daha az bayt (JSON ayrıştırıcıları için fark yok).
+            json_bytes = json.dumps(data, ensure_ascii=False, separators=(',', ':')).encode('utf-8')
 
             # İstemci gzip destekliyorsa anında sıkıştır (18MB -> ~2MB)
-            accept_encoding = request.httprequest.headers.get('Accept-Encoding', '')
-            headers = {
-                'Content-Type': 'application/json; charset=utf-8',
-                'Access-Control-Allow-Origin': '*',
-                'Cache-Control': 'public, max-age=300',
-                'ETag': etag,
-            }
-
-            if 'gzip' in accept_encoding:
-                import gzip
-                compressed = gzip.compress(json_bytes)
+            if 'gzip' in request.httprequest.headers.get('Accept-Encoding', ''):
+                json_bytes = gzip.compress(json_bytes, compresslevel=5)
                 headers['Content-Encoding'] = 'gzip'
-                headers['Content-Length'] = str(len(compressed))
-                return Response(compressed, status=200, headers=headers)
-
             headers['Content-Length'] = str(len(json_bytes))
             return Response(json_bytes, status=200, headers=headers)
 
-        except Exception as e:
+        except Exception:
             _logger.exception("Power BI urun listesi hatasi")
             return self._json_error('Sunucu hatasi.', 500)
 
@@ -219,8 +267,6 @@ class PowerBIController(http.Controller):
         if size not in VALID_SIZES:
             return self._json_error('Gecersiz boyut.', 400)
 
-        image_field = VALID_SIZES[size]
-
         try:
             product = request.env['product.product'].sudo().search([
                 ('barcode', '=', barcode),
@@ -230,13 +276,9 @@ class PowerBIController(http.Controller):
             if not product:
                 return self._json_error('Urun bulunamadi: %s' % barcode, 404)
 
-            image_data = product[image_field]
-            if not image_data:
-                return self._json_error('Gorsel yok: %s' % barcode, 404)
+            return self._image_response(product, size, barcode)
 
-            return self._serve_image(image_data, barcode)
-
-        except Exception as e:
+        except Exception:
             _logger.exception("Power BI gorsel hatasi (barkod: %s)", barcode)
             return self._json_error('Sunucu hatasi.', 500)
 
@@ -260,29 +302,65 @@ class PowerBIController(http.Controller):
         if size not in VALID_SIZES:
             return self._json_error('Gecersiz boyut.', 400)
 
-        image_field = VALID_SIZES[size]
-
         try:
             product = request.env['product.product'].sudo().browse(product_id)
             if not product.exists() or not product.active:
                 return self._json_error('Urun bulunamadi: %s' % product_id, 404)
 
-            image_data = product[image_field]
-            if not image_data:
-                return self._json_error('Gorsel yok: %s' % product_id, 404)
+            return self._image_response(product, size, str(product_id))
 
-            return self._serve_image(image_data, str(product_id))
-
-        except Exception as e:
+        except Exception:
             _logger.exception("Power BI gorsel hatasi (ID: %s)", product_id)
             return self._json_error('Sunucu hatasi.', 500)
 
     # =================================================================
-    #  Yardımcı: Görseli HTTP Response olarak döndür
+    #  Yardımcılar: Görseli HTTP Response olarak döndür
     # =================================================================
 
+    def _image_response(self, product, size, identifier):
+        """Görseli önce depolanmış boyut ek dosyasından akıtır; yoksa eski base64 yoluna düşer."""
+        attachment = self._find_image_attachment(product, size)
+        if attachment:
+            stream = attachment._to_http_stream()
+            if stream.type in ('data', 'path') and stream.size:
+                # NEDEN: ETag = ek dosya checksum'ı; Stream.get_response If-None-Match
+                # eşleşirse gövdeyi okumadan 304 döner. Dosya diskten akıtılır, base64 yok.
+                if not (stream.mimetype or '').startswith('image/'):
+                    stream.mimetype = 'image/png'
+                stream.max_age = CACHE_MAX_AGE
+                response = stream.get_response()
+                response.headers['Cache-Control'] = 'public, max-age=%d' % CACHE_MAX_AGE
+                response.headers['Access-Control-Allow-Origin'] = '*'
+                return response
+
+        # Boyut ek dosyası yoksa (ör. eski kayıt) alan değerinden okunur — eski davranış.
+        image_data = product[VALID_SIZES[size]]
+        if not image_data:
+            return self._json_error('Gorsel yok: %s' % identifier, 404)
+        return self._serve_image(image_data, identifier)
+
+    def _find_image_attachment(self, product, size):
+        """Ürün için `size` boyutundaki depolanmış görselin ek dosyası.
+
+        Odoo sırası: varyantın kendi görseli, yoksa şablonunki
+        (image_<size> hesaplanan alanı ile aynı kural).
+        """
+        attachments = request.env['ir.attachment'].sudo()
+        attachment = attachments.search([
+            ('res_model', '=', 'product.product'),
+            ('res_id', '=', product.id),
+            ('res_field', '=', 'image_variant_%s' % size),
+        ], limit=1)
+        if not attachment:
+            attachment = attachments.search([
+                ('res_model', '=', 'product.template'),
+                ('res_id', '=', product.product_tmpl_id.id),
+                ('res_field', '=', 'image_%s' % size),
+            ], limit=1)
+        return attachment
+
     def _serve_image(self, image_base64, identifier):
-        """Base64 görsel verisini binary HTTP yanıtı olarak döndürür."""
+        """Base64 görsel verisini binary HTTP yanıtı olarak döndürür (yalnız yedek yol)."""
         try:
             image_bytes = base64.b64decode(image_base64)
         except Exception:
@@ -297,9 +375,7 @@ class PowerBIController(http.Controller):
 
         # ETag — cache doğrulama
         etag = hashlib.md5(image_bytes).hexdigest()
-
-        if_none_match = request.httprequest.headers.get('If-None-Match', '')
-        if if_none_match == etag:
+        if _etag_matches(etag):
             return Response(status=304)
 
         return Response(

@@ -333,17 +333,34 @@ class FalProvider(AIProviderBase):
         "in color, texture, weave and pattern."
     )
 
-    def erase_regions(self, image_base64, tag_boxes, prompt=None, timeout=120, pad_ratio=0.25):
+    def erase_regions(self, image_base64, tag_boxes, prompt=None, timeout=120, pad_ratio=0.25,
+                      budget=None):
         """Kutuları maskeleyip bölgeyi çevresindeki kumaşla doldur (Bria, olmazsa FLUX Fill).
 
         upload_image görseli küçültüp WebP'ye çevirdiği için kullanılmaz: silme
         modelleri görsel ve maskenin aynı boyutta olmasını ister; ikisi de burada yüklenir.
+
+        budget: toplam süre sınırı (sn). HTTP isteği içinden çağrılırken verilir; Bria'ya
+        her çağrı en fazla `timeout`, ama kalan bütçeyi aşmayacak şekilde verilir, FLUX Fill
+        yedeği ve indirme de kalan bütçeyle sınırlanır. Yoksa eski davranış (cron yolu).
 
         Returns:
             (bytes veya None, float cost)
         """
         self._check_client()
         import io
+        import time
+        # NEDEN: Bria (timeout) + FLUX Fill (timeout) + indirme art arda ~5 dk sürebiliyordu;
+        # HTTP worker'ı o sürece kilitliydi. Bütçe tüm zincire ortak son tarihtir.
+        deadline = time.monotonic() + budget if budget else None
+
+        def _remaining(cap):
+            if deadline is None:
+                return cap
+            left = deadline - time.monotonic()
+            if left < 3:
+                raise TimeoutError('silme işlemi %ss bütçesini aştı' % budget)
+            return min(cap, int(left))
         import requests as req_lib
         from PIL import Image, ImageDraw
         from .garment_preprocessor import protect_box_pixels, tag_box_to_pixels
@@ -389,7 +406,7 @@ class FalProvider(AIProviderBase):
                 'image_url': image_url,
                 'mask_url': mask_url,
                 'mask_type': 'manual',
-            }, client_timeout=timeout))
+            }, client_timeout=_remaining(timeout)))
             cost = 0.04
         except Exception as e:
             _logger.warning('Bria Eraser başarısız, FLUX Fill deneniyor: %s', e)
@@ -401,12 +418,12 @@ class FalProvider(AIProviderBase):
                 'mask_url': mask_url,
                 'output_format': 'png',
                 'safety_tolerance': '5',
-            }, client_timeout=timeout))
+            }, client_timeout=_remaining(timeout)))
             cost = round(0.05 * max(1.0, w * h / 1e6), 4)
         if not out_url:
             return None, 0.0
         _logger.info('%s ile %d bölge silindi (%dx%d, $%.3f)', used, drawn, w, h, cost)
-        erased = Image.open(io.BytesIO(req_lib.get(out_url, timeout=60).content)).convert('RGB')
+        erased = Image.open(io.BytesIO(req_lib.get(out_url, timeout=_remaining(60)).content)).convert('RGB')
         # Yalnız maskelenen bölgeler orijinale yapıştırılır: görselin geri kalanı ve
         # çözünürlüğü (ör. 1664x2496) aynen korunur, yeniden sıkıştırma kaybı olmaz
         if erased.size != original.size:

@@ -2,17 +2,23 @@
 import base64
 from contextlib import contextmanager
 import io
+import sys
+import types
 from datetime import timedelta
 
-from odoo import fields
-from odoo.exceptions import UserError
+from odoo import SUPERUSER_ID, api, fields
+from odoo.exceptions import UserError, ValidationError
 from odoo.tests import TransactionCase, new_test_user, tagged
 
 from unittest.mock import patch
 
+from ..services.garment_analyzer import clear_usage_recorder
 from ..models.ai_studio_session import (
-    _get_extra_prompt_en, _make_usage_recorder, _needs_bare_legs, _try_acquire_lease,
+    AI_QUEUE_CRONS, QUEUE_JOB_BUDGET_SECONDS, _cron_round_cursor, _get_extra_prompt_en,
+    _make_usage_recorder, _needs_bare_legs, _try_acquire_lease,
 )
+
+MOD = 'odoo.addons.ugurlar_ai_studio.models.ai_studio_session'
 
 try:
     from PIL import Image
@@ -32,6 +38,8 @@ class TestAiStudioModels(TransactionCase):
     @classmethod
     def setUpClass(cls):
         super().setUpClass()
+        # Kuyruk işleri tr_TR ortamında çalışır; test veritabanında dil kapalı olabilir
+        cls.env['res.lang']._activate_lang('tr_TR')
         color = cls.env['product.attribute'].create({
             'name': 'Renk',
             'value_ids': [(0, 0, {'name': 'Kırmızı'}), (0, 0, {'name': 'Mavi'})],
@@ -48,6 +56,12 @@ class TestAiStudioModels(TransactionCase):
         cls.Gen = cls.env['ai.studio.generation']
         cls.operator = new_test_user(cls.env, login='ais_operator',
                                      groups='ugurlar_ai_studio.group_ai_studio_operator')
+
+    def setUp(self):
+        super().setUp()
+        # İş gövdeleri thread-local kullanım kaydedicisi kurar (üretimde _queue_run_job temizler);
+        # geri alınan oturuma yazan kaydedici sonraki testlere sızmasın
+        self.addCleanup(clear_usage_recorder)
 
     def _session(self, product, **vals):
         return self.Session.create(dict({'product_id': product.id}, **vals))
@@ -196,20 +210,23 @@ class TestAiStudioModels(TransactionCase):
         self.assertEqual(session._detect_garment_type(), 'one_piece')
 
     # ── Cron: alan adları / domain'ler geçerli, boş veride hata yok ──
+    # (cron girişi her kayıttan sonra commit eder; testler commit'siz çekirdeği çağırır)
     def test_cron_runs(self):
         self.env['ir.config_parameter'].sudo().set_param('ugurlar_ai_studio.fal_api_key', '')
         self.env['ir.config_parameter'].sudo().set_param('ugurlar_ai_studio.fashn_api_key', '')
-        self.Session._cron_check_stuck_generations()
+        self.Session._check_stuck_generations()
+        self.assertIsNone(self.Session._queue_claim_job(1, 'w1'), 'API anahtarı yokken kuyruk iş almamalı')
 
     def test_orphan_generation_is_requeued(self):
         session = self._session(self.red, state='processing')
         gen = self.Gen.create({'session_id': session.id, 'photo_type': 'front', 'state': 'processing'})
+        self.env.flush_all()  # bekleyen ORM yazımı write_date'i SQL'den sonra ezmesin
         self.env.cr.execute("UPDATE ai_studio_generation SET write_date = %s WHERE id = %s",
                             (fields.Datetime.now() - timedelta(minutes=5), gen.id))
         gen.invalidate_recordset()
         self.env['ir.config_parameter'].sudo().set_param('ugurlar_ai_studio.fashn_api_key', '')
         self.env['ir.config_parameter'].sudo().set_param('ugurlar_ai_studio.fal_api_key', '')
-        self.Session._cron_check_stuck_generations()
+        self.Session._check_stuck_generations()
         self.assertEqual(gen.state, 'pending', 'gönderilmeden ölen iş tekrar kuyruğa alınmalı')
         self.assertEqual(gen.retry_count, 1)
 
@@ -218,7 +235,8 @@ class TestAiStudioModels(TransactionCase):
         session = self._session(self.red, state='review')
         gen = self.Gen.create({'session_id': session.id, 'photo_type': 'front', 'state': 'done'})
         Session = type(self.Session)
-        with patch.object(Session, '_create_provider') as create_provider:
+        # İş kendi cursor'ını açar; test verisini görsün diye registry test modunda
+        with self.enter_registry_test_mode(), patch.object(Session, '_create_provider') as create_provider:
             self.Session._retry_generation_thread_body(session.id, gen.id, 'key', self.env.uid)
             self.Session._process_ai_thread_body(session.id, 'key', self.env.uid)
         create_provider.assert_not_called()
@@ -230,12 +248,7 @@ class TestAiStudioModels(TransactionCase):
         self.Gen.create({'session_id': session.id, 'photo_type': 'front', 'state': 'processing',
                          'fal_request_id': 'req-1', 'submitted_at': fields.Datetime.now()})
         self.Gen.create({'session_id': session.id, 'photo_type': 'back', 'state': 'pending'})
-        found = self.Session.search([
-            ('id', '=', session.id),
-            ('generation_ids', 'not any', [
-                ('photo_type', '=', 'front'), ('state', '=', 'processing'), ('fal_request_id', '!=', False),
-            ]),
-        ])
+        found = self.Session.search([('id', '=', session.id)] + self.Session._queue_session_domain())
         self.assertFalse(found, 'ön yüz fal kuyruğundayken oturum yeniden başlatılmamalı')
 
     # ── Arka ofis iptal / tamamlama korumaları ──────────────────────
@@ -411,3 +424,413 @@ class TestAiStudioModels(TransactionCase):
         fallback('Fix.')
         self.assertEqual(provider.kwargs[-1]['model_name'], 'fashn/tryon/v1.6')
         self.assertEqual(provider.kwargs[-1]['prompt'], '')
+
+    # ── AI kuyruğu: iş HTTP worker'ında thread değil, cron slotlarında ──
+    def _queue_env(self, limit='2'):
+        icp = self.env['ir.config_parameter'].sudo()
+        icp.set_param('ugurlar_ai_studio.default_provider', 'fal')
+        icp.set_param('ugurlar_ai_studio.fal_api_key', 'test-key')
+        icp.set_param('ugurlar_ai_studio.monthly_budget', '0')
+        icp.set_param('ugurlar_ai_studio.concurrent_limit', limit)
+
+    def _queue_triggers(self):
+        crons = self.env['ir.cron'].browse([self.env.ref(x).id for x in AI_QUEUE_CRONS])
+        return self.env['ir.cron.trigger'].sudo().search_count([('cron_id', 'in', crons.ids)])
+
+    def _preset(self, **vals):
+        return self.env['ai.studio.model.preset'].create(dict({
+            'name': 'Kuyruk Manken', 'garment_type': 'tops', 'model_image_front': _image_b64(),
+        }, **vals))
+
+    def test_queue_crons_exist(self):
+        self.assertEqual(len(AI_QUEUE_CRONS), 2)
+        for xmlid in AI_QUEUE_CRONS:
+            cron = self.env.ref(xmlid)
+            self.assertTrue(cron.active, xmlid)
+            self.assertIn('_cron_process_queue', cron.code)
+
+    def test_start_processing_enqueues_without_thread(self):
+        self._queue_env()
+        session = self._session(self.red, model_preset_id=self._preset().id)
+        self.env['ai.studio.photo'].create({
+            'session_id': session.id, 'photo_type': 'front', 'image_original': _image_b64()})
+        before = self._queue_triggers()
+        with patch('threading.Thread.start') as start:
+            session.action_start_processing()
+        start.assert_not_called()
+        self.assertEqual(session.state, 'preprocessing')
+        self.assertEqual(set(session.generation_ids.mapped('state')), {'pending'})
+        self.assertGreater(self._queue_triggers(), before, 'kuyruk cron\'u tetiklenmeli')
+        self.assertEqual(self.Session._queue_claim_job(1, 'w1'), ('session', session.id, False))
+        session.invalidate_recordset(['ai_lease_until'])
+        self.assertTrue(session.ai_lease_until, 'iş alınırken kira yazılmalı')
+
+    def test_retry_paths_enqueue_without_thread(self):
+        self._queue_env()
+        preset = self._preset()
+        with patch('threading.Thread.start') as start:
+            # Kaldığı yerden devam
+            failed = self._session(self.red, state='failed', model_preset_id=preset.id)
+            gen = self.Gen.create({'session_id': failed.id, 'photo_type': 'front', 'state': 'failed'})
+            before = self._queue_triggers()
+            failed.action_retry_failed()
+            self.assertEqual(gen.state, 'pending')
+            self.assertGreater(self._queue_triggers(), before)
+            # Toplu revizyon tekrar deneme
+            review = self._session(self.blue, state='review')
+            parent = self.Gen.create({'session_id': review.id, 'photo_type': 'front', 'state': 'done'})
+            rev = self.Gen.create({'session_id': review.id, 'photo_type': 'front', 'state': 'failed',
+                                   'parent_generation_id': parent.id})
+            before = self._queue_triggers()
+            rev.action_batch_retry()
+            self.assertEqual(rev.state, 'pending')
+            self.assertGreater(self._queue_triggers(), before)
+            # Tek üretim (revizyon / Tekrar Dene)
+            before = self._queue_triggers()
+            review._process_single_generation(rev)
+            self.assertGreater(self._queue_triggers(), before)
+            # Takılmış revizyonları kurtar: senkron cron yerine kuyruk
+            before = self._queue_triggers()
+            rev.action_recover_stuck_revisions_server()
+            self.assertGreater(self._queue_triggers(), before)
+            # Toplu yeniden işleme
+            self.env['ai.studio.photo'].create({
+                'session_id': failed.id, 'photo_type': 'front', 'image_original': _image_b64()})
+            failed.state = 'failed'
+            before = self._queue_triggers()
+            failed.action_batch_reprocess()
+            self.assertEqual(failed.state, 'preprocessing')
+            self.assertGreater(self._queue_triggers(), before)
+        start.assert_not_called()
+        with self.assertRaises(UserError):
+            self._session(self.red, state='done')._process_single_generation(gen)
+
+    def test_queue_slot_respects_concurrent_limit(self):
+        self._queue_env(limit='1')
+        session = self._session(self.red, state='processing')
+        self.Gen.create({'session_id': session.id, 'photo_type': 'front', 'state': 'pending'})
+        self.assertIsNone(self.Session._queue_claim_job(2, 'w2'), 'limit 1 iken ikinci slot iş almamalı')
+        self.assertEqual(self.Session._queue_claim_job(1, 'w1'), ('session', session.id, False))
+
+    def test_queue_skips_leased_session(self):
+        self._queue_env()
+        session = self._session(self.red, state='processing')
+        self.Gen.create({'session_id': session.id, 'photo_type': 'front', 'state': 'pending'})
+        self.assertTrue(_try_acquire_lease(self.env.cr, session.id, 'baska-worker'))
+        self.assertIsNone(self.Session._queue_claim_job(1, 'w1'), 'canlı kiralı oturum ikinci kez alınmamalı')
+
+    def test_queue_respects_budget(self):
+        self._queue_env()
+        session = self._session(self.red, state='processing')
+        self.Gen.create({'session_id': session.id, 'photo_type': 'front', 'state': 'pending', 'cost': 5.0})
+        self.env['ir.config_parameter'].sudo().set_param('ugurlar_ai_studio.monthly_budget', '1.0')
+        self.assertIsNone(self.Session._queue_claim_job(1, 'w1'), 'bütçe doluyken ücretli iş başlamamalı')
+
+    def test_queue_processes_review_revision(self):
+        self._queue_env()
+        session = self._session(self.red, state='review')
+        gen = self.Gen.create({'session_id': session.id, 'photo_type': 'front', 'state': 'pending'})
+        self.assertEqual(self.Session._queue_claim_job(1, 'w1'), ('revision', session.id, gen.id))
+        self.assertIsNone(self.Session._queue_claim_job(2, 'w2'), 'aynı oturum iki slotta işlenmemeli')
+
+    def test_mannequin_generation_is_queued_not_threaded(self):
+        self._queue_env()
+        preset = self._preset(mannequin_prompt='Genç kadın manken')
+        before = self._queue_triggers()
+        with patch('threading.Thread.start') as start:
+            preset.action_generate_mannequin()
+        start.assert_not_called()
+        self.assertEqual(preset.mannequin_generation_state, 'queued')
+        self.assertGreater(self._queue_triggers(), before)
+        with self.assertRaises(UserError):
+            preset.action_generate_mannequin()
+        self.assertEqual(self.Session._queue_claim_job(1, 'w1'), ('mannequin', preset.id, False))
+        self.assertEqual(preset.mannequin_generation_state, 'generating')
+        self.assertFalse(self.env['ai.studio.model.preset']._queue_claim_mannequin(),
+                         'aynı preset iki slotta üretilmemeli')
+
+    def test_stuck_mannequin_marked_failed(self):
+        preset = self._preset(mannequin_generation_state='generating')
+        self.env.cr.execute("UPDATE ai_studio_model_preset SET write_date = %s WHERE id = %s",
+                            (fields.Datetime.now() - timedelta(hours=2), preset.id))
+        preset.invalidate_recordset()
+        self.Session._check_stuck_generations()
+        self.assertEqual(preset.mannequin_generation_state, 'failed')
+
+    def test_stuck_cron_isolates_broken_record(self):
+        broken = self._session(self.red, state='processing')
+        ok = self._session(self.blue, state='processing')
+        self.Gen.create({'session_id': ok.id, 'photo_type': 'front', 'state': 'done'})
+        Session = type(self.Session)
+        original = Session._finalize_idle_session_state
+
+        def _finalize(rec):
+            if rec == broken:
+                raise ValueError('bozuk kayıt')
+            return original(rec)
+
+        with patch.object(Session, '_finalize_idle_session_state', autospec=True, side_effect=_finalize), \
+                self.assertLogs('odoo.addons.ugurlar_ai_studio.models.ai_studio_session', 'ERROR') as logs:
+            self.Session._check_stuck_generations()
+        self.assertEqual(ok.state, 'review', 'bozuk kayıt diğer oturumların ilerlemesini durdurmamalı')
+        self.assertEqual(broken.state, 'processing')
+        self.assertTrue(any('oturumu sonlandırma' in line for line in logs.output))
+
+    def test_lease_renewed_during_prep(self):
+        # Hazırlık (analiz, etiket silme, görünüm yapısı) kira süresini aşabilir: her adımda yenilenir
+        self._queue_env()
+        session = self._session(self.red, state='review', model_preset_id=self._preset().id)
+        gen = self.Gen.create({'session_id': session.id, 'photo_type': 'back', 'state': 'pending',
+                               'original_image': _image_b64()})
+        Session = type(self.Session)
+        mod = 'odoo.addons.ugurlar_ai_studio.models.ai_studio_session'
+        with self.enter_registry_test_mode(), \
+                patch.object(Session, '_create_provider'), \
+                patch('odoo.addons.ugurlar_ai_studio.services.garment_analyzer.analyze_garment', return_value={}), \
+                patch.object(Session, '_prepare_garment_for_tryon',
+                             return_value=('url', _image_b64().decode(), 0.0)), \
+                patch.object(Session, '_garment_view_info', side_effect=RuntimeError('dur')), \
+                patch(mod + '._renew_session_lease') as renew, \
+                self.assertLogs(mod, 'ERROR') as logs:
+            self.Session._retry_generation_thread_body(session.id, gen.id, 'key', self.env.uid, lease_owner='w1')
+        # işleme başında 1 + analiz sonrası + etiket silme sonrası
+        self.assertGreaterEqual(renew.call_count, 3, logs.output)
+
+    # ── Kuyruk yürütme katmanı: cron girişi, hata işaretleme, süre bütçesi ──
+    def _processing_session(self, *view_types, state='pending'):
+        session = self._session(self.red, state='processing')
+        photo = self.env['ai.studio.photo'].create({
+            'session_id': session.id, 'photo_type': 'front', 'image_original': _image_b64()})
+        gens = self.Gen.concat(*(self.Gen.create({
+            'session_id': session.id, 'source_photo_id': photo.id, 'photo_type': t, 'state': state,
+        }) for t in view_types))
+        return session, gens
+
+    def _release_lease(self, session):
+        self.env.cr.execute("UPDATE ai_studio_session SET ai_lease_owner = NULL, ai_lease_until = NULL "
+                            "WHERE id = %s", (session.id,))
+
+    def test_queue_claims_revision_before_session(self):
+        # Toplu oturum işleri kısa ve kullanıcı bekleyen revizyonları aç bırakmamalı
+        self._queue_env()
+        batch, _gens = self._processing_session('front')
+        review = self._session(self.blue, state='review')
+        rev = self.Gen.create({'session_id': review.id, 'photo_type': 'front', 'state': 'pending'})
+        self.assertEqual(self.Session._queue_claim_job(1, 'w1'), ('revision', review.id, rev.id))
+        self.assertEqual(self.Session._queue_claim_job(2, 'w2'), ('session', batch.id, False))
+
+    def test_cron_job_error_fails_pending_and_releases_lease(self):
+        self._queue_env()
+        session, gens = self._processing_session('front', 'back')
+        Session = type(self.Session)
+        before = self._queue_triggers()
+        with self.enter_registry_test_mode(), patch.object(self.env.cr, 'commit'), \
+                patch.object(Session, '_process_ai_thread_body', side_effect=RuntimeError('patladı')), \
+                self.assertLogs(MOD, 'ERROR'):
+            self.Session._cron_process_queue(slot=1)
+        self.env.invalidate_all()
+        self.assertEqual(set(gens.mapped('state')), {'failed'}, 'kuyruk aynı işi sonsuza dek almamalı')
+        self.assertEqual(session.state, 'failed')
+        self.assertFalse(session.ai_lease_owner, 'kira bırakılmalı')
+        self.assertEqual(self._queue_triggers(), before, 'iş kalmadıysa kuyruk yeniden tetiklenmemeli')
+
+    def test_cron_commits_lease_then_retriggers_when_work_left(self):
+        self._queue_env()
+        session, _gens = self._processing_session('front')
+        Session = type(self.Session)
+        before = self._queue_triggers()
+
+        def _run(rec, job, owner, deadline=None):
+            self.assertTrue(commit.called, 'kira iş başlamadan commit edilmeli')
+            self._release_lease(session)  # iş görünümü bitirmeden bıraktı (süre bütçesi)
+
+        with patch.object(self.env.cr, 'commit') as commit, \
+                patch.object(Session, '_queue_run_job', autospec=True, side_effect=_run) as run:
+            self.Session._cron_process_queue(slot=1)
+        self.assertEqual(run.call_args.args[1], ('session', session.id, False))
+        self.assertGreater(self._queue_triggers(), before, 'iş kaldıysa kuyruk yeniden tetiklenmeli')
+
+    def test_deadline_processes_one_view_then_leaves_rest(self):
+        self._queue_env()
+        session, gens = self._processing_session('detail', 'detail')
+        Session = type(self.Session)
+        with self.enter_registry_test_mode(), patch.object(Session, '_create_provider'), \
+                patch.object(Session, '_process_detail_generation', return_value=_image_b64()):
+            self.Session._process_ai_thread_body(session.id, 'key', self.env.uid, deadline=1.0)
+        self.env.invalidate_all()
+        self.assertEqual(sorted(gens.mapped('state')), ['done', 'pending'],
+                         'bütçe dolsa da en az bir görünüm işlenmeli, kalan sonraki tura')
+        self.assertEqual(session.state, 'processing')
+        self.assertTrue(self.Session._queue_has_work())
+
+    def test_unknown_photo_type_fails_without_paid_call(self):
+        # Tipi boş bekleyen üretim hiç işlenmiyordu: oturum her tur yeniden alınıp analiz ücreti ödeniyordu
+        self._queue_env()
+        session, done = self._processing_session('front', state='done')
+        unknown = self.Gen.create({'session_id': session.id, 'source_photo_id': done.source_photo_id.id,
+                                   'photo_type': False, 'state': 'pending'})
+        Session = type(self.Session)
+        with self.enter_registry_test_mode(), patch.object(Session, '_create_provider') as provider, \
+                patch('odoo.addons.ugurlar_ai_studio.services.garment_preprocessor.preprocess_garment_image',
+                      return_value={'image_base64': 'x'}), \
+                patch('odoo.addons.ugurlar_ai_studio.services.garment_analyzer.analyze_garment',
+                      return_value={}) as analyze:
+            self.Session._process_ai_thread_body(session.id, 'key', self.env.uid)
+        analyze.assert_not_called()
+        provider.return_value.upload_image.assert_not_called()
+        self.env.invalidate_all()
+        self.assertEqual((unknown.state, unknown.error_type), ('failed', 'invalid_input'))
+        self.assertEqual(session.state, 'review')
+        self.assertFalse(self.Session._queue_has_work(), 'işlenemeyen iş kuyruğu yeniden tetiklememeli')
+
+    def test_unrecoverable_fal_job_closed_after_timeout(self):
+        self.env['ir.config_parameter'].sudo().set_param('ugurlar_ai_studio.fal_api_key', 'k')
+        now = fields.Datetime.now()
+        old, fresh = (self.Gen.create({
+            'session_id': self._session(product, state='processing').id, 'photo_type': 'front',
+            'state': 'processing', 'fal_request_id': 'req', 'fal_app': 'fal-ai/x', 'submitted_at': at,
+        }) for product, at in ((self.red, now - timedelta(minutes=31)), (self.blue, now - timedelta(minutes=5))))
+        Session = type(self.Session)
+        with patch.dict(sys.modules, {'fal_client': types.SimpleNamespace(SyncClient=lambda key: None)}), \
+                patch.object(Session, '_recover_submitted_generation', side_effect=RuntimeError('bozuk sonuç')), \
+                self.assertLogs(MOD, 'ERROR'):
+            self.Session._check_stuck_generations()
+        self.assertEqual((old.state, old.error_type), ('failed', 'timeout'))
+        self.assertEqual(fresh.state, 'processing', 'süresi dolmayan iş tekrar denenmeli')
+
+    def test_round_cursor_found_in_core_loop(self):
+        # Odoo 19: bir turdaki tüm hazır cron işleri tek _process_jobs_loop çağrısında sırayla koşar
+        from odoo.addons.base.models.ir_cron import IrCron
+        round_cr = types.SimpleNamespace(dbname=self.env.cr.dbname)
+        seen = []
+
+        def _acquire(cr, job_id):
+            seen.append(_cron_round_cursor())
+
+        with patch.object(IrCron, '_acquire_one_job', side_effect=_acquire):
+            IrCron._process_jobs_loop(round_cr, job_ids=[1])
+        self.assertIs(seen[0], round_cr)
+        self.assertIsNone(_cron_round_cursor())
+
+    def test_round_cursor_none_when_core_loop_missing(self):
+        # D-1: çekirdek metodu kaldırılır/sarmalanırsa istisna kuyruğu tümden durdurmamalı
+        from odoo.addons.base.models.ir_cron import IrCron
+        self._queue_env()
+        session, _gens = self._processing_session('front')
+        Session = type(self.Session)
+        # None: metot kaldırıldı; object(): __code__ taşımayan sarmalayıcı
+        for replacement in (None, object()):
+            with self.subTest(replacement=replacement), \
+                    patch.object(IrCron, '_process_jobs_loop', replacement), \
+                    patch.object(self.env.cr, 'commit'), \
+                    patch.object(Session, '_queue_run_job', autospec=True) as run:
+                self.assertIsNone(_cron_round_cursor())
+                self.Session._cron_process_queue(slot=1)
+                run.assert_called_once()
+            self._release_lease(session)
+
+    def test_round_budget_shared_between_jobs(self):
+        # Watchdog tur başına sıfırlanır: aynı turdaki ikinci kuyruk işi yeni bütçe almamalı
+        self._queue_env()
+        session, _gens = self._processing_session('front')
+        Session = type(self.Session)
+        round_cr = types.SimpleNamespace()
+        with patch(MOD + '._cron_round_cursor', return_value=round_cr), patch.object(self.env.cr, 'commit'), \
+                patch.object(Session, '_queue_run_job', autospec=True) as run:
+            self.Session._cron_process_queue(slot=1)
+            first_deadline = run.call_args.kwargs['deadline']
+            self._release_lease(session)
+            self.Session._cron_process_queue(slot=2)
+            self.assertEqual(run.call_args.kwargs['deadline'], first_deadline)
+            # Turun bütçesi bitti: iş alınmaz, yeni tura (yeni watchdog süresi) tetiklenir
+            round_cr._ai_queue_round_start -= QUEUE_JOB_BUDGET_SECONDS + 1
+            self._release_lease(session)
+            run.reset_mock()
+            before = self._queue_triggers()
+            self.Session._cron_process_queue(slot=1)
+        run.assert_not_called()
+        self.assertGreater(self._queue_triggers(), before)
+
+    def test_mannequin_job_commits_before_long_work(self):
+        # İş boyunca cron cursor'ında açık transaction kalmamalı
+        preset = self._preset(mannequin_prompt='Genç kadın manken')
+        Preset = type(self.env['ai.studio.model.preset'])
+
+        def _work(*args):
+            self.assertTrue(commit.called, 'okumalar commit edilmeden uzun iş başladı')
+
+        with patch.object(self.env.cr, 'commit') as commit, \
+                patch.object(Preset, '_generate_mannequin_thread', autospec=True, side_effect=_work) as work:
+            self.env['ai.studio.model.preset']._run_mannequin_job(preset.id)
+        self.assertEqual(work.call_args.args[1:3], (preset.id, 'Genç kadın manken'))
+
+    def test_queued_mannequin_failed_only_when_queue_stalled(self):
+        self._queue_env()
+        preset = self._preset(mannequin_generation_state='queued')
+        self.env.cr.execute("UPDATE ai_studio_model_preset SET write_date = %s WHERE id = %s",
+                            (fields.Datetime.now() - timedelta(hours=2), preset.id))
+        preset.invalidate_recordset()
+        self.Session._check_stuck_generations()
+        self.assertEqual(preset.mannequin_generation_state, 'queued', 'çalışan kuyrukta bekleme meşru')
+        self.env['ir.config_parameter'].sudo().set_param('ugurlar_ai_studio.concurrent_limit', '0')
+        self.Session._check_stuck_generations()
+        self.assertEqual(preset.mannequin_generation_state, 'failed')
+
+    def test_generation_refs_must_share_session(self):
+        own, other = self._session(self.red), self._session(self.blue)
+        Photo = self.env['ai.studio.photo']
+        foreign_photo = Photo.create({'session_id': other.id, 'photo_type': 'front', 'image_original': _image_b64()})
+        foreign_gen = self.Gen.create({'session_id': other.id, 'photo_type': 'front', 'state': 'done'})
+        with self.assertRaises(ValidationError):
+            self.Gen.create({'session_id': own.id, 'photo_type': 'front', 'source_photo_id': foreign_photo.id})
+        with self.assertRaises(ValidationError):
+            self.Gen.create({'session_id': own.id, 'photo_type': 'front', 'parent_generation_id': foreign_gen.id})
+        own_photo = Photo.create({'session_id': own.id, 'photo_type': 'front', 'image_original': _image_b64()})
+        parent = self.Gen.create({'session_id': own.id, 'photo_type': 'front', 'source_photo_id': own_photo.id})
+        rev = self.Gen.create({'session_id': own.id, 'photo_type': 'front', 'source_photo_id': own_photo.id,
+                               'parent_generation_id': parent.id})
+        with self.assertRaises(ValidationError):
+            rev.write({'session_id': other.id})
+
+    def test_lock_race_logs_no_sql_error(self):
+        # İki slot aynı oturumu seçince ikincisi SerializationFailure alır: beklenen yarış, ERROR logu yok
+        registry = self.registry
+        with registry.cursor() as cr_a:
+            cr_a.execute("SET LOCAL lock_timeout = '10s'")
+            env_a = api.Environment(cr_a, SUPERUSER_ID, {})
+            product = env_a['product.product'].create({'name': 'Kilit yarışı'})
+            ids = (env_a['ai.studio.session'].create({'product_id': product.id}).id, product.product_tmpl_id.id)
+            cr_a.commit()
+
+        def _cleanup():
+            with registry.cursor() as cr:
+                env = api.Environment(cr, SUPERUSER_ID, {})
+                env['ai.studio.session'].browse(ids[0]).unlink()
+                env['product.template'].browse(ids[1]).unlink()
+                cr.commit()
+        self.addCleanup(_cleanup)
+        with registry.cursor() as cr_b, registry.cursor() as cr_c:
+            cr_b.execute("SELECT id FROM ai_studio_session WHERE id = %s", (ids[0],))  # snapshot
+            cr_c.execute("UPDATE ai_studio_session SET ai_lease_owner = 'w1' WHERE id = %s", (ids[0],))
+            cr_c.commit()
+            with self.assertNoLogs('odoo.sql_db', 'ERROR'):
+                self.assertFalse(api.Environment(cr_b, SUPERUSER_ID, {})['ai.studio.session']
+                                 ._queue_lock_and_lease(ids[0], 'w2'))
+
+    def test_qty_available_not_stored(self):
+        # Stok her okumada değişir; stored kopya bayatlıyordu (kolon DB'de kalır, yazılmaz)
+        self.assertFalse(self.Session._fields['qty_available'].store)
+
+    # ── HTTP içi elle silme: toplam süre bütçesi ─────────────────────
+    def test_erase_regions_http_has_time_budget_and_clear_error(self):
+        session = self._session(self.red)
+        gen = self.Gen.create({'session_id': session.id, 'photo_type': 'front', 'state': 'done',
+                               'generated_image': _image_b64()})
+        self.env['ir.config_parameter'].sudo().set_param('ugurlar_ai_studio.fal_api_key', 'k')
+        from ..services.fal_provider import FalProvider
+        box = [[100, 100, 200, 200]]
+        with patch.object(FalProvider, 'erase_regions', side_effect=TimeoutError('x')) as er:
+            with self.assertRaises(UserError) as cm:
+                gen.action_erase_regions(box)
+        self.assertLessEqual(er.call_args.kwargs['budget'], 60, 'HTTP içi çağrı ≤60 sn olmalı')
+        self.assertIn('tekrar deneyin', str(cm.exception))

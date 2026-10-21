@@ -12,6 +12,29 @@
             <field name="active" eval="True"/>
         </record>
 
+        <!-- AI iş kuyruğu slotları: her slot aynı anda tek iş yürütür (global eşzamanlılık =
+             min(concurrent_limit, slot sayısı)). İstekler _trigger() ile anında uyandırır;
+             aralık yalnız kaçan tetiklemeler için güvenlik ağıdır. Slot eklenirse
+             ai_studio_session.AI_QUEUE_CRONS da güncellenmeli. -->
+        <record id="cron_ai_queue_1" model="ir.cron">
+            <field name="name">AI Stüdyo: İş Kuyruğu (slot 1)</field>
+            <field name="model_id" ref="model_ai_studio_session"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_process_queue(slot=1)</field>
+            <field name="interval_number">2</field>
+            <field name="interval_type">minutes</field>
+            <field name="active" eval="True"/>
+        </record>
+        <record id="cron_ai_queue_2" model="ir.cron">
+            <field name="name">AI Stüdyo: İş Kuyruğu (slot 2)</field>
+            <field name="model_id" ref="model_ai_studio_session"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_process_queue(slot=2)</field>
+            <field name="interval_number">2</field>
+            <field name="interval_type">minutes</field>
+            <field name="active" eval="True"/>
+        </record>
+
         <!-- Çöp temizleme: günlük -->
         <record id="cron_garbage_collect" model="ir.cron">
             <field name="name">AI Stüdyo: Reddedilen Görselleri Temizle</field>
