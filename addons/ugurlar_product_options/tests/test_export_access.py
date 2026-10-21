@@ -66,6 +66,21 @@ class TestProductExportAccess(HttpCase):
             sheet = z.read('xl/worksheets/sheet1.xml').decode()
         self.assertNotIn('<f>', sheet)
 
+    def test_array_formula_and_urls_stay_plain_strings(self):
+        for text in ('{=1+1}', 'http://x', 'external:\\\\host'):
+            self.product.name = text
+            res = self._export('export_internal', [{'name': 'display_name', 'label': text, 'type': 'char'}])
+            self.assertEqual(res.status_code, 200)
+            with zipfile.ZipFile(io.BytesIO(res.content)) as z:
+                sheet = z.read('xl/worksheets/sheet1.xml').decode()
+                self.assertNotIn('<f', sheet)
+                self.assertNotIn('hyperlink', sheet)
+                self.assertNotIn('xl/worksheets/_rels/sheet1.xml.rels', z.namelist())
+
+    def test_non_string_label_does_not_500(self):
+        res = self._export('export_internal', [{'name': 'default_code', 'label': 123, 'type': 'char'}])
+        self.assertEqual(res.status_code, 200)
+
     def test_access_error_on_read_returns_403_not_500(self):
         # NEDEN: sudo kalkınca kullanıcı hakkı olmayan alan AccessError verir; 500 değil 403 beklenir
         Model = type(self.env['product.product'])

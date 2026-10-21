@@ -76,7 +76,9 @@ class ProductExportController(http.Controller):
         if xlsxwriter:
             # DIKKAT: strings_to_formulas=False — "=..." ile başlayan ürün adı/etiket Excel'de formül
             # olarak çalışmasın (formül enjeksiyonu). Kaldırmayın.
-            workbook = xlsxwriter.Workbook(output, {'in_memory': True, 'strings_to_formulas': False})
+            workbook = xlsxwriter.Workbook(output, {
+                'in_memory': True, 'strings_to_formulas': False, 'strings_to_urls': False,
+            })
             sheet = workbook.add_worksheet('Ürünler')
 
             # Stiller — wrap_text KAPALI
@@ -121,7 +123,9 @@ class ProductExportController(http.Controller):
 
             # Header
             for col_idx, fdef in enumerate(field_defs):
-                sheet.write(0, col_idx, fdef.get('label', fdef['name']), header_fmt)
+                # NEDEN: write_string — "{=...}" dizi formülü ve "external:\\host" köprüsü yazılmasın;
+                # label str olmayabilir (istemci girdisi), str() 500'ü önler.
+                sheet.write_string(0, col_idx, str(fdef.get('label', fdef['name'])), header_fmt)
                 width = col_widths.get(fdef['name'], 15)
                 sheet.set_column(col_idx, col_idx, width)
 
@@ -150,9 +154,9 @@ class ProductExportController(http.Controller):
                         try:
                             sheet.write_number(row_idx, col_idx, float(value or 0), money_fmt if ftype == 'monetary' else float_fmt)
                         except (ValueError, TypeError):
-                            sheet.write(row_idx, col_idx, str(value), text_fmt)
+                            sheet.write_string(row_idx, col_idx, str(value), text_fmt)
                     else:
-                        sheet.write(row_idx, col_idx, str(value) if value else '', text_fmt)
+                        sheet.write_string(row_idx, col_idx, str(value) if value else '', text_fmt)
 
             # Freeze header
             sheet.freeze_panes(1, 0)
@@ -175,7 +179,7 @@ class ProductExportController(http.Controller):
             no_wrap = Alignment(wrap_text=False, vertical='center')
 
             for col_idx, fdef in enumerate(field_defs, start=1):
-                cell = ws.cell(row=1, column=col_idx, value=fdef.get('label', fdef['name']))
+                cell = ws.cell(row=1, column=col_idx, value=str(fdef.get('label', fdef['name'])))
                 cell.fill = header_fill
                 cell.font = header_font
                 cell.alignment = no_wrap
