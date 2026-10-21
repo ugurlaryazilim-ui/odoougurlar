@@ -1,4 +1,5 @@
 import logging
+import time
 from datetime import timedelta
 from odoo import models, fields, api
 
@@ -46,6 +47,23 @@ class BarcodeOperation(models.Model):
         for rec in self:
             rec.difference_qty = rec.quantity - rec.theoretical_qty
 
+    GC_BATCH = 10000
+    GC_TIME_BUDGET = 120   # sn; autovacuum turu başına
+
+    @api.model
+    def _gc_in_batches(self, domain, deadline):
+        """Aday kayıtları GC_BATCH'lik parçalarla, süre bütçesi bitene dek sil; silinen sayısı döner."""
+        total = 0
+        while time.monotonic() < deadline:
+            batch = self.search(domain, limit=self.GC_BATCH)
+            if not batch:
+                break
+            batch.unlink()
+            total += len(batch)
+            if len(batch) < self.GC_BATCH:
+                break
+        return total
+
     @api.autovacuum
     def _gc_old_operations(self):
         """Eski operasyon kayıtlarını otomatik temizle (Odoo autovacuum).
@@ -55,28 +73,24 @@ class BarcodeOperation(models.Model):
         days = 90
         cutoff = fields.Datetime.now() - timedelta(days=days)
 
+        # NEDEN: günde 10 binden fazla okuma kaydı üretilen sistemde tek parti temizliği hiç yetişmezdi;
+        # parça parça (10.000) silinir, tur süre bütçesiyle (GC_TIME_BUDGET sn) biter, kalanı ertesi gün alır.
+        deadline = time.monotonic() + self.GC_TIME_BUDGET
         # Read-only operasyonlar: güvenle silinebilir
-        # Tek seferde sınırsız unlink uzun kilit + bellek: parça parça (her turda en fazla 10.000)
-        readonly_ops = self.search([
+        count_ro = self._gc_in_batches([
             ('create_date', '<', cutoff),
             ('operation_type', 'in', ['search', 'shelf_search', 'shelf_control', 'label']),
-        ], limit=10000)
-        count_ro = len(readonly_ops)
-        if readonly_ops:
-            readonly_ops.unlink()
+        ], deadline)
 
         # Yazma operasyonları: 180 günden eskiler
         cutoff_write = fields.Datetime.now() - timedelta(days=180)
         # Sayım fişlerinin satırları silinmez (eski sayım fişleri boş kalıyordu)
-        write_ops = self.search([
+        count_wr = self._gc_in_batches([
             ('create_date', '<', cutoff_write),
             ('operation_type', 'not in', ['search', 'shelf_search', 'shelf_control', 'label',
                                           'counting', 'count_adjustment']),
             ('count_session_id', '=', False),
-        ], limit=10000)
-        count_wr = len(write_ops)
-        if write_ops:
-            write_ops.unlink()
+        ], deadline)
 
         _logger.info(
             "Operasyon temizliği: %d okuma + %d yazma kaydı silindi (toplam: %d)",
