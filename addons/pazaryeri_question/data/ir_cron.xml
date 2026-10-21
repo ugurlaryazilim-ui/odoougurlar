@@ -1,13 +1,14 @@
 <?xml version="1.0" encoding="utf-8"?>
 <odoo>
     <data noupdate="1">
+        <!-- DIKKAT: noupdate=1 -> mevcut kurulumda aralık güncellenmez; 19.0.1.0.1 migrasyonu 5 dk altındakileri 5 dk yapar. -->
         <!-- Pazaryeri Soru Senkronizasyon Cron -->
         <record id="cron_sync_marketplace_questions" model="ir.cron">
             <field name="name">Pazaryeri: Müşteri Sorularını Senkronize Et</field>
             <field name="model_id" ref="model_marketplace_question"/>
             <field name="state">code</field>
             <field name="code">model._cron_sync_all_questions()</field>
-            <field name="interval_number">30</field>
+            <field name="interval_number">5</field>
             <field name="interval_type">minutes</field>
             <field name="active" eval="True"/>
         </record>
