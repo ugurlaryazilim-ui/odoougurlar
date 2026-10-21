@@ -33,6 +33,7 @@ class _FakeNebim:
         self.mode = 'hang'
         self.delay = 0.0
         self.calls = []
+        self.post_models = []   # gelen Post'ların ModelType'ı (cari 2/3, sipariş 13/14, fatura ...)
         self.stop = threading.Event()
         owner = self
 
@@ -45,11 +46,16 @@ class _FakeNebim:
                 if self.path.endswith('/Connect'):
                     return self._send({'SessionID': 'fake-session'})
                 try:
-                    proc = json.loads(body or b'{}').get('ProcName') or self.path.rsplit('/', 1)[-1]
+                    data = json.loads(body or b'{}')
                 except ValueError:
-                    proc = '?'
+                    data = {}
+                proc = data.get('ProcName') or self.path.rsplit('/', 1)[-1]
                 owner.calls.append(proc)
-                if owner.mode == 'hang':
+                if self.path.endswith('/Post'):
+                    owner.post_models.append(data.get('ModelType'))
+                # 'hang_after_post': ilk Post'a kadar hızlı (sorgular boş), sonra yalnız Post dışı uçlar asılı
+                if owner.mode == 'hang' or (owner.mode == 'hang_after_post' and owner.post_models
+                                            and not self.path.endswith('/Post')):
                     owner.stop.wait(30)
                     return
                 if owner.delay:
@@ -147,14 +153,84 @@ class TestNebimChainBudget(PackingCase):
         self.assertTrue(sale.nebim_customer_sent)
         self.assertTrue(sale.nebim_order_sent)
 
+    def _spy_http(self):
+        """Gerçek gönderimi bozmadan her HTTP çağrısının (uç, ProcName, timeout) kaydı."""
+        sent = []
+        orig = nc._http_session.post
+
+        def spy(url, *args, **kwargs):
+            sent.append((url.rsplit('/', 1)[-1], (kwargs.get('json') or {}).get('ProcName'),
+                         kwargs.get('timeout')))
+            return orig(url, *args, **kwargs)
+        p = patch.object(nc._http_session, 'post', spy)
+        p.start()
+        self.addCleanup(p.stop)
+        return sent
+
     def test_slow_data_endpoints_chain_bounded_by_deadline(self):
-        """Yavaş ama yanıtlayan uç: zincir toplam bütçeyi aşmaz (önce: çağrı sayısı x gecikme)."""
+        """Yavaş ama yanıtlayan uç: zincir toplam bütçeyi aşmaz; YAZMA (Post) kısaltılmış timeout ile
+        hiç başlamaz (K-1: kesilen Post Nebim'de belge açar, nebim_sent yazılmaz -> mükerrer belge)."""
         self.fake.mode = 'slow'
         self.fake.delay = 0.7       # her çağrı timeout altında; toplamı bütçeyi aşar
+        sent = self._spy_http()
         sale, picking, batch, res, elapsed = self._complete()
         self.assertEqual(picking.state, 'done')
         self.assertLess(elapsed, BUDGET + PAY, 'zincir deadline + pay içinde bitmeli')
         self.assertLess(len(self.fake.calls), 6, self.fake.calls)
+        posts = [t for ep, _proc, t in sent if ep == 'Post']
+        self.assertTrue(all(t[1] == CALL_TIMEOUT for t in posts), 'Post yalnız tam timeout ile: %s' % sent)
+        # Gönderilen her Post yanıtlandı (0,7 < 1 sn): cari gittiyse kodu kayıtlı, kesilen yazma yok
+        sale.invalidate_recordset()
+        self.assertEqual(sale.nebim_customer_sent, any(m in (2, 3) for m in self.fake.post_models),
+                         self.fake.post_models)
+
+    def test_write_without_full_budget_is_never_sent(self):
+        """Kalan süre < yazma timeout'u: Post ve numara SP'si ağa HİÇ çıkmaz (Connect dahil);
+        okuma ise kalan süreye kısaltılıp yapılır."""
+        self.fake.mode = 'slow'
+        sent = self._spy_http()
+        conn = self.env['odoougurlar.nebim.connector'].with_context(
+            nebim_timeout=CALL_TIMEOUT, nebim_retries=0, nebim_deadline=time.monotonic() + CALL_TIMEOUT / 2)
+        with self.assertRaises(nc.NebimTimeoutError):
+            conn.post_data('Post', {'ModelType': 13})
+        with self.assertRaises(nc.NebimTimeoutError):
+            conn.run_proc('sp_GetNextExportFileNumber_Hamurlabs')
+        self.assertEqual(sent, [], 'yazma için hiçbir istek gitmemeli')
+        self.assertEqual(self.fake.calls, [])
+        conn.run_proc('sp_GetCustomer_Hamurlabs')
+        self.assertEqual(self.fake.calls, ['sp_GetCustomer_Hamurlabs'])
+        self.assertLessEqual(sent[-1][2][1], CALL_TIMEOUT / 2, 'okuma kalan süreye kısaltılır')
+
+    def test_write_with_budget_uses_full_timeout(self):
+        self.fake.mode = 'slow'
+        sent = self._spy_http()
+        conn = self.env['odoougurlar.nebim.connector'].with_context(
+            nebim_timeout=CALL_TIMEOUT, nebim_retries=0, nebim_deadline=time.monotonic() + CALL_TIMEOUT + 2)
+        conn.post_data('Post', {'ModelType': 13})
+        conn.run_proc('sp_GetNextExportFileNumber_Hamurlabs')
+        writes = [t for ep, proc, t in sent if ep == 'Post' or proc == 'sp_GetNextExportFileNumber_Hamurlabs']
+        self.assertEqual(len(writes), 2, sent)
+        self.assertTrue(all(t[1] == CALL_TIMEOUT for t in writes), sent)
+
+    def test_customer_post_ok_address_lookup_hung_keeps_code(self):
+        """Ö-1: cari Post başarılı, ardından adres sorgusu asılı -> cari kodu kayıtlı kalır (savepoint geri
+        almaz); ikinci denemede yeni cari Post'u gitmez (önce: kod kaybolur, mükerrer cari açılırdı)."""
+        self.fake.mode = 'hang_after_post'
+        sale, picking, batch, res, elapsed = self._complete()
+        self.assertEqual(self.fake.post_models[:1], [3], self.fake.post_models)
+        sale.invalidate_recordset()
+        self.customer.invalidate_recordset()
+        self.assertTrue(sale.nebim_customer_sent)
+        self.assertEqual(sale.nebim_customer_code, '1-4-1')
+        self.assertEqual(self.customer.nebim_customer_code, '1-4-1')
+        self.assertFalse(sale.nebim_order_sent, 'sipariş aşaması asılı uçta tekrar denenecek')
+        self.fake.mode = 'ok'
+        self.fake.post_models.clear()
+        self.pack_ctl._trigger_nebim_sync(picking)
+        self.assertFalse([m for m in self.fake.post_models if m in (2, 3)],
+                         'ikinci denemede cari Post yok: %s' % self.fake.post_models)
+        sale.invalidate_recordset()
+        self.assertTrue(sale.nebim_order_sent)
 
     def test_chain_without_deadline_context_keeps_per_call_timeout(self):
         """Cron yolu: nebim_deadline context'i yok -> connector yalnız çağrı timeout'u uygular."""
