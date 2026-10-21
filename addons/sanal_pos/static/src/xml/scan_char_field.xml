@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<templates xml:space="preserve">
+    <t t-name="sanal_pos.ScanCharField" t-inherit="web.CharField" t-inherit-mode="primary">
+        <xpath expr="//input" position="attributes">
+            <attribute name="t-on-keydown">onKeydown</attribute>
+            <attribute name="inputmode">text</attribute>
+        </xpath>
+        <xpath expr="//div[hasclass('o_field_input_buttons')]" position="inside">
+            <button t-if="canScan" type="button"
+                    class="btn btn-link m-0 py-1 px-3 fa fa-camera fa-lg o_sanal_pos_scan_btn"
+                    title="Kamera ile barkod okut" aria-label="Kamera ile barkod okut"
+                    t-on-click="onScanClick"/>
+        </xpath>
+    </t>
+</templates>

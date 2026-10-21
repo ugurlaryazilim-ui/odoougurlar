@@ -21,7 +21,10 @@
                     <group string="Fatura">
                         <label for="invoice_no"/>
                         <div class="o_row">
+                            <!-- Kamera ile okut / Enter: fatura otomatik getirilir -->
                             <field name="invoice_no" readonly="fetched"
+                                   widget="sanal_pos_scan_char"
+                                   options="{'fetch_method': 'action_fetch_invoice'}"
                                    placeholder="UGR fatura numarası"/>
                             <button name="action_fetch_invoice" type="object"
                                     string="Faturayı Getir" class="btn-secondary"
