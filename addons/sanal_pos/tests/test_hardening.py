@@ -40,7 +40,8 @@ EXPECTED_PUBLIC = {
     'sanal.pos.payment.resend.wizard': {'default_get', 'action_confirm'},
     'sanal.pos.payment.refund.wizard': {'action_confirm'},
     'sanal.pos.payment.review.close.wizard': {'action_confirm'},
-    'res.config.settings': {'action_copy_tailor_mssql', 'default_get', 'set_values'},
+    'res.config.settings': {'action_copy_tailor_mssql', 'action_sanal_pos_test_connection',
+                            'default_get', 'set_values'},
 }
 
 # Sanal POS Kullanıcısına KAPALI olması gereken (yönetici) eylemler.
@@ -308,6 +309,14 @@ class TestSecretSurfaces(SecurityCase):
                     Settings.with_user(user).create({})
                 with self.assertRaises(AccessError):
                     Settings.with_user(user).action_copy_tailor_mssql()
+                with self.assertRaises(AccessError):
+                    Settings.create({}).with_user(user).action_sanal_pos_test_connection()
+        self.assertNoParatikaCalls()
+        # Bağlantı testi sonuç penceresi yalnız sistem yöneticisine açık
+        for user in (self.user_plain, self.user_sp, self.user_mgr):
+            with self.subTest(user=user.login, model='sanal.pos.connection.test.wizard'):
+                with self.assertRaises(AccessError):
+                    self.env['sanal.pos.connection.test.wizard'].with_user(user).create({})
 
     def test_g2_set_values_dogrudan_cagrisi_sistem_yoneticisine_ozel(self):
         """G-2: çekirdek set_values yönetici denetimi yapmaz (yalnız execute yapar); boş kayıt

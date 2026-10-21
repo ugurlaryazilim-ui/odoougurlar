@@ -69,6 +69,9 @@ ERROR_MESSAGES = {
     'ERR10262': 'Bu işlem için kısmi iade yapılamıyor.',
     'ERR10030': 'İşlem Paratika\'da bulunamadı.',
 }
+# Bağlantı testi: kimlik reddi ve yetki eksikliği kodları
+AUTH_ERROR_CODES = ('ERR10020',)
+PERMISSION_ERROR_CODES = ('ERR10047', 'ERR10053', 'ERR10266')
 
 # Paratika transactionType -> normalize tür
 _KIND_BY_TYPE = {
@@ -146,20 +149,23 @@ class SanalPosProviderParatika(models.AbstractModel):
         return self.env['ir.config_parameter'].sudo().get_param(key) or ''
 
     def _credentials(self):
+        # Kopyala-yapıştırla gelen baş/son boşluk Paratika'da ERR10020 verir
         return {
-            'MERCHANT': self._param('sanal_pos.paratika_merchant'),
-            'MERCHANTUSER': self._param('sanal_pos.paratika_merchant_user'),
-            'MERCHANTPASSWORD': self._param('sanal_pos.paratika_merchant_password'),
+            'MERCHANT': self._param('sanal_pos.paratika_merchant').strip(),
+            'MERCHANTUSER': self._param('sanal_pos.paratika_merchant_user').strip(),
+            'MERCHANTPASSWORD': self._param('sanal_pos.paratika_merchant_password').strip(),
         }
 
     def _secrets(self):
         """Log/mesajlardan süzülecek sır değerleri."""
-        return [self._param('sanal_pos.paratika_merchant_password'),
-                self._param('sanal_pos.paratika_secret_key')]
+        secrets = [self._param('sanal_pos.paratika_merchant_password'),
+                   self._param('sanal_pos.paratika_secret_key')]
+        # Bağlantı testinde ekrandaki (henüz kaydedilmemiş) şifre de süzülür
+        return secrets + list(self.env.context.get('sanal_pos_extra_secrets') or [])
 
-    def _api_url(self, payment):
+    def _api_url(self, payment, environment=None):
         """Kayıt ortamına göre kök adres (KK-52: ayar değil, kaydın ortamı geçerli)."""
-        if payment.environment == 'live':
+        if (environment or payment.environment) == 'live':
             url = self._param('sanal_pos.paratika_live_url') or DEFAULT_LIVE_URL
         else:
             url = self._param('sanal_pos.paratika_test_url') or DEFAULT_TEST_URL
@@ -220,13 +226,17 @@ class SanalPosProviderParatika(models.AbstractModel):
             text = '%s (%s)' % (detail, code) if code else detail
         return tools.scrub(text, self._secrets())
 
-    def _call(self, payment, action, params):
+    def _call(self, payment, action, params, environment=None, credentials=None, api_url=None):
         """Paratika'ya tek istek. Asla istisna fırlatmaz; ham sonuç sözlüğü döner.
 
         Dönüş: ``ok, timeout, error_code, error_message, raw_code, data``
         (``data`` ayrıştırılmış JSON ya da ``None``).
+
+        ``environment`` / ``credentials`` / ``api_url`` yalnız bağlantı testinde verilir
+        (``payment`` boş kayıt kümesidir; ayar ekranındaki kaydedilmemiş değerler denenir).
         """
-        credentials = self._credentials()
+        environment = environment or payment.environment
+        credentials = credentials or self._credentials()
         if not all(credentials.values()):
             return self._result(
                 error_code='CONFIG', data=None,
@@ -238,7 +248,7 @@ class SanalPosProviderParatika(models.AbstractModel):
         request_params = {k: v for k, v in request_params.items()
                           if v not in (None, False, '')}
         body = urlencode(request_params, encoding='utf-8').encode('ascii')
-        url = self._api_url(payment)
+        url = api_url or self._api_url(payment, environment)
         request_log = self._mask_request(request_params)
         financial = action in FINANCIAL_ACTIONS
         uncertain_on_failure = action in STATE_CHANGING_ACTIONS
@@ -267,7 +277,7 @@ class SanalPosProviderParatika(models.AbstractModel):
 
         raw_code = result.get('raw_code')
         self._log_call(
-            payment, action, 'paratika', payment.environment, duration_ms=duration_ms,
+            payment, action, 'paratika', environment, duration_ms=duration_ms,
             http_status=http_status, response_code=raw_code,
             error_code=result['error_code'], success=result['ok'],
             request_body=request_log, response_body=self._mask_response(data, raw_text),
@@ -303,6 +313,45 @@ class SanalPosProviderParatika(models.AbstractModel):
         return self._result(
             error_code=code, raw_code=response_code,
             error_message=self._error_message(code, message))
+
+    # ---------------------------------------------------------------- arayüz: bağlantı testi
+    @api.private
+    def test_connection(self, environment, credentials, api_url):
+        """Kimlik bilgisini salt-okuma bir sorguyla dener (link/para hareketi yok).
+
+        Var olmayan bir ödeme numarası için QUERYTRANSACTION gönderilir. Paratika önce
+        kullanıcıyı doğrular; "kayıt yok" gibi bir yanıt da kimliğin geçerli olduğunu gösterir.
+        Ek anahtarlar: ``reached`` (sunucu anlamlı yanıt verdi), ``authenticated``,
+        ``problem`` (``config|network|address|auth|permission|None``).
+        """
+        provider = self.with_context(
+            sanal_pos_extra_secrets=[credentials.get('MERCHANTPASSWORD') or ''])
+        res = provider._call(
+            self.env['sanal.pos.payment'], 'QUERYTRANSACTION',
+            {'MERCHANTPAYMENTID': 'BAGLANTI-TESTI-%d' % int(time.time())},
+            environment=environment, credentials=credentials, api_url=api_url)
+        res.pop('data', None)
+        code = res['error_code']
+        if res['ok']:
+            problem = None
+        elif code == 'CONFIG':
+            problem = 'config'
+        elif res['timeout']:
+            problem = 'network'
+        elif code and (code.startswith('HTTP') or code == 'INVALID_RESPONSE'):
+            problem = 'address'
+        elif code in AUTH_ERROR_CODES:
+            problem = 'auth'
+        elif code in PERMISSION_ERROR_CODES:
+            problem = 'permission'
+        else:
+            # Kullanıcı doğrulandı; sorgu başka bir nedenle reddedildi (ör. kayıt yok)
+            problem = None
+        res.update(
+            reached=problem not in ('config', 'network', 'address'),
+            authenticated=problem is None,
+            problem=problem)
+        return res
 
     # ---------------------------------------------------------------- arayüz: link
     @api.private

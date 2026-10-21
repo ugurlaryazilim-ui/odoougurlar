@@ -68,6 +68,11 @@ class SanalPosProvider(models.AbstractModel):
     def refund(self, payment, refund_line):
         raise NotImplementedError()
 
+    @api.private
+    def test_connection(self, environment, credentials, api_url):
+        """Ayar ekranından kimlik denemesi -> ek anahtarlar ``reached, authenticated, problem``."""
+        raise NotImplementedError()
+
     @api.model
     @api.private
     def parse_notification(self, params):
