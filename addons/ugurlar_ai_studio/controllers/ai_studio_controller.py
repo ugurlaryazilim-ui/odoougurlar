@@ -10,6 +10,9 @@ from datetime import date, timedelta
 
 _logger = logging.getLogger(__name__)
 
+STALE_REVIEW_SCREEN = ('İnceleme ekranınız eski (oturum başka bir ekranda açıldı ya da durumu değişti); '
+                       'görselleri yeniden görmek için ekranı yenileyin.')
+
 
 class AiStudioController(http.Controller):
     """AI Studio REST API endpointleri."""
@@ -420,7 +423,7 @@ class AiStudioController(http.Controller):
             return {'error': str(e)}
 
     @http.route('/ai_studio/approve_generation', type='jsonrpc', auth='user', methods=['POST'])
-    def approve_generation(self, generation_id, is_primary=False):
+    def approve_generation(self, generation_id, is_primary=False, lock_token=''):
         """AI uretimini onayla. Sadece onaycı ve yönetici."""
         try:
             if not request.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer'):
@@ -428,6 +431,8 @@ class AiStudioController(http.Controller):
             gen = request.env['ai.studio.generation'].browse(int(generation_id))
             if not gen.exists():
                 return {'error': 'Uretim bulunamadi.'}
+            if self._stale_review_screen(gen.session_id, lock_token):
+                return {'error': STALE_REVIEW_SCREEN}
 
             gen.action_approve()
             if is_primary:
@@ -550,7 +555,7 @@ class AiStudioController(http.Controller):
             return {'error': str(e)}
 
     @http.route('/ai_studio/select_candidate', type='jsonrpc', auth='user', methods=['POST'])
-    def select_candidate(self, candidate_id):
+    def select_candidate(self, candidate_id, lock_token=''):
         """Alternatif adayı ana görsel yap. Sadece onaycı ve yönetici."""
         try:
             if not request.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer'):
@@ -558,6 +563,8 @@ class AiStudioController(http.Controller):
             candidate = request.env['ai.studio.generation.candidate'].browse(int(candidate_id)).exists()
             if not candidate:
                 return {'error': 'Aday bulunamadı.'}
+            if self._stale_review_screen(candidate.generation_id.session_id, lock_token):
+                return {'error': STALE_REVIEW_SCREEN}
             candidate.action_select()
             return {'success': True, 'generation_id': candidate.generation_id.id}
         except Exception as e:
@@ -566,7 +573,7 @@ class AiStudioController(http.Controller):
             return {'error': str(e)}
 
     @http.route('/ai_studio/erase_regions', type='jsonrpc', auth='user', methods=['POST'])
-    def erase_regions(self, generation_id, boxes=None):
+    def erase_regions(self, generation_id, boxes=None, lock_token=''):
         """Reviewer'ın AI sonucunda işaretlediği alarm/etiket bölgelerini sil. Sadece onaycı ve yönetici."""
         try:
             if not request.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer'):
@@ -574,6 +581,8 @@ class AiStudioController(http.Controller):
             gen = request.env['ai.studio.generation'].browse(int(generation_id)).exists()
             if not gen:
                 return {'error': 'Üretim bulunamadı.'}
+            if self._stale_review_screen(gen.session_id, lock_token):
+                return {'error': STALE_REVIEW_SCREEN}
             gen.action_erase_regions(boxes or [])
             return {'success': True, 'generation_id': gen.id}
         except UserError as e:
@@ -672,7 +681,7 @@ class AiStudioController(http.Controller):
             return {'error': str(e)}
 
     @http.route('/ai_studio/complete_session', type='jsonrpc', auth='user', methods=['POST'])
-    def complete_session(self, session_id, approved_items=None):
+    def complete_session(self, session_id, approved_items=None, lock_token=''):
         """Oturumu tamamla ve gorselleri urune kaydet. Sadece onaycı ve yönetici.
         
         Doğrulama + işaretleme burada; ürüne yazma kuyrukta (`_run_save_job`).
@@ -688,6 +697,8 @@ class AiStudioController(http.Controller):
                 return {'success': False, 'error': 'Bu oturum zaten tamamlanmış.'}
             if session.state != 'review':
                 return {'success': False, 'error': 'Bu oturum tamamlanabilir durumda değil (durum: %s).' % session.state}
+            if self._stale_review_screen(session, lock_token):
+                return {'success': False, 'error': STALE_REVIEW_SCREEN}
             if session.generation_ids.filtered(lambda g: g.state in ('pending', 'processing')):
                 return {'success': False, 'error': 'İşlenmekte olan üretimler var; tamamlanmalarını bekleyin.'}
 
@@ -695,8 +706,9 @@ class AiStudioController(http.Controller):
             # onaydan sonraki hedef değişikliği onayları düşürür (KK2); ekran bayatsa kaydetme yapılmaz.
             # EKIP-BORC: içerik damgası (onay anında ek checksum'ı saklayan stored alan) bilinçli eklenmedi
             # (yeni kolon deploy riski); bütünlük kural+onay düşürmeye dayanır: review'da üretim/aday operatöre
-            # kapalı (J10 Y4), id kümesi karşılaştırılır, içerik karşılaştırılmaz. Kapsamayan: iki onaycının
-            # aynı oturumda içerik/hedef değiştirmesi. Yükseltme: generation'a approval_checksum (görsel ek
+            # kapalı (J10 Y4), hedef de review'da operatöre kapalı (O-J10-2), onaycı eylemleri güncel kilit
+            # jetonunu ister (D-J10-3); id kümesi karşılaştırılır, içerik karşılaştırılmaz. Kapsamayan: form
+            # görünümündeki action_mark_done (jetonsuz) ve yöneticinin kilidi bırakıp aynı anda düzenlemesi. Yükseltme: generation'a approval_checksum (görsel ek
             # checksum'ı + ürün/kardeş/tür hedefi), complete_session/_run_save_job yeniden hesaplayıp karşılaştırır.
             if approved_items is not None:
                 client_ids = {int(item.get('id') or 0) for item in approved_items}
@@ -759,6 +771,28 @@ class AiStudioController(http.Controller):
     # ═══════════════════════════════════════════════════════════
     REVIEW_LOCK_TIMEOUT_MINUTES = 5
 
+    @staticmethod
+    def _stale_review_screen(session, lock_token):
+        """Onaycının eylemi, oturumun GÜNCEL inceleme kilidini tutan ekrandan mı gelmiyor?
+
+        NEDEN (J10 D-J10-3): approve/select/erase/complete yalnız id alır; açık kalmış eski bir ekran
+        (iptal → taslak → yeniden review, başka sekme kilidi devraldı) görmediği içeriği onaylatırdı.
+        Jeton durum değişiminde temizlenir (ai.studio.session.write), yeni ekran yeni jetonla kilit alır.
+        Yalnız 'review'da istenir: diğer durumlarda kilit alınmaz (acquire_review_lock) ve complete reddeder.
+        """
+        return session.state == 'review' and not (
+            lock_token and session.review_lock_token == lock_token
+            and session.review_locked_by == request.env.user)
+
+    @staticmethod
+    def _review_lock_writable(session):
+        """Kilit alanlarını yalnız onaycı/yönetici ve yalnız 'review' oturumda yazar (J10 D-J10-4).
+
+        NEDEN: uçlar sudo yazar; operatör kendi oturumunda kilidi tutup onaycıyı dışarıda bırakabilir ya da
+        'saving' satırını sık yazıp kaydetme işini çakıştırabilirdi. Operatörün popup'ı salt okunur açılır.
+        """
+        return session.state == 'review' and session._is_approval_authority()
+
     def _next_review_session(self, exclude_ids=()):
         """Onay kuyruğundaki ilk oturum: revizesi süren ve başka kullanıcının
         aktif kilidi olan oturumlar atlanır."""
@@ -794,6 +828,8 @@ class AiStudioController(http.Controller):
             session = request.env['ai.studio.session'].browse(int(session_id))
             if not session.exists():
                 return {'success': False, 'error': 'Oturum bulunamadı.'}
+            if not self._review_lock_writable(session):
+                return {'success': True, 'read_only': True}
 
             now = fields.Datetime.now()
             current_user = request.env.user
@@ -856,6 +892,8 @@ class AiStudioController(http.Controller):
             session = request.env['ai.studio.session'].browse(int(session_id))
             if not session.exists():
                 return {'success': False}
+            if not session._is_approval_authority():
+                return {'success': True}   # operatör kilit almaz (D-J10-4); bırakacak kilidi de yok
 
             current_user = request.env.user
             # Token eşleşiyorsa VEYA aynı kullanıcıysa VEYA yöneticiyse kilidi kaldır
@@ -882,6 +920,8 @@ class AiStudioController(http.Controller):
             session = request.env['ai.studio.session'].browse(int(session_id))
             if not session.exists():
                 return {'success': False}
+            if not self._review_lock_writable(session):
+                return {'success': True, 'read_only': True}
 
             if (lock_token and session.review_lock_token == lock_token) or \
                (session.review_locked_by and session.review_locked_by.id == request.env.user.id):

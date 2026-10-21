@@ -159,7 +159,10 @@
     <record id="rule_set_line_operator_edit" model="ir.rule">
         <field name="name">AI Takım Parçası: Operatör açık oturumda düzenler</field>
         <field name="model_id" ref="model_ai_studio_set_line"/>
-        <field name="domain_force">[('session_id.user_id', '=', user.id), ('session_id.state', 'not in', ('saving', 'done'))]</field>
+        <!-- NEDEN (J10 O-J10-2): takım modunda kuyruk set satırlarının ürünlerine yazar; 'review'da onay ÖNCESİ
+             değişen satır onaycının gördüğünden başka ürüne yazdırırdı (düşecek onay yok). Oturumun kendi hedef
+             alanları da review'da kapalı (_check_saving_transition). -->
+        <field name="domain_force">[('session_id.user_id', '=', user.id), ('session_id.state', 'not in', ('review', 'saving', 'done'))]</field>
         <field name="groups" eval="[(4, ref('group_ai_studio_operator'))]"/>
         <field name="perm_read" eval="False"/>
     </record>

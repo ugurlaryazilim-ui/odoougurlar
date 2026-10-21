@@ -2427,6 +2427,9 @@ class AiStudioSession(models.Model):
                 # DIKKAT: geri alınmazsa yarım yazım (ve bozulmuş transaction) cron cursor'ında kalır
                 self.env.cr.rollback()
                 if not _is_db_conflict(err):
+                    # NEDEN (Ö-8): çakışma serisi bitti; bayat sayaç sonraki "Tamamla"yı erken vazgeçirirdi.
+                    # EKIP-BORC: başka süreçte kalan sayaç temizlenmez (bellek içi); kesin çözüm stored sayaç.
+                    _SAVE_CONFLICTS.pop(res_id, None)
                     _logger.exception('AI kuyruğu: ürüne kaydetme beklenmeyen hata (session=%s)', res_id)
                 elif _SAVE_CONFLICTS.get(res_id, 0) + 1 < SAVE_CONFLICT_RETRY_LIMIT:
                     _SAVE_CONFLICTS[res_id] = _SAVE_CONFLICTS.get(res_id, 0) + 1
@@ -4143,22 +4146,35 @@ class AiStudioSession(models.Model):
         if 'state' in vals and (vals['state'] == 'done'
                                 or self.filtered(lambda s: s.state == 'review' and s.state != vals['state'])):
             raise AccessError(_('İncelemedeki oturumun durumunu yalnız onaycı veya yönetici değiştirebilir.'))
+        # NEDEN (J10 D-J10-3): review'a giriş sistemin (işleme bitince, su) ya da onaycının işi. Operatör
+        # taslakta değiştirdiği içeriği AI'sız doğrudan review'a alırsa onaycının eski ekranı onu onaylatırdı.
+        if vals.get('state') == 'review' and self.filtered(lambda s: s.state != 'review'):
+            raise AccessError(_('Oturumu incelemeye yalnız sistem (işleme bitince) veya onaycı alabilir.'))
+        # NEDEN (J10 O-J10-2): review'da onay HENÜZ yokken hedef değişirse düşecek onay yoktur; onaycı A ürünü
+        # diye gördüğü görselleri onaylar, kuyruk operatörün seçtiği B ürününe yazar. Aynı değer serbest.
+        if self._changed_target(vals).filtered(lambda s: s.state == 'review'):
+            raise AccessError(_('İncelemedeki oturumun hedefini (ürün, kardeş varyantlar, çekim tipi) yalnız '
+                                'onaycı veya yönetici değiştirebilir.'))
 
-    def _drop_approvals_on_change(self, vals):
-        """Yetkisiz kullanıcı ürüne yazılacak hedefi değiştirince oturumun onaylarını düşür (J10 KK2).
-
-        Döndürür: onayı düşürülecek oturumlar (super().write SONRASI _drop_approvals ile).
-        NEDEN: product_id / apply_to_siblings / session_type kuyruğun HANGİ ürünlere yazacağını belirler;
-        onaycı başka bir hedefi onaylamıştı.
-        """
-        if self._is_approval_authority():
-            return self.browse()
+    def _changed_target(self, vals):
+        """APPROVAL_TARGET_FIELDS değerini gerçekten değiştiren kayıtlar (aynı değer yazımı sayılmaz)."""
         changed = self.browse()
         for field_name in APPROVAL_TARGET_FIELDS & set(vals):
             field = self._fields[field_name]
             changed |= self.filtered(
                 lambda s: field.convert_to_write(s[field_name], s) != (vals[field_name] or False))
         return changed
+
+    def _drop_approvals_on_change(self, vals):
+        """Yetkisiz kullanıcı ürüne yazılacak hedefi değiştirince oturumun onaylarını düşür (J10 KK2).
+
+        Döndürür: onayı düşürülecek oturumlar (super().write SONRASI _drop_approvals ile).
+        NEDEN: product_id / apply_to_siblings / session_type kuyruğun HANGİ ürünlere yazacağını belirler;
+        onaycı başka bir hedefi onaylamıştı. review'da bu yazım zaten reddedilir; burası taslak vb. içindir.
+        """
+        if self._is_approval_authority():
+            return self.browse()
+        return self._changed_target(vals)
 
     def _drop_approvals(self, reason):
         gens = self.sudo().generation_ids
@@ -4181,19 +4197,30 @@ class AiStudioSession(models.Model):
     # (security/ai_studio_security.xml, *_operator_edit) — create/o2m/context default/ek yollarının hepsinde
     # geçerli olduğu için model override'ı DEĞİL. Kuralın göremediği tek yol aşağıda.
     @api.model
-    def _check_target_session_unlocked(self, vals, label):
-        """Açık oturumdaki satırı session_id ile 'saving'/'done' oturuma TAŞIMA engeli.
+    def _check_target_session_unlocked(self, vals, label, states=('saving', 'done')):
+        """Açık oturumdaki satırı session_id ile kilitli (states) oturuma TAŞIMA engeli.
 
         NEDEN: kayıt kuralı yazım ÖNCESİ kaydı denetler (o an açık oturumda) → taşımayı yakalamaz.
+        states, satırın operatör kuralındaki durum listesiyle aynı olmalı (fotoğraf: saving/done; set satırı:
+        review dahil).
         """
         target = self.browse(vals.get('session_id') or [])
-        if target.state in ('saving', 'done') and not self._is_approval_authority():
-            raise AccessError(_('Onaylanan oturuma (%s) yalnız onaycı veya yönetici ekleme yapabilir.') % label)
+        if target.state in states and not self._is_approval_authority():
+            raise AccessError(_('İncelemedeki veya onaylanan oturuma (%s) yalnız onaycı veya yönetici ekleme '
+                                'yapabilir.') % label)
 
     def write(self, vals):
         self._check_saving_transition(vals)
         drop = self._drop_approvals_on_change(vals)
+        # NEDEN (J10 D-J10-3): inceleme kilidinin jetonu onaycı uçlarında "bu ekran güncel" kanıtıdır
+        # (controller _stale_review_screen). Durum değişince (review'a giriş/çıkış) eski ekranın jetonu geçersiz
+        # olmalı; yoksa iptal → taslak → yeniden review sonrası açık kalan eski ekran onay verebilir.
+        unlock = self.browse()
+        if 'state' in vals and 'review_lock_token' not in vals:
+            unlock = self.filtered(lambda s: s.state != vals['state'] and (s.review_locked_by or s.review_lock_token))
         res = super(AiStudioSession, self).write(vals)
+        if unlock:
+            unlock.sudo().write({'review_locked_by': False, 'review_lock_time': False, 'review_lock_token': False})
         if drop:
             drop._drop_approvals(_('ürün / kardeş / oturum türü'))
         if 'state' in vals:

@@ -2,6 +2,7 @@
 kaydetme sorunlarında onaycıya bildirim (Ö-2) ve ham hata metni yok (D1)."""
 import base64
 import io
+from datetime import datetime
 from types import SimpleNamespace
 from unittest.mock import patch
 
@@ -148,13 +149,14 @@ class TestApprovalGate(TransactionCase):
         self.assertEqual(open_line.session_id, locked)
 
     def test_operator_can_still_edit_in_review(self):
-        # J10: review'da oturum alanları serbest, ama hedef değişimi onayı düşürür; onay alanları kapalı
+        # J10: review'da onaya etkisiz oturum alanları serbest; hedef (O-J10-2) ve onay alanları kapalı
         session = self._session()
         session.with_user(self.operator).write({'extra_prompt': 'kolu düzelt'})
         self.assertTrue(session.generation_ids.is_approved)
-        session.with_user(self.operator).write({'product_id': self.other_product.id})
-        self.assertEqual(session.product_id, self.other_product)
-        self.assertFalse(session.generation_ids.is_approved)
+        with self.assertRaises(AccessError):
+            session.with_user(self.operator).write({'product_id': self.other_product.id})
+        self.assertEqual(session.product_id, self.product)
+        self.assertTrue(session.generation_ids.is_approved)
         with self.assertRaises(AccessError):
             session.generation_ids.with_user(self.operator).write({'is_excluded': True})
 
@@ -423,7 +425,9 @@ class TestApprovalGate(TransactionCase):
             approved.with_user(self.operator).write({'generated_image': False})
 
     def test_operator_session_change_drops_approval(self):
+        # KK2 review dışında (taslak) geçerli; review'da hedef yazımı zaten kapalı (O-J10-2)
         session, approved, _pending = self._review_pair()
+        session.state = 'draft'
         op = session.with_user(self.operator)
         # aynı değer / ilgisiz alan: düşmez (apply_to_siblings varsayılanı True)
         op.write({'product_id': self.product.id, 'apply_to_siblings': True, 'extra_prompt': 'x'})
@@ -443,6 +447,7 @@ class TestApprovalGate(TransactionCase):
         SetLine = self.env['ai.studio.set.line']
         for action in ('create', 'write'):
             session, approved, _pending = self._review_pair()
+            session.state = 'draft'   # review'da set satırı kapalı (O-J10-2); KK2 taslakta
             line = SetLine.create({'session_id': session.id, 'product_id': self.product.id})
             line.with_user(self.operator).write({'sequence': 5})   # ürüne yazımı etkilemez
             self.assertTrue(approved.is_approved)
@@ -487,16 +492,17 @@ class TestApprovalGate(TransactionCase):
     def test_complete_session_refuses_changed_approvals(self):
         session, approved, _pending = self._review_pair()
         seen = [{'id': approved.id, 'is_primary': True}]   # onaycının ekranındaki onaylı küme
-        session.with_user(self.operator).write({'product_id': self.other_product.id})   # onay düştü
+        token = self._lock(session)
+        approved.with_user(self.reviewer).action_unapprove()   # başka ekrandan onay kaldırıldı
         env = self.env(user=self.reviewer)
         with patch(CTRL + '.request', SimpleNamespace(env=env)):
-            res = AiStudioController().complete_session(session.id, approved_items=seen)
+            res = AiStudioController().complete_session(session.id, approved_items=seen, lock_token=token)
         self.assertFalse(res['success'])
         self.assertIn('değişti', res['error'])
         self.assertEqual(session.state, 'review')
         approved.with_user(self.reviewer).action_approve()
         with patch(CTRL + '.request', SimpleNamespace(env=env)):
-            res = AiStudioController().complete_session(session.id, approved_items=seen)
+            res = AiStudioController().complete_session(session.id, approved_items=seen, lock_token=token)
         self.assertTrue(res['success'])
         self.assertEqual(session.state, 'saving')
 
@@ -508,6 +514,137 @@ class TestApprovalGate(TransactionCase):
             res = AiStudioController().get_review_data(session.id)
         self.assertNotIn('error', res)
         self.assertFalse(session.generation_ids.is_primary)
+
+    # --- J10 düzeltme #2: hedef kilidi, bayat ekran jetonu, kilit uçları ---
+    def _ctrl(self, user, method, *args, **kwargs):
+        with patch(CTRL + '.request', SimpleNamespace(env=self.env(user=user))):
+            return getattr(AiStudioController(), method)(*args, **kwargs)
+
+    def _lock(self, session, token='tok-a', user=None):
+        """Onaycı inceleme ekranını açar (popup'ın acquire_lock çağrısı)."""
+        res = self._ctrl(user or self.reviewer, 'acquire_review_lock', session.id, lock_token=token)
+        self.assertTrue(res['success'])
+        self.assertEqual(session.review_lock_token, token)
+        return token
+
+    def test_operator_review_target_fields_locked(self):
+        # O-J10-2: onay ÖNCESİ (düşecek onay yokken) hedef değişimi onaycının gördüğünden başka ürüne yazdırırdı
+        session, approved, _pending = self._review_pair()
+        approved.write({'is_approved': False})
+        SetLine = self.env['ai.studio.set.line']
+        line = SetLine.create({'session_id': session.id, 'product_id': self.product.id})
+        draft_line = SetLine.create({'session_id': self._session(state='draft').id, 'product_id': self.product.id})
+        op = session.with_user(self.operator)
+        # aynı değer / onaya etkisiz alan serbest (form yeniden kaydı)
+        op.write({'product_id': self.product.id, 'apply_to_siblings': True, 'session_type': 'single',
+                  'extra_prompt': 'kolu düzelt'})
+        for vals in ({'product_id': self.other_product.id}, {'apply_to_siblings': False}, {'session_type': 'set'}):
+            with self.subTest(vals=vals), self.assertRaises(AccessError) as cm:
+                op.write(vals)
+            self.assertIn('hedef', str(cm.exception))
+        attacks = {
+            'set satırı ürünü': lambda: line.with_user(self.operator).write({'product_id': self.other_product.id}),
+            'set satırı ekle': lambda: SetLine.with_user(self.operator).create(
+                {'session_id': session.id, 'product_id': self.other_product.id}),
+            'o2m set satırı': lambda: op.write({'set_line_ids': [(0, 0, {'product_id': self.other_product.id})]}),
+            'taslaktan taşı': lambda: draft_line.with_user(self.operator).write({'session_id': session.id}),
+        }
+        for label, attack in attacks.items():
+            with self.subTest(label), self.assertRaises(AccessError) as cm:
+                attack()
+            if label == 'set satırı ürünü':   # kuralın genel İngilizce mesajı değil, Türkçe neden
+                self.assertIn('takım parçalarını', str(cm.exception))
+        self.assertEqual((session.product_id, session.apply_to_siblings, session.session_type),
+                         (self.product, True, 'single'))
+        self.assertEqual((line.product_id, session.set_line_ids), (self.product, line))
+        # kontrol: onaycı hedefi değiştirebilir
+        session.with_user(self.reviewer).write({'product_id': self.other_product.id})
+        line.with_user(self.reviewer).write({'product_id': self.other_product.id})
+
+    def test_operator_cannot_put_session_into_review(self):
+        # D-J10-3 (a): review'a geçiş sistemin (işleme bitince) ya da onaycının işi
+        for state in ('draft', 'photos_ready', 'processing'):
+            session = self._session(state=state)
+            with self.subTest(state), self.assertRaises(AccessError):
+                session.with_user(self.operator).write({'state': 'review'})
+            self.assertEqual(session.state, state)
+        session.with_user(self.reviewer).write({'state': 'review'})
+        other = self._session(state='processing')
+        other.write({'state': 'review'})   # kuyruk / thread (su)
+        self.assertEqual((session.state, other.state), ('review', 'review'))
+
+    def test_review_lock_cleared_on_state_change(self):
+        session = self._session()
+        self._lock(session)
+        session.write({'state': 'review', 'extra_prompt': 'x'})   # aynı durum: kilit kalır
+        self.assertEqual(session.review_locked_by, self.reviewer)
+        session.with_user(self.reviewer).write({'reviewer_id': self.reviewer.id, 'state': 'saving'})
+        self.assertFalse(session.review_locked_by or session.review_lock_token or session.review_lock_time)
+
+    def test_stale_review_screen_cannot_approve(self):
+        # D-J10-3 PoC C: onaycı A'nın ekranı açıkken iptal → taslak → operatör değiştirir → yeniden review;
+        # A'nın eski ekranı (eski jeton) onaylayıp tamamlayamaz
+        session, _approved, pending = self._review_pair()
+        token = self._lock(session)
+        rev = session.with_user(self.reviewer)
+        rev.action_cancel()
+        rev.action_reset_draft()
+        self.assertFalse(session.review_lock_token)
+        pending.with_user(self.operator).write({'generated_image': self._image((10, 10, 220))})
+        session.write({'state': 'review'})   # sistem (ör. işleme bitti)
+        res = self._ctrl(self.reviewer, 'approve_generation', pending.id, lock_token=token)
+        self.assertIn('eski', res['error'])
+        res = self._ctrl(self.reviewer, 'complete_session', session.id, lock_token=token)
+        self.assertIn('eski', res['error'])
+        self.assertEqual((pending.is_approved, session.state), (False, 'review'))
+        # yeni ekran (yeni jeton) güncel içeriği gösterir ve onaylar
+        token = self._lock(session, token='tok-b')
+        self.assertTrue(self._ctrl(self.reviewer, 'approve_generation', pending.id, lock_token=token)['success'])
+
+    def test_review_token_required_for_reviewer_actions(self):
+        session, _approved, pending = self._review_pair()
+        cand = self.env['ai.studio.generation.candidate'].create(
+            {'generation_id': pending.id, 'image': self._image((10, 200, 10))})
+        token = self._lock(session)
+        calls = {
+            'approve_generation': (pending.id,),
+            'select_candidate': (cand.id,),
+            'erase_regions': (pending.id, [[0, 0, 10, 10]]),
+            'complete_session': (session.id,),
+        }
+        with patch.object(type(self.Gen), 'action_erase_regions') as erase:
+            for method, args in calls.items():
+                for bad in ('', 'baska-sekme'):
+                    with self.subTest(method=method, token=bad):
+                        res = self._ctrl(self.reviewer, method, *args, lock_token=bad)
+                        self.assertIn('eski', res.get('error') or '')
+            self.assertEqual((pending.is_approved, session.state, erase.call_count), (False, 'review', 0))
+            # başka onaycının jetonuyla da olmaz (kilit sahibi kontrolü)
+            other = new_test_user(self.env, login='ais_rev2_j10', groups='ugurlar_ai_studio.group_ai_studio_reviewer')
+            self.assertIn('eski', self._ctrl(other, 'approve_generation', pending.id, lock_token=token)['error'])
+            for method, args in calls.items():
+                with self.subTest(method=method, token='ok'):
+                    self.assertTrue(self._ctrl(self.reviewer, method, *args, lock_token=token).get('success'))
+        self.assertEqual(session.state, 'saving')
+
+    def test_lock_endpoints_reviewer_and_review_only(self):
+        # D-J10-4: operatör kilit alamaz (popup'ı salt okunur açılır); review dışı durumda kilit yazılmaz
+        session = self._session()
+        for method in ('acquire_review_lock', 'heartbeat_review_lock'):
+            res = self._ctrl(self.operator, method, session.id, lock_token='op')
+            self.assertTrue(res['success'], method)
+        self.assertFalse(session.review_locked_by or session.review_lock_token or session.review_lock_time)
+        self._lock(session)
+        self._ctrl(self.operator, 'release_review_lock', session.id, lock_token='op')
+        self.assertEqual(session.review_locked_by, self.reviewer)   # operatör onaycının kilidini bırakamaz
+        saving = self._session(state='saving', reviewer_id=self.reviewer.id)
+        res = self._ctrl(self.reviewer, 'acquire_review_lock', saving.id, lock_token='r')
+        self.assertTrue(res['success'])
+        self.assertFalse(saving.review_locked_by)
+        old = datetime(2020, 1, 1)
+        saving.write({'review_locked_by': self.reviewer.id, 'review_lock_token': 'r', 'review_lock_time': old})
+        self._ctrl(self.reviewer, 'heartbeat_review_lock', saving.id, lock_token='r')
+        self.assertEqual(saving.review_lock_time, old)
 
     def test_y3_poc_flow_product_gets_reviewer_image(self):
         # A4 Y3 PoC: onaydan sonra operatör görseli değiştiremez, arkayı onaylayamaz; ürün onaylananı alır
@@ -526,6 +663,7 @@ class TestApprovalGate(TransactionCase):
     # --- J10 / D2: kaydetme işinde DB çakışması ---
     def test_save_job_serialization_failure_keeps_saving(self):
         session = self._session(state='saving', reviewer_id=self.reviewer.id)
+        self.addCleanup(session_mod._SAVE_CONFLICTS.pop, session.id, None)   # süreç belleği testler arası sızmasın
         conflict = pg_errors.SerializationFailure('could not serialize access due to concurrent update')
         with patch.object(type(self.Session), '_save_to_product', side_effect=conflict), \
                 self.assertRaises(pg_errors.SerializationFailure):
@@ -564,6 +702,17 @@ class TestApprovalGate(TransactionCase):
         msg = session.message_ids[0]
         self.assertIn('çakış', msg.body)
         self.assertIn(self.reviewer.partner_id, msg.partner_ids)
+        self.assertNotIn(session.id, session_mod._SAVE_CONFLICTS)
+
+    def test_save_job_unexpected_error_resets_conflict_counter(self):
+        # Ö-8: çakışma dışı hatada sayaç kalırsa sonraki "Tamamla" daha az denemeyle erken vazgeçer
+        session = self._session(state='saving', reviewer_id=self.reviewer.id)
+        session_mod._SAVE_CONFLICTS[session.id] = 3
+        self.addCleanup(session_mod._SAVE_CONFLICTS.pop, session.id, None)
+        with patch.object(type(self.Session), '_run_save_job', side_effect=ValueError('beklenmeyen')), \
+                patch.object(self.env.cr, 'rollback'), \
+                patch(SESSION_MOD + '._release_session_lease'):
+            self.Session._queue_run_job(('save', session.id, False), 'owner-j10')
         self.assertNotIn(session.id, session_mod._SAVE_CONFLICTS)
 
     def test_notify_save_problem_never_raises(self):

@@ -48,7 +48,10 @@ class TestCompleteSessionQueued(TransactionCase):
         self.startPatcher(patch.object(type(self.env.cr), 'commit', lambda cr: None))
 
     def _review_session(self):
-        session = self.Session.create({'product_id': self.product.id, 'state': 'review'})
+        # J10 D-J10-3: complete_session onaycının açık inceleme ekranının jetonunu ister
+        session = self.Session.create({'product_id': self.product.id, 'state': 'review',
+                                       'review_locked_by': self.reviewer.id, 'review_lock_token': 'j6',
+                                       'review_lock_time': fields.Datetime.now()})
         self.Gen.create({'session_id': session.id, 'photo_type': 'front', 'state': 'done',
                          'is_approved': True, 'is_primary': True, 'generated_image': _image_b64()})
         return session
@@ -60,7 +63,7 @@ class TestCompleteSessionQueued(TransactionCase):
         env = self.env(user=self.reviewer)
         with patch(CTRL + '.request', SimpleNamespace(env=env)), \
                 patch.object(type(self.Session), '_save_to_product') as save:
-            res = AiStudioController().complete_session(session.id)
+            res = AiStudioController().complete_session(session.id, lock_token='j6')
         self.assertEqual(res, {'success': True, 'saving': True})
         save.assert_not_called()   # ağır iş istekte yapılmaz
         self.assertEqual(session.state, 'saving')
@@ -111,7 +114,7 @@ class TestCompleteSessionQueued(TransactionCase):
         session = self._review_session()
         env = self.env(user=self.reviewer)
         with patch(CTRL + '.request', SimpleNamespace(env=env)):
-            self.assertTrue(AiStudioController().complete_session(session.id)['success'])
+            self.assertTrue(AiStudioController().complete_session(session.id, lock_token='j6')['success'])
         self.assertEqual(session.state, 'saving')
         self.assertEqual(self.Session._queue_claim_job(1, 'w1'), ('save', session.id, False))
         self.Session._run_save_job(session.id)

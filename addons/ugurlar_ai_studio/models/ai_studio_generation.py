@@ -483,7 +483,7 @@ class AiStudioGeneration(models.Model):
         self.browse()._check_operator_lock(self.env['ai.studio.session'].browse([i for i in session_ids if i]))
         records = super().create(vals_list)
         # NEDEN: create SONRASI denetim; default_is_excluded bağlamı, copy ve o2m da yakalanır.
-        # is_approved kısmını kural da yakalar (Ö-6); burada kalması operatöre Türkçe neden göstermek için.
+        # is_approved kısmını kural da yakalar; burada kalması operatöre Türkçe neden göstermek için.
         # is_primary hariç: action_start_processing operatörle ön görseli varsayılan ana görsel yaratır;
         # onaysız üretimde ana görsel ürüne yazılmaz (kuyruk yalnız onaylıları alır).
         if records.filtered(lambda g: g.is_approved or g.is_excluded) \
@@ -504,7 +504,8 @@ class AiStudioGeneration(models.Model):
         # NEDEN: sudo yalnız durum okumak için; operatör başkasının oturumunu okuyamasa da kural reddeder
         sessions = self.sudo().session_id | (target_sessions or Session).sudo()
         if sessions.filtered(lambda s: s.state in OPERATOR_LOCKED_STATES):
-            raise AccessError(_('Oturum incelemede veya ürüne kaydediliyor; görselleri yalnız onaycı değiştirebilir.'))
+            raise AccessError(_('Oturum incelemede ya da ürüne kaydediliyor/kaydedildi; görselleri yalnız onaycı '
+                                'değiştirebilir.'))
         if self.sudo().filtered('is_approved'):
             raise AccessError(_('Onaylanmış görseli yalnız onaycı veya yönetici değiştirebilir.'))
 
