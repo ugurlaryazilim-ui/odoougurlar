@@ -1194,7 +1194,7 @@ async function _openReviewPopup(initialSessionId) {
             }
 
             // Kilit goToNextSession'da bırakılır (sonraki oturum yoksa close() ile)
-            await goToNextSession(`✅ ${previousSessionName} kaydedildi.`);
+            await goToNextSession(`✅ ${previousSessionName} onaylandı, görseller arka planda ürüne kaydediliyor.`);
         } catch(e) {
             showToast('❌ Kaydetme hatası: ' + e.message, 'error');
             if (btn) { btn.disabled = false; btn.textContent = `✅ Tamamla ve Kaydet (${approvedItems.length} görsel)`; }

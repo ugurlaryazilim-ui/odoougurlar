@@ -59,6 +59,9 @@ class PazaramaOrderSync(models.Model):
         stores = self.env['pazarama.store'].search([('active', '=', True), ('auto_sync', '=', True)])
         for store in stores:
             try:
+                # DIKKAT: cron mağaza ayarındaki pencereyi (order_day_range) kullanır, daraltılmaz: API değişen
+                # siparişi (iptal/sevkiyat) pencere dışından döndürdüğü doğrulanmadı; dar pencere iptal gecikmesine
+                # ve kesintide kaçan siparişe yol açar (A4 K1, DERSLER 22.10).
                 self.sync_orders_for_store(store)
             except Exception as e:
                 _logger.exception("Pazarama %s senkronizasyon hatası: %s", store.name, e)
@@ -233,7 +236,10 @@ class PazaramaOrderSync(models.Model):
         if changed or action == 'created' or not rec.sale_order_id:
             rec._reconcile_sale_order(store)
         rec._auto_accept(store, api_client)
-        rec.last_checked = fields.Datetime.now()
+        # NEDEN: bkz. Idefix — last_checked yalnız bayatlama ölçütü; değişmeyen kayda her turda yazılmaz.
+        now = fields.Datetime.now()
+        if changed or action or not rec.last_checked or rec.last_checked < now - _STALE_CHECK_AFTER:
+            rec.last_checked = now
         if action:
             return action
         return 'updated' if changed else 'unchanged'

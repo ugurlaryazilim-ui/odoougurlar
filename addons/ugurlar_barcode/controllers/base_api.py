@@ -19,6 +19,7 @@ class _ValidationIncomplete(Exception):
 
 # Basit in-process duplicate guard (son istek hash'i + timestamp)
 _last_requests = {}  # key: user_id + endpoint + args_hash → timestamp
+MAX_BULK_ITEMS = 500  # toplu raflama / sayım tek istekte en fazla bu kadar kalem
 _DEBOUNCE_SECONDS = 0.5  # 500ms içinde aynı istek tekrarlanırsa atla
 
 
@@ -429,32 +430,96 @@ class BarcodeApiBase(http.Controller):
         qty, reserved = request.env.cr.fetchone()
         return float(qty or 0), float(reserved or 0)
 
+    def _shelf_qty_map(self, products, location):
+        """Birden çok ürünün raf miktarı: {product_id: (toplam, rezerve)}; tek kilit + tek toplam
+        sorgusu (ürün başına 2 sorgu yerine). Satırlar id sırasıyla kilitlenir: iki eşzamanlı
+        toplu işlem ters sırada kilitleyip kilitlenmesin."""
+        ids = tuple(sorted({getattr(p, 'id', p) for p in products}))
+        if not ids:
+            return {}
+        request.env['stock.quant'].flush_model(['quantity', 'reserved_quantity'])
+        request.env.cr.execute(
+            "SELECT id FROM stock_quant WHERE product_id IN %s AND location_id=%s "
+            "ORDER BY id FOR UPDATE", [ids, location.id])
+        request.env.cr.execute(
+            "SELECT product_id, COALESCE(SUM(quantity), 0), COALESCE(SUM(reserved_quantity), 0) "
+            "FROM stock_quant WHERE product_id IN %s AND location_id=%s GROUP BY product_id",
+            [ids, location.id])
+        return {pid: (float(qty or 0), float(res or 0))
+                for pid, qty, res in request.env.cr.fetchall()}
+
+    def _check_bulk_items(self, items):
+        """Toplu uçlarda liste üst sınırı: sınırsız liste tek istekte binlerce hareket üretirdi."""
+        if len(items) > MAX_BULK_ITEMS:
+            return {'error': f'Tek seferde en fazla {MAX_BULK_ITEMS} kalem işlenebilir '
+                             f'({len(items)} gönderildi). Listeyi bölüp tekrar gönderin.'}
+        return None
+
+    def _mobile_stock_moves(self, entries, reason, is_inventory=False):
+        """Tamamlanmış stok hareketlerini TEK create/confirm/done turunda oluşturur.
+
+        entries: [(ürün, kaynak, hedef, miktar)]. Hareket ürün başınadır (Odoo hareketi tek
+        ürünlüdür); ORM çağrıları ise parti başına bir kez yapılır. Dönen kayıt kümesi
+        entries sırasındadır."""
+        Move = request.env['stock.move'].sudo()
+        if not entries:
+            return Move
+        vals_list, line_vals = [], []
+        for product, source, dest, quantity in entries:
+            company = (dest if dest.usage == 'internal' else source).company_id or request.env.company
+            vals_list.append({
+                'product_id': product.id,
+                'product_uom': product.uom_id.id,
+                'product_uom_qty': quantity,
+                'location_id': source.id,
+                'location_dest_id': dest.id,
+                'company_id': company.id,
+                'origin': reason,
+                'is_inventory': is_inventory,
+            })
+            line_vals.append({
+                'product_id': product.id,
+                'product_uom_id': product.uom_id.id,
+                'quantity': quantity,
+                'location_id': source.id,
+                'location_dest_id': dest.id,
+                'company_id': company.id,
+            })
+        moves = Move.create(vals_list)
+        # NEDEN: merge=False — aynı ürün iki kez gelirse hareketler birleşmesin (tek hareketli
+        # eski davranışla aynı sonuç, dönen küme entries ile hizalı kalır)
+        moves._action_confirm(merge=False)
+        moves.move_line_ids.unlink()
+        request.env['stock.move.line'].sudo().create([
+            {**vals, 'move_id': move.id} for vals, move in zip(line_vals, moves)])
+        moves.picked = True
+        moves._action_done()
+        return moves
+
     def _mobile_stock_move(self, product, source, dest, quantity, reason, is_inventory=False):
         """Tamamlanmış stok hareketi oluşturur (kaynaktan hedefe, verilen miktar)."""
-        company = (dest if dest.usage == 'internal' else source).company_id or request.env.company
-        move = request.env['stock.move'].sudo().create({
-            'product_id': product.id,
-            'product_uom': product.uom_id.id,
-            'product_uom_qty': quantity,
-            'location_id': source.id,
-            'location_dest_id': dest.id,
-            'company_id': company.id,
-            'origin': reason,
-            'is_inventory': is_inventory,
-        })
-        move._action_confirm()
-        move.move_line_ids.unlink()
-        move.write({'move_line_ids': [(0, 0, {
-            'product_id': product.id,
-            'product_uom_id': product.uom_id.id,
-            'quantity': quantity,
-            'location_id': source.id,
-            'location_dest_id': dest.id,
-            'company_id': company.id,
-        })]})
-        move.picked = True
-        move._action_done()
-        return move
+        return self._mobile_stock_moves(
+            [(product, source, dest, quantity)], reason, is_inventory)
+
+    def _mobile_stock_moves_isolated(self, entries, reason, is_inventory=False):
+        """Toplu hareket; parti başarısızsa kalem kalem (her biri kendi savepoint'inde) dener.
+
+        Returns: entries ile hizalı [(hareket | None, hata | None)]. Sayımda bir kalemin hatası
+        diğerlerini düşürmemeli; sağlıklı yolda tüm parti tek turda gider."""
+        try:
+            with request.env.cr.savepoint():
+                moves = self._mobile_stock_moves(entries, reason, is_inventory)
+            return [(m, None) for m in moves]
+        except Exception as e:
+            _logger.warning('Toplu stok hareketi başarısız, kalem kalem deneniyor: %s', e)
+        out = []
+        for entry in entries:
+            try:
+                with request.env.cr.savepoint():
+                    out.append((self._mobile_stock_move(*entry, reason, is_inventory), None))
+            except Exception as e:
+                out.append((None, e))
+        return out
 
     def _inventory_location(self, product, location):
         company = location.company_id or request.env.company

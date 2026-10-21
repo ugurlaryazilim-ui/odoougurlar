@@ -78,7 +78,7 @@ class YouTubeOAuth(http.Controller):
         }
 
         try:
-            resp = requests.post(token_url, data=data).json()
+            resp = requests.post(token_url, data=data, timeout=30).json()
             
             if 'error' in resp:
                 return f"Token Error: {resp.get('error_description', resp['error'])}"
@@ -102,7 +102,7 @@ class YouTubeOAuth(http.Controller):
 
             # Fetch Channel info
             headers = {'Authorization': f'Bearer {access_token}'}
-            channel_resp = requests.get('https://www.googleapis.com/youtube/v3/channels?part=id,snippet&mine=true', headers=headers).json()
+            channel_resp = requests.get('https://www.googleapis.com/youtube/v3/channels?part=id,snippet&mine=true', headers=headers, timeout=30).json()
             
             if 'items' in channel_resp and channel_resp['items']:
                 channel = channel_resp['items'][0]

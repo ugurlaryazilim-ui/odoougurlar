@@ -44,15 +44,15 @@
     <!-- Kayıt Kuralları (Record Rules)                               -->
     <!-- ============================================================ -->
     <data noupdate="1">
-        <!-- Operatör: sadece kendi oturumlarını görür -->
+        <!-- Operatör: sadece kendi oturumlarını görür (yazma: aşağıdaki kilit kuralı) -->
         <record id="rule_session_operator" model="ir.rule">
             <field name="name">AI Stüdyo Oturum: Operatör kendi oturumları</field>
             <field name="model_id" ref="model_ai_studio_session"/>
             <field name="domain_force">[('user_id', '=', user.id)]</field>
             <field name="groups" eval="[(4, ref('group_ai_studio_operator'))]"/>
             <field name="perm_read" eval="True"/>
-            <field name="perm_write" eval="True"/>
-            <field name="perm_create" eval="True"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_create" eval="False"/>
             <field name="perm_unlink" eval="False"/>
         </record>
 
@@ -85,6 +85,9 @@
             <field name="model_id" ref="model_ai_studio_generation"/>
             <field name="domain_force">[('session_id.user_id', '=', user.id)]</field>
             <field name="groups" eval="[(4, ref('group_ai_studio_operator'))]"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_unlink" eval="False"/>
         </record>
 
         <record id="rule_generation_reviewer" model="ir.rule">
@@ -94,13 +97,101 @@
             <field name="groups" eval="[(4, ref('group_ai_studio_reviewer'))]"/>
         </record>
     </data>
-    <!-- Aday görseller: ebeveyn üretimin kuralını izler -->
+    <!-- Aday görseller: ebeveyn üretimin kuralını izler (yazma: aşağıdaki kilit kuralı) -->
     <record id="rule_ai_studio_candidate_operator" model="ir.rule">
         <field name="name">AI Aday: Operatör kendi oturumları</field>
         <field name="model_id" ref="model_ai_studio_generation_candidate"/>
         <field name="domain_force">[('generation_id.session_id.user_id', '=', user.id)]</field>
         <field name="groups" eval="[(4, ref('group_ai_studio_operator'))]"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="False"/>
     </record>
+
+    <!-- ============================================================ -->
+    <!-- Onay kilidi (A4 Y1/O1/Y2/O2): 'saving'/'done' oturum içeriği  -->
+    <!-- ============================================================ -->
+    <!-- NEDEN: 'saving' oturumu kuyruk sistem yetkisiyle ürüne yazar; onaydan sonra operatörün
+         değiştirdiği her şey (oturum, üretim, takım satırı, aday, alan eki) onaysız ürüne gider.
+         Model write/create override'ları her turda yeni bir yolla (context default, o2m, ek) atlatıldı;
+         kayıt kuralı ORM'in tüm yollarında (create SONRASI oluşan kayıtta, write/unlink ÖNCESİ, ir.attachment
+         res_model/res_id üzerinden) uygulanır.
+         DIKKAT: grup kuralları OR'lanır. Operatörün başka bir kuralında perm_write/create/unlink açık kalırsa
+         bu kilit etkisiz olur; operatör yazma yetkisi YALNIZ *_operator_edit kurallarından gelmeli.
+         Açık oturumun 'saving'e GEÇİŞİ kurala takılmaz (kural yazım öncesi kaydı görür): o geçiş
+         ai.studio.session._check_saving_transition'da; kilitli oturuma session_id ile TAŞIMA da modelde. -->
+    <record id="rule_session_operator_edit" model="ir.rule">
+        <field name="name">AI Stüdyo Oturum: Operatör kendi açık oturumunu düzenler</field>
+        <field name="model_id" ref="model_ai_studio_session"/>
+        <field name="domain_force">[('user_id', '=', user.id), ('state', 'not in', ('saving', 'done'))]</field>
+        <field name="groups" eval="[(4, ref('group_ai_studio_operator'))]"/>
+        <field name="perm_read" eval="False"/>
+    </record>
+    <record id="rule_generation_operator_edit" model="ir.rule">
+        <field name="name">AI Stüdyo Üretim: Operatör açık oturumda düzenler</field>
+        <field name="model_id" ref="model_ai_studio_generation"/>
+        <field name="domain_force">[('session_id.user_id', '=', user.id), ('session_id.state', 'not in', ('saving', 'done'))]</field>
+        <field name="groups" eval="[(4, ref('group_ai_studio_operator'))]"/>
+        <field name="perm_read" eval="False"/>
+    </record>
+    <record id="rule_set_line_operator_edit" model="ir.rule">
+        <field name="name">AI Takım Parçası: Operatör açık oturumda düzenler</field>
+        <field name="model_id" ref="model_ai_studio_set_line"/>
+        <field name="domain_force">[('session_id.user_id', '=', user.id), ('session_id.state', 'not in', ('saving', 'done'))]</field>
+        <field name="groups" eval="[(4, ref('group_ai_studio_operator'))]"/>
+        <field name="perm_read" eval="False"/>
+    </record>
+    <record id="rule_candidate_operator_edit" model="ir.rule">
+        <field name="name">AI Aday: Operatör açık oturumda düzenler</field>
+        <field name="model_id" ref="model_ai_studio_generation_candidate"/>
+        <field name="domain_force">[('generation_id.session_id.user_id', '=', user.id), ('generation_id.session_id.state', 'not in', ('saving', 'done'))]</field>
+        <field name="groups" eval="[(4, ref('group_ai_studio_operator'))]"/>
+        <field name="perm_read" eval="False"/>
+    </record>
+    <!-- Onaycı (reviewer kuralları zaten serbest) ve erişim yöneticisi (eski is_admin() eşdeğeri,
+         ör. senkron ajanının admin kullanıcısı) kilide takılmaz. Takım satırında önceden kural yoktu. -->
+    <record id="rule_set_line_reviewer_edit" model="ir.rule">
+        <field name="name">AI Takım Parçası: Onaycı düzenler</field>
+        <field name="model_id" ref="model_ai_studio_set_line"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('group_ai_studio_reviewer'))]"/>
+        <field name="perm_read" eval="False"/>
+    </record>
+    <record id="rule_session_admin_edit" model="ir.rule">
+        <field name="name">AI Stüdyo Oturum: Erişim yöneticisi düzenler</field>
+        <field name="model_id" ref="model_ai_studio_session"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('base.group_erp_manager'))]"/>
+        <field name="perm_read" eval="False"/>
+    </record>
+    <record id="rule_generation_admin_edit" model="ir.rule">
+        <field name="name">AI Stüdyo Üretim: Erişim yöneticisi düzenler</field>
+        <field name="model_id" ref="model_ai_studio_generation"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('base.group_erp_manager'))]"/>
+        <field name="perm_read" eval="False"/>
+    </record>
+    <record id="rule_set_line_admin_edit" model="ir.rule">
+        <field name="name">AI Takım Parçası: Erişim yöneticisi düzenler</field>
+        <field name="model_id" ref="model_ai_studio_set_line"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('base.group_erp_manager'))]"/>
+        <field name="perm_read" eval="False"/>
+    </record>
+    <record id="rule_candidate_admin_edit" model="ir.rule">
+        <field name="name">AI Aday: Erişim yöneticisi düzenler</field>
+        <field name="model_id" ref="model_ai_studio_generation_candidate"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('base.group_erp_manager'))]"/>
+        <field name="perm_read" eval="False"/>
+    </record>
+    <!-- DIKKAT: rule_session_operator / rule_generation_operator noupdate="1" blokta; mevcut veritabanında
+         -u XML'deki perm_* değişikliğini uygulamaz ve açık kalan perm_write kilidi OR ile deler.
+         Bu çağrı her kurulum/güncellemede onları salt okumaya çeker (idempotent). -->
+    <function model="ir.rule" name="write">
+        <value eval="[ref('rule_session_operator'), ref('rule_generation_operator')]"/>
+        <value eval="{'perm_write': False, 'perm_create': False, 'perm_unlink': False}"/>
+    </function>
     <record id="rule_ai_studio_candidate_reviewer" model="ir.rule">
         <field name="name">AI Aday: Onaycı tümü</field>
         <field name="model_id" ref="model_ai_studio_generation_candidate"/>

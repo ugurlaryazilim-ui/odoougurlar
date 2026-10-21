@@ -110,7 +110,9 @@ class TrendyolOrder(models.Model):
                                     help='Hakediş - Platform Hizmet - Uluslararası Hizmet - Kargo - İade Kargo - Ceza - Stopaj')
 
     # Bölünmüş (split) siparişte bu kayda bağlanan parça paket ID'leri: ",id1,id2,"
-    split_package_ids = fields.Char(string="Bölünmüş Paket ID'leri", readonly=True, index=True)
+    # NEDEN: ',id1,id2,' biçiminde aranır (ilike '%,id,%'); btree bu kalıbı kullanamaz, her yeni
+    # pakette tüm tablo taranıyordu. Trigram (GIN) ilike'ı indeksler; pg_trgm yoksa Odoo indeksi atlar.
+    split_package_ids = fields.Char(string="Bölünmüş Paket ID'leri", readonly=True, index='trigram')
     # Yeniden kurulumda işlenmiş (iptal / bozulmuş) parça paketleri — tekrar işlenmesin
     split_closed_ids = fields.Char(string="Kapanmış Parça Paketleri", readonly=True)
 
@@ -938,7 +940,7 @@ class TrendyolOrderLine(models.Model):
     _name = 'trendyol.order.line'
     _description = 'Trendyol Sipariş Kalemi'
 
-    order_id = fields.Many2one('trendyol.order', string='Sipariş', ondelete='cascade')
+    order_id = fields.Many2one('trendyol.order', string='Sipariş', ondelete='cascade', index=True)
     trendyol_line_id = fields.Char(string='Line ID')
     barcode = fields.Char(string='Barkod')
     merchant_sku = fields.Char(string='Merchant SKU')

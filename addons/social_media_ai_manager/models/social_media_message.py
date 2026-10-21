@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+import time
+
 from odoo import models, fields, api
 
 class SocialMediaMessage(models.Model):
@@ -6,7 +8,7 @@ class SocialMediaMessage(models.Model):
     _description = 'Social Media Message / Comment'
     _order = 'date asc'
 
-    conversation_id = fields.Many2one('social.media.conversation', string="Conversation", required=True, ondelete='cascade')
+    conversation_id = fields.Many2one('social.media.conversation', string="Conversation", required=True, ondelete='cascade', index=True)
     platform_message_id = fields.Char(string="Platform Message ID", help="Unique ID from WhatsApp/Meta")
     post_link = fields.Char(string="Post URL", help="Direct link to the post if this is a comment")
     post_id = fields.Many2one('social.media.post', string="Linked Post", help="The social media post this message belongs to")
@@ -31,6 +33,10 @@ class SocialMediaMessage(models.Model):
                                  help="Başarısız AI yanıt denemesi sayısı; sınıra ulaşınca mesaj kuyruktan çıkar")
     ai_failed = fields.Boolean(string="AI Yanıt Veremedi", default=False, copy=False,
                                help="AI art arda yanıt üretemedi; mesaj temsilci tarafından yanıtlanmalı")
+
+    # NEDEN: dakikalık AI kuyruk cron'u (incoming + ai_processed=False) tüm mesaj tablosunu
+    # taramasın; kısmi indeks yalnız bekleyen gelen mesajları kapsar (tablo küçük kalır).
+    _ai_queue_idx = models.Index("(create_date) WHERE message_type = 'incoming' AND ai_processed IS NOT TRUE")
 
     @api.depends('attachment')
     def _compute_has_attachment(self):
@@ -136,7 +142,10 @@ class SocialMediaMessage(models.Model):
         return results
 
     @api.model
-    def _cron_process_ai_queue(self, limit=50):
+    def _cron_process_ai_queue(self, limit=50, time_budget=40):
+        # DIKKAT: cron her dakika çalışır; yeni batch yalnız bütçe (sn) dolmadan başlar, aksi halde
+        # her batch 2 sn uyku + yapay zeka çağrısıyla turlar üst üste biner. Kalan mesajlar sonraki turda.
+        deadline = time.monotonic() + time_budget
         import logging
         _logger = logging.getLogger(__name__)
         
@@ -172,11 +181,13 @@ class SocialMediaMessage(models.Model):
         ai_provider = self.env['social.media.ai.provider'].sudo()
         conversations = messages.mapped('conversation_id')
         
-        import time
         consecutive_429s = 0
         MAX_CONSECUTIVE_429S = 3  # 3 ard arda 429 alırsak dur
         
         for conversation in conversations:
+            if time.monotonic() >= deadline:
+                _logger.info('AI kuyruğu süre bütçesi (%s sn) doldu; kalanlar sonraki tura bırakıldı', time_budget)
+                break
             # Rate limit: 429 hataları arka arkaya geliyorsa dur
             if consecutive_429s >= MAX_CONSECUTIVE_429S:
                 _logger.warning(
@@ -203,6 +214,8 @@ class SocialMediaMessage(models.Model):
                     batches_to_process.append(list(dm_msgs))
                     
                 for batch in batches_to_process:
+                    if time.monotonic() >= deadline:
+                        break
                     last_msg = batch[-1]
                     # Combine user messages into one paragraph for this batch
                     user_message = "\n".join([m.content.replace("[YORUM]:", "").strip() for m in batch])

@@ -11,6 +11,7 @@ import requests
 
 from odoo import models, fields, api
 from odoo.exceptions import UserError
+from odoo.service.model import PG_CONCURRENCY_EXCEPTIONS_TO_RETRY
 
 _logger = logging.getLogger(__name__)
 
@@ -489,6 +490,18 @@ class UgurlarInvoiceCollectorWizard(models.Model):
         if not selected_lines:
             raise UserError('Lütfen ZIP arşivine eklenecek en az bir fatura seçiniz.')
 
+        # NEDEN: arka plan cron'u aynı işi aynı anda indiriyorsa çift Doğan/Nebim çağrısı ve yazma çakışması
+        # olmasın; ekranı yenileyip (JS bir sonraki adımı yine tetikler) bu turu cron'a bırak.
+        if not self._try_lock_job():
+            _logger.info("Fatura işi %d arka planda işleniyor; etkileşimli adım atlandı.", self.id)
+            return {
+                'type': 'ir.actions.act_window',
+                'res_model': self._name,
+                'res_id': self.id,
+                'view_mode': 'form',
+                'target': 'new',
+            }
+
         start_time = time.time()
         max_duration = 25.0
         batch_sz = self.batch_size if self.batch_size > 0 else 15
@@ -547,6 +560,16 @@ class UgurlarInvoiceCollectorWizard(models.Model):
             'target': 'new',
         }
 
+    def _try_lock_job(self):
+        """İş satırını işlem sonuna dek kilitle; başka işlem (cron ya da etkileşimli adım) tutuyorsa False.
+
+        DIKKAT: SKIP LOCKED bilerek; NOWAIT hata verir, bekleme ise iki tarafı da 25 sn tutar.
+        """
+        self.ensure_one()
+        self.env.cr.execute(
+            "SELECT id FROM ugurlar_invoice_collector WHERE id = %s FOR UPDATE SKIP LOCKED", (self.id,))
+        return bool(self.env.cr.fetchone())
+
     def action_start_background_download(self):
         """Faturaları indirmeyi arka plan Cron görevine devreder ve kullanıcıya bildirim gösterir."""
         self.ensure_one()
@@ -573,85 +596,116 @@ class UgurlarInvoiceCollectorWizard(models.Model):
         Arka plan Cron İşleyicisi: 'downloading' durumundaki fatura arşivleme işlerini tarar,
         arka planda indirir, ZIP & Birleştirilmiş PDF oluşturur ve kullanıcıya bildirim gönderir.
         """
-        jobs = self.search([('state', '=', 'downloading')], limit=5)
+        jobs = self.search([('state', '=', 'downloading')], limit=5, order='id')
+        retrigger = False
         for job in jobs:
+            if not job._try_lock_job():
+                continue   # etkileşimli adım işliyor (JS otomatik tıklama); çift indirme olmasın
             _logger.info("Cron: Arka plan fatura arşivleme işi işleniyor (Job ID: %d)...", job.id)
             try:
-                start_time = time.time()
-                while time.time() - start_time < 25.0:
-                    pending = job.line_ids.filtered(lambda l: l.selected and l.download_status == 'pending')
-                    if not pending:
-                        break
-                    batch_sz = job.batch_size if job.batch_size > 0 else 15
-                    batch = pending[:batch_sz]
-                    job._process_batch_lines(batch)
-                
-                remaining = job.line_ids.filtered(lambda l: l.selected and l.download_status == 'pending')
-                if not remaining:
-                    selected = job.line_ids.filtered(lambda l: l.selected)
-                    success_lines = selected.filtered(lambda l: l.download_status == 'success' and l.pdf_file)
-                    
-                    if success_lines:
-                        job._finalize_zip(selected)
-                        _logger.info("Cron: Job ID %d tamamlandı! ZIP ve Birleştirilmiş PDF oluşturuldu: %s", job.id, job.zip_filename)
-                    else:
-                        error_lines = selected.filtered(lambda l: l.download_status == 'error')
-                        _logger.warning("Cron: Job ID %d — hiç başarılı indirme yok (%d hata). ZIP oluşturulamadı.", job.id, len(error_lines))
-                        job.write({'state': 'error'})
-                    
-                    target_partner = job.create_uid.partner_id
-                    if target_partner:
-                        # Bildirim metnini hazırla (düz metin — simple_notification HTML desteklemez)
-                        brand_text = ', '.join(job.brand_ids.mapped('name')) or 'Tümü'
-                        group_text = ', '.join(job.product_group_ids.mapped('name')) or 'Tümü'
-                        
-                        try:
-                            self.env['bus.bus']._sendone(
-                                target_partner,
-                                'simple_notification',
-                                {
-                                    'title': '🎉 Fatura ZIP / PDF Arşivi Hazır!',
-                                    'message': f"ZIP: {job.zip_filename}\nMarka: {brand_text} / Ürün Grubu: {group_text}\nİndirilen: {job.processed_count} adet",
-                                    'type': 'success',
-                                    'sticky': True,
-                                    'action': {
-                                        'type': 'ir.actions.act_window',
-                                        'name': job.zip_filename or 'Fatura Arşivi',
-                                        'res_model': 'ugurlar.invoice.collector',
-                                        'res_id': job.id,
-                                        'views': [[False, 'form']],
-                                        'target': 'current',
-                                    }
-                                }
-                            )
-                            _logger.info("Cron: Bus bildirimi ve yönlendirme linki kullanıcıya iletildi (%s)", job.create_uid.name)
-                        except Exception as ne:
-                            _logger.warning("Bus bildirim gönderim hatası: %s", str(ne))
+                # NEDEN: iş gövdesi savepoint içinde; beklenmedik hata yarım yazımı (satır durumları, ZIP) bir
+                # sonraki işin commit'ine taşımasın (A4 Ö-4).
+                with self.env.cr.savepoint():
+                    retrigger = job._cron_process_one() or retrigger
+            except PG_CONCURRENCY_EXCEPTIONS_TO_RETRY:
+                # NEDEN: geçici kilit/serileştirme çakışması (ör. kullanıcı aynı satırı formda değiştiriyor)
+                # işi kalıcı 'error'a düşürmesin; savepoint geri alındı, iş 'downloading' kalır ve sonraki
+                # turda (cron aralığı ya da etkileşimli adım) yeniden denenir. Bilerek _trigger() yok:
+                # kalıcı çakışmada cron saniyelik döngüye girerdi.
+                _logger.warning("Cron: Job ID %d eşzamanlılık çakışması; sonraki turda denenecek.", job.id,
+                                exc_info=True)
+            except Exception:
+                _logger.exception("Cron hatası (Job ID %d); iş geri alındı ve hataya çekildi.", job.id)
+                # NEDEN: aynı hatalı iş her dakika yeniden denenmesin; kullanıcı formdan sıfırlayabilir.
+                job.write({'state': 'error'})
+            self.env['ir.cron']._commit_progress()   # iş başına commit: kilit ve işlem kısa kalır
+        if retrigger:
+            cron = self.env.ref('ugurlar_invoice_collector.cron_process_invoice_collector_jobs',
+                                raise_if_not_found=False)
+            if cron:
+                cron._trigger()
 
-                        try:
-                            from markupsafe import Markup
-                            target_partner.message_post(
-                                body=Markup(
-                                    "<b>🎉 Fatura Arşivi Hazır!</b><br/>"
-                                    "<b>ZIP Dosyası:</b> {zip}<br/>"
-                                    "<b>Birleştirilmiş PDF:</b> {pdf}<br/>"
-                                    "<b>Marka / Ürün Grubu:</b> {brand} / {group}<br/>"
-                                    "<b>İndirilen Fatura Sayısı:</b> {count} adet"
-                                ).format(
-                                    zip=job.zip_filename,
-                                    pdf=job.merged_pdf_filename or 'Oluşturuldu',
-                                    brand=brand_text,
-                                    group=group_text,
-                                    count=job.processed_count,
-                                ),
-                                subject="Fatura ZIP Arşivi Hazırlandı",
-                                message_type="notification",
-                                subtype_xmlid="mail.mt_comment",
-                            )
-                        except Exception as me:
-                            _logger.debug("Partner message_post hatası: %s", str(me))
-            except Exception as e:
-                _logger.error("Cron hatası (Job ID %d): %s", job.id, str(e))
+    def _cron_process_one(self):
+        """Tek işin bir cron dilimi; ilerleme sürüyorsa (bekleyen satır kaldıysa) True döner."""
+        self.ensure_one()
+        job = self
+        start_time = time.time()
+        while time.time() - start_time < 25.0:
+            pending = job.line_ids.filtered(lambda l: l.selected and l.download_status == 'pending')
+            if not pending:
+                break
+            batch_sz = job.batch_size if job.batch_size > 0 else 15
+            batch = pending[:batch_sz]
+            job._process_batch_lines(batch)
+        
+        remaining = job.line_ids.filtered(lambda l: l.selected and l.download_status == 'pending')
+        # NEDEN: 25 sn'lik dilim bitince bir sonraki dakikayı beklemek yerine cron kendini tetikler
+        # (aralık 5 dk'ya çıkarılabildi); ilerleme yoksa sonsuz döngü olmaz: yalnız işlenen iş için.
+        retrigger = bool(remaining)
+        if not remaining:
+            selected = job.line_ids.filtered(lambda l: l.selected)
+            success_lines = selected.filtered(lambda l: l.download_status == 'success' and l.pdf_file)
+            
+            if success_lines:
+                job._finalize_zip(selected)
+                _logger.info("Cron: Job ID %d tamamlandı! ZIP ve Birleştirilmiş PDF oluşturuldu: %s", job.id, job.zip_filename)
+            else:
+                error_lines = selected.filtered(lambda l: l.download_status == 'error')
+                _logger.warning("Cron: Job ID %d — hiç başarılı indirme yok (%d hata). ZIP oluşturulamadı.", job.id, len(error_lines))
+                job.write({'state': 'error'})
+            
+            target_partner = job.create_uid.partner_id
+            if target_partner:
+                # Bildirim metnini hazırla (düz metin — simple_notification HTML desteklemez)
+                brand_text = ', '.join(job.brand_ids.mapped('name')) or 'Tümü'
+                group_text = ', '.join(job.product_group_ids.mapped('name')) or 'Tümü'
+                
+                try:
+                    self.env['bus.bus']._sendone(
+                        target_partner,
+                        'simple_notification',
+                        {
+                            'title': '🎉 Fatura ZIP / PDF Arşivi Hazır!',
+                            'message': f"ZIP: {job.zip_filename}\nMarka: {brand_text} / Ürün Grubu: {group_text}\nİndirilen: {job.processed_count} adet",
+                            'type': 'success',
+                            'sticky': True,
+                            'action': {
+                                'type': 'ir.actions.act_window',
+                                'name': job.zip_filename or 'Fatura Arşivi',
+                                'res_model': 'ugurlar.invoice.collector',
+                                'res_id': job.id,
+                                'views': [[False, 'form']],
+                                'target': 'current',
+                            }
+                        }
+                    )
+                    _logger.info("Cron: Bus bildirimi ve yönlendirme linki kullanıcıya iletildi (%s)", job.create_uid.name)
+                except Exception as ne:
+                    _logger.warning("Bus bildirim gönderim hatası: %s", str(ne))
+
+                try:
+                    from markupsafe import Markup
+                    target_partner.message_post(
+                        body=Markup(
+                            "<b>🎉 Fatura Arşivi Hazır!</b><br/>"
+                            "<b>ZIP Dosyası:</b> {zip}<br/>"
+                            "<b>Birleştirilmiş PDF:</b> {pdf}<br/>"
+                            "<b>Marka / Ürün Grubu:</b> {brand} / {group}<br/>"
+                            "<b>İndirilen Fatura Sayısı:</b> {count} adet"
+                        ).format(
+                            zip=job.zip_filename,
+                            pdf=job.merged_pdf_filename or 'Oluşturuldu',
+                            brand=brand_text,
+                            group=group_text,
+                            count=job.processed_count,
+                        ),
+                        subject="Fatura ZIP Arşivi Hazırlandı",
+                        message_type="notification",
+                        subtype_xmlid="mail.mt_comment",
+                    )
+                except Exception as me:
+                    _logger.debug("Partner message_post hatası: %s", str(me))
+        return retrigger
 
     def _finalize_zip(self, selected_lines):
         """Tüm indirilen PDF'leri tek bir ZIP arşivinde ve ayrıca birleştirilmiş tek bir PDF dosyasında toplar."""

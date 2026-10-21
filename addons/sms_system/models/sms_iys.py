@@ -65,13 +65,15 @@ class SmsSystemIys(models.AbstractModel):
 
     @api.model
     @api.private
-    def refresh_contacts(self, contacts, deadline=None, guard=True):
+    def refresh_contacts(self, contacts, deadline=None, guard=True, commit_every=0):
         """Kişilerin İYS SMS iznini sorgula ve yaz. Süre dolunca durur.
 
         Dönen: {'done', 'approved', 'rejected', 'not_found', 'errors', 'stopped': None|'time'|'guard'|'error',
         'retryable'} — stopped='error' ise 'error' (metin) ve 'retryable' (geçici hata mı) dolar; çağıran kalıcı
         hatada (yanlış şifre vb.) beklemez, geçici hatada sonra tekrar dener.
         guard: "kişi yok" cevapları çoğunluktaysa durdur (SmartADM yüksek hata oranında hesabı 24 saat bloklar).
+        commit_every: >0 ise her N yanıtta ilerleme commit'lenir (yalnız cron geçirir; etkileşimli çağrı kendi
+        işleminde kalır). NEDEN: 1500 kişi x 0.15 sn aralık tek işlemde 4 dk açık kalıyordu.
         """
         stats = {'done': 0, 'approved': 0, 'rejected': 0, 'not_found': 0, 'errors': 0, 'invalid': 0,
                  'stopped': None}
@@ -117,6 +119,8 @@ class SmsSystemIys(models.AbstractModel):
                 _logger.warning('İYS toplu sorgu durduruldu: %s/%s numara İYS kaydında yok ya da geçersiz (hesap blok '
                                 'riskine karşı)', failed, answered)
                 break
+            if commit_every and (stats['done'] + stats['invalid']) % commit_every == 0:
+                self.env['ir.cron']._commit_progress()
             time.sleep(REQUEST_GAP)
         failure = last_error or last_invalid
         if failure and not stats['stopped'] and not stats['done']:
@@ -130,7 +134,7 @@ class SmsSystemIys(models.AbstractModel):
 
     @api.model
     @api.private
-    def sync_report(self, deadline=None):
+    def sync_report(self, deadline=None, commit=False):
         """Son senkrondan bugüne izin hareketlerini çek (7 günlük pencereler, tüm sayfalar).
 
         Numaralar maskeli dönerse eşleştirilemez; o durumda 'masked' sayılır ve rehber sorgu ile güncellenir.
@@ -159,6 +163,9 @@ class SmsSystemIys(models.AbstractModel):
                         contact.write({'iys_status': row['status'], 'iys_checked_at': now,
                                        'iys_source': row['source'] or contact.iys_source})
                         stats['updated'] += 1
+                if commit:
+                    # NEDEN: sayfa başına commit; uzun senkron tek işlemde kilit/VACUUM tutmasın (yalnız cron)
+                    self.env['ir.cron']._commit_progress()
                 page += 1
                 if page >= max_page or (deadline and time.monotonic() > deadline):
                     break
@@ -185,12 +192,12 @@ class SmsSystemIys(models.AbstractModel):
         try:
             last = icp.get_param('sms_system.iys_last_report')
             if not last or fields.Datetime.now() - fields.Datetime.to_datetime(last) > timedelta(hours=20):
-                stats = self.sync_report(deadline=deadline)
+                stats = self.sync_report(deadline=deadline, commit=True)
                 _logger.info('İYS rapor senkronu: %s', stats)
             pending = self.env['sms.system.contact'].sudo().search(
                 [('iys_checked_at', '=', False), ('opt_out', '=', False)], limit=1500, order='id')
             if pending:
-                stats = self.refresh_contacts(pending, deadline=deadline)
+                stats = self.refresh_contacts(pending, deadline=deadline, commit_every=50)
                 _logger.info('İYS ilk sorgu: %s', stats)
         except SmartAdmError as e:
             _logger.warning('İYS cron hatası: %s', e)

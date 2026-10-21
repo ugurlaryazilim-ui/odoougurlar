@@ -14,7 +14,7 @@ from datetime import timedelta
 from PIL import Image, ImageDraw, Image as PILImage
 
 from odoo import models, fields, api, _
-from odoo.exceptions import UserError
+from odoo.exceptions import AccessError, UserError, ValidationError
 
 from ..services.garment_analyzer import (
     clear_usage_recorder, design_hint, set_usage_context, set_usage_recorder,
@@ -779,6 +779,9 @@ class AiStudioSession(models.Model):
     _inherit = ['mail.thread', 'mail.activity.mixin']
     _order = 'create_date desc'
     _rec_name = 'name'
+    # NEDEN: chatter varsayılanı 'write' erişimi ister; onay kilidi kuralı operatörün 'saving'/'done' oturuma
+    # yazmasını kapatınca kendi oturumuna not yazması da kapanırdı. Not ürüne yazılan içeriği etkilemez.
+    _mail_post_access = 'read'
 
     name = fields.Char(
         string='Oturum No',
@@ -1042,6 +1045,7 @@ class AiStudioSession(models.Model):
     reviewer_id = fields.Many2one(
         'res.users',
         string='Onayıcı',
+        copy=False,  # NEDEN: kopyayı kopyalayan (operatör) onaycı atamış olamaz; yazımı yalnız yetkili (A4 Y1)
     )
 
     # --- İstatistikler ---
@@ -1110,7 +1114,11 @@ class AiStudioSession(models.Model):
                 vals['name'] = self.env['ir.sequence'].next_by_code(
                     'ai.studio.session'
                 ) or '/'
-        return super().create(vals_list)
+        records = super().create(vals_list)
+        # NEDEN: denetim OLUŞAN kayıtta yapılır; vals'a bakmak context['default_state'] /
+        # default_reviewer_id ile atlatılıyordu (varsayılanlar super().create içinde uygulanır). A4 Y1.
+        records._check_approval_gate_created()
+        return records
 
     @api.depends('product_id')
     def _compute_siblings(self):
@@ -2274,6 +2282,11 @@ class AiStudioSession(models.Model):
             ]),
         ] + self._lease_free_domain()
 
+    def _queue_saving_domain(self):
+        # NEDEN: complete_session görselleri ürüne HTTP isteğinde değil kuyrukta yazar (resize + çok
+        # varyantlı product.image oluşturma onlarca sn sürebiliyordu)
+        return [('state', '=', 'saving')] + self._lease_free_domain()
+
     def _queue_revision_domain(self):
         # Oturum işleme durumundaysa bekleyen üretimleri oturum işi alır; inceleme /
         # başarısız oturumdaki tek üretim (revizyon, Tekrar Dene) ayrı iştir
@@ -2285,7 +2298,8 @@ class AiStudioSession(models.Model):
     @api.model
     def _queue_has_work(self):
         return bool(
-            self.search_count(self._queue_session_domain(), limit=1)
+            self.search_count(self._queue_saving_domain(), limit=1)
+            or self.search_count(self._queue_session_domain(), limit=1)
             or self.env['ai.studio.generation'].search_count(self._queue_revision_domain(), limit=1)
             or self.env['ai.studio.model.preset'].search_count(
                 [('mannequin_generation_state', '=', 'queued')], limit=1)
@@ -2313,7 +2327,7 @@ class AiStudioSession(models.Model):
         """Sıradaki tek işi seç ve kirasını al (commit ETMEZ; cron sarmalayıcısı commit eder).
 
         Returns: None | ('session', session_id, False) | ('revision', session_id, gen_id)
-                 | ('mannequin', preset_id, False)
+                 | ('save', session_id, False) | ('mannequin', preset_id, False)
         """
         global _queue_limit_warned
         limit = int(self.env['ir.config_parameter'].sudo().get_param(
@@ -2326,6 +2340,10 @@ class AiStudioSession(models.Model):
                             'eşzamanlılık %d ile sınırlı.', limit, len(AI_QUEUE_CRONS), len(AI_QUEUE_CRONS))
         if slot > limit:
             return None
+        # Ürüne kaydetme API anahtarı/bütçe gerektirmez ve onaycıyı bekletir: AI işlerinden önce
+        for session in self.search(self._queue_saving_domain(), order='write_date asc, id asc', limit=20):
+            if self._queue_lock_and_lease(session.id, owner):
+                return ('save', session.id, False)
         if not self._get_active_api_key():
             if self._queue_has_work():
                 _logger.warning('AI kuyruğu: bekleyen iş var ama API anahtarı bulunamadı!')
@@ -2388,6 +2406,16 @@ class AiStudioSession(models.Model):
         if kind == 'mannequin':
             self.env['ai.studio.model.preset']._run_mannequin_job(res_id)
             return
+        if kind == 'save':
+            try:
+                self._run_save_job(res_id)
+                # NEDEN: commit burada (testte cr.commit yasak olduğundan _run_save_job içinde değil)
+                self.env.cr.commit()
+            except Exception:
+                _logger.exception('AI kuyruğu: ürüne kaydetme beklenmeyen hata (session=%s)', res_id)
+            finally:
+                _release_session_lease(self.pool, res_id, owner)
+            return
         api_key = self._get_active_api_key()
         # DIKKAT: okuma cron cursor'ında yeni transaction açar; iş (dakikalar) boyunca
         # idle-in-transaction snapshot kalmasın
@@ -2404,6 +2432,71 @@ class AiStudioSession(models.Model):
         finally:
             clear_usage_recorder()
             _release_session_lease(self.pool, res_id, owner)
+
+    @api.model
+    def _run_save_job(self, session_id):
+        """'saving' oturumun onaylı görsellerini ürüne yaz; başarıda 'done', hatada 'review' (mesajla).
+
+        DIKKAT: hata durumunda oturum 'saving'de bırakılırsa kuyruk aynı işi sonsuza dek alır; 'review'a
+        dönmek onaycının yeniden denemesine izin verir. Kaydetme idempotenttir (eski AI görselleri silinip
+        yeniden yazılır), kira dolup başka slot alsa da çift kayıt oluşmaz.
+        """
+        session = self.browse(session_id)
+        if session.state != 'saving':
+            return
+        # NEDEN: kuyruk sistem yetkisiyle yazar; 'saving' yalnız complete_session'ın onay denetiminden geçtiyse
+        # güvenilir (write kilidine ek olarak, DB'ye doğrudan/sudo ile yazılmış durumlara karşı).
+        # DIKKAT: reviewer_id onay izi olarak yalnız yetkililerin yazabildiği sürece güvenilirdir
+        # (_check_saving_transition / _check_approval_gate_created); bu denetimler gevşerse kuyruk onaysız yazar.
+        reviewer = session.reviewer_id.sudo()
+        if not (reviewer and reviewer.has_group('ugurlar_ai_studio.group_ai_studio_reviewer')):
+            reason = _('Ürüne kaydetme reddedildi: oturum onaycı tarafından tamamlanmamış. '
+                       'Onaycı "Tamamla" ile yeniden başlatmalı.')
+        elif session.generation_ids.filtered(lambda g: g.state in ('pending', 'processing')):
+            reason = _('Ürüne kaydetme ertelendi: oturumda hâlâ işlenen üretim var. '
+                       'Üretimler bitince onaycı "Tamamla" ile yeniden başlatmalı.')
+        else:
+            reason = None
+        if reason:
+            _logger.warning('Ürüne kaydetme reddedildi: oturum %s (reviewer=%s); incelemeye döndü.',
+                            session_id, reviewer.id)
+            session.write({'state': 'review'})
+            session._notify_save_problem(reason)
+            return
+        try:
+            with self.env.cr.savepoint():
+                approved = session.generation_ids.filtered(
+                    lambda g: g.is_approved and g.state == 'done' and not g.is_excluded)
+                if not approved:
+                    raise UserError(_('Onaylı görsel bulunamadı.'))
+                session._save_to_product(approved)
+                # Seçilmeyen alternatif adaylar artık gereksiz — depolamayı boşalt
+                session.generation_ids.candidate_ids.unlink()
+                session.write({'state': 'done', 'date_done': fields.Datetime.now()})
+                session.message_post(body=_('%d onaylı görsel ürüne başarıyla kaydedildi.') % len(approved))
+            _logger.info('Ürüne kaydetme: %s (%s) tamamlandı, %d görsel.', session.name, session.id, len(approved))
+        except Exception as err:
+            _logger.exception('Ürüne kaydetme hatası (session=%s)', session_id)
+            session.write({'state': 'review'})
+            # NEDEN (D1): beklenmeyen hatanın ham metni (SQL, dosya yolu) chatter'a yazılmaz; ayrıntı log'da.
+            detail = (str(err)[:300] if isinstance(err, (UserError, ValidationError))
+                      else _('beklenmeyen hata, kayıtlara bakın'))
+            session._notify_save_problem(_('Ürüne kaydetme başarısız, tekrar "Tamamla" deneyin: %s') % detail)
+
+    def _notify_save_problem(self, text):
+        """Chatter notu + onaycıya (reviewer_id) bildirim; bildirim hatası akışı bozmaz.
+
+        NEDEN: popup 'arka planda kaydediliyor' diyip sonraki oturuma geçtiği için hata toast'ı görünmez;
+        onaycı haberdar olmazsa oturum sessizce 'review'da kalır (A4 Ö-2).
+        """
+        self.ensure_one()
+        partner = self.reviewer_id.sudo().partner_id
+        try:
+            with self.env.cr.savepoint():
+                self.message_post(body=text, partner_ids=partner.ids, subtype_xmlid='mail.mt_comment')
+        except Exception:
+            _logger.warning('Kaydetme bildirimi gönderilemedi (session=%s)', self.id, exc_info=True)
+            self.message_post(body=text)
 
     @api.model
     def _queue_mark_job_failed(self, kind, session_id, gen_id, err, uid):
@@ -3971,7 +4064,49 @@ class AiStudioSession(models.Model):
         if self._queue_has_work():
             self._trigger_ai_queue()
 
+    @api.model
+    def _is_approval_authority(self):
+        """Sunucu kodu (su), yönetici veya onaycı mı? ('saving' kapısını ve kilitleri bu geçer.)"""
+        return bool(self.env.su or self.env.is_admin()
+                    or self.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer'))
+
+    def _check_saving_transition(self, vals):
+        """'saving' kuyrukta cron yetkisiyle ürüne yazdırır; yalnız onaycı/yönetici (complete_session) veya
+        sunucu kodu (su) bu duruma geçirebilir ve onaycıyı (reviewer_id) yazabilir.
+
+        NEDEN: context bayrağı kullanılmadı; RPC istemcisi context'i kendi verebilir, grup denetimi verilemez.
+        DIKKAT: operatörün perm_write'ı var; bu denetim kalkarsa onay adımı RPC ile atlanır. _run_save_job
+        reviewer_id'ye güvenir: bu alan yalnız yetkili yazabildiği sürece onay izi sayılır.
+        """
+        if self._is_approval_authority():
+            return
+        if vals.get('state') == 'saving':
+            raise AccessError(_('Oturumu ürüne kaydetmeye yalnız onaycı veya yönetici alabilir.'))
+        if 'reviewer_id' in vals:
+            raise AccessError(_('Onayıcı alanını yalnız onaycı veya yönetici değiştirebilir.'))
+
+    def _check_approval_gate_created(self):
+        """create sonrası denetim: default_* bağlamıyla gelen 'saving' / reviewer_id da yakalanır."""
+        if self._is_approval_authority():
+            return
+        if self.filtered(lambda r: r.state == 'saving' or r.reviewer_id):
+            raise AccessError(_('Oturumu ürüne kaydetmeye ve onayıcı atamaya yalnız onaycı veya yönetici yetkilidir.'))
+
+    # Onaydan sonra ('saving'/'done') içerik değişmesin (A4 O1/Y2/O2): kilit kayıt kuralında
+    # (security/ai_studio_security.xml, *_operator_edit) — create/o2m/context default/ek yollarının hepsinde
+    # geçerli olduğu için model override'ı DEĞİL. Kuralın göremediği tek yol aşağıda.
+    @api.model
+    def _check_target_session_unlocked(self, vals, label):
+        """Açık oturumdaki satırı session_id ile 'saving'/'done' oturuma TAŞIMA engeli.
+
+        NEDEN: kayıt kuralı yazım ÖNCESİ kaydı denetler (o an açık oturumda) → taşımayı yakalamaz.
+        """
+        target = self.browse(vals.get('session_id') or [])
+        if target.state in ('saving', 'done') and not self._is_approval_authority():
+            raise AccessError(_('Onaylanan oturuma (%s) yalnız onaycı veya yönetici ekleme yapabilir.') % label)
+
     def write(self, vals):
+        self._check_saving_transition(vals)
         res = super(AiStudioSession, self).write(vals)
         if 'state' in vals:
             for record in self:

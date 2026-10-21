@@ -131,7 +131,7 @@
         <field name="model_id" ref="model_ai_studio_imageless_line"/>
         <field name="state">code</field>
         <field name="code">
-env['ai.studio.imageless.line'].action_refresh()
+env['ai.studio.imageless.line'].action_refresh_cached()
 action = env.ref('ugurlar_ai_studio.action_ai_studio_imageless').sudo().read()[0]
         </field>
     </record>

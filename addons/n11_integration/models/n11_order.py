@@ -109,7 +109,7 @@ class N11OrderLine(models.Model):
     _name = 'n11.order.line'
     _description = 'N11 Sipariş Satırı'
 
-    order_id = fields.Many2one('n11.order', string='N11 Siparişi', ondelete='cascade')
+    order_id = fields.Many2one('n11.order', string='N11 Siparişi', ondelete='cascade', index=True)
     item_id = fields.Char(string='Item ID', index=True)
     package_id = fields.Char(string='Paket ID')
 

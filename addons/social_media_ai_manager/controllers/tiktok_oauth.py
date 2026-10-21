@@ -75,7 +75,8 @@ class TikTokOAuth(http.Controller):
             resp = requests.post(
                 token_url,
                 data=urllib.parse.urlencode(data),
-                headers={'Content-Type': 'application/x-www-form-urlencoded'}
+                headers={'Content-Type': 'application/x-www-form-urlencoded'},
+                timeout=30
             ).json()
 
             if 'error' in resp:
@@ -106,7 +107,8 @@ class TikTokOAuth(http.Controller):
             user_resp = requests.get(
                 'https://open.tiktokapis.com/v2/user/info/',
                 params={'fields': 'open_id,display_name,avatar_url'},
-                headers=headers
+                headers=headers,
+                timeout=30
             ).json()
 
             user_data = user_resp.get('data', {}).get('user', {})

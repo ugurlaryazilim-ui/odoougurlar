@@ -1,5 +1,11 @@
 from odoo import fields, models, tools
 
+# NEDEN: görünüm her açılışta (sıralama + sayım için) tüm settlement tablosunu GROUP BY ile topluyordu;
+# tablo büyüdükçe ekran yavaşlıyordu. Yalnız son _VIEW_DAYS günde finans hareketi olan siparişler
+# (tüm hareketleri dahil) listelenir; daha eskisi için "Trendyol Sipariş" / "Finansal Kayıtlar" kullanılır.
+# DIKKAT: değer SQL'e gömülür (görünüm modül yükseltmesinde yeniden kurulur); yalnız tamsayı sabit olmalı.
+_VIEW_DAYS = 180
+
 
 class TrendyolTransactionCheck(models.Model):
     """İşlem Kontrol: finansal işlemlerin sipariş bazında tek satırda özeti (SQL görünümü, salt okunur).
@@ -98,6 +104,9 @@ class TrendyolTransactionCheck(models.Model):
                 LEFT JOIN trendyol_order o ON o.id = s.order_id
                 WHERE COALESCE(s.order_number, '') <> ''
                   AND COALESCE(s.transaction_type, '') <> 'payment'
+                  AND (s.store_id, s.order_number) IN (
+                      SELECT r.store_id, r.order_number FROM trendyol_settlement r
+                      WHERE r.transaction_date >= (CURRENT_DATE - {_VIEW_DAYS}))
                 GROUP BY s.store_id, s.order_number
             )
         """)

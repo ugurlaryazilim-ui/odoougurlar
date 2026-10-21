@@ -14,7 +14,7 @@ from markupsafe import Markup, escape
 from odoo import fields, http
 from odoo.http import request
 from odoo.service.model import PG_CONCURRENCY_EXCEPTIONS_TO_RETRY
-from odoo.addons.odoougurlar.services.nebim_connector import WRITE_CHAIN_TIMEOUT
+from odoo.addons.odoougurlar.services.nebim_connector import NebimTimeoutError, WRITE_CHAIN_TIMEOUT
 
 from .base_api import BarcodeApiBase
 
@@ -153,6 +153,18 @@ class PackingApiController(BarcodeApiBase):
         if move.wave_skipped:
             return min(move.wave_collected_qty or 0, move.product_uom_qty)
         return move.product_uom_qty
+
+    @staticmethod
+    def _packing_item_progress(move):
+        """Liste satırının okutma alanları. Detay listesi ve okutma yanıtındaki `item_update`
+        aynı hesabı kullanır: istemci yamalı satırı tam yenilemeyle aynı değerde görür."""
+        target = PackingApiController._packing_target(move)
+        return {
+            'target_qty': target,
+            'done_qty': PackingApiController._packing_done_qty(move),
+            'matched': move.packing_scanned_qty >= target,
+            'scanned_qty': move.packing_scanned_qty,
+        }
 
     @staticmethod
     def _packing_progress(picking, all_pickings):
@@ -295,10 +307,7 @@ class PackingApiController(BarcodeApiBase):
                                         'product_name': product.display_name,
                                         'barcode': self._get_physical_barcode(product),
                                         'demand_qty': rm.product_uom_qty,
-                                        'target_qty': self._packing_target(rm),
-                                        'done_qty': self._packing_done_qty(rm),
-                                        'matched': rm.packing_scanned_qty >= self._packing_target(rm),
-                                        'scanned_qty': rm.packing_scanned_qty,
+                                        **self._packing_item_progress(rm),
                                         'origin': rp.origin or '',
                                         'customer_name': customer_name,
                                         'cargo_tracking': cargo_tracking,
@@ -323,10 +332,7 @@ class PackingApiController(BarcodeApiBase):
                             'product_name': product.display_name,
                             'barcode': self._get_physical_barcode(product),
                             'demand_qty': move.product_uom_qty,
-                            'target_qty': self._packing_target(move),
-                            'done_qty': self._packing_done_qty(move),
-                            'matched': move.packing_scanned_qty >= self._packing_target(move),
-                            'scanned_qty': move.packing_scanned_qty,
+                            **self._packing_item_progress(move),
                             'origin': picking.origin or '',
                             'customer_name': customer_name,
                             'cargo_tracking': cargo_tracking,
@@ -348,10 +354,7 @@ class PackingApiController(BarcodeApiBase):
                     'product_name': product.display_name,
                     'barcode': self._get_physical_barcode(product),
                     'demand_qty': move.product_uom_qty,
-                    'target_qty': self._packing_target(move),
-                    'done_qty': self._packing_done_qty(move),
-                    'matched': move.packing_scanned_qty >= self._packing_target(move),
-                    'scanned_qty': move.packing_scanned_qty,
+                    **self._packing_item_progress(move),
                     'origin': picking.origin or '',
                     'customer_name': customer_name,
                     'cargo_tracking': cargo_tracking,
@@ -544,6 +547,7 @@ class PackingApiController(BarcodeApiBase):
                             'complete': True,
                             'all_matched': all_matched,
                             'replacement_match': True,
+                            'refresh_needed': True,
                         }
 
             # Hâlâ bulunamadı ama iptal edilmiş move var →
@@ -624,6 +628,7 @@ class PackingApiController(BarcodeApiBase):
                         if m.state != 'cancel'
                     ),
                     'soft_match': True,
+                    'refresh_needed': True,
                 }
 
         if not target_move:
@@ -790,6 +795,13 @@ class PackingApiController(BarcodeApiBase):
             'remaining_items': remaining_items,
             'complete': new_qty >= self._packing_target(target_move),
             'all_matched': all_matched,
+            # Okutulan satırın yeni durumu: istemci listeyi yeniden çekmeden yamar (okutma
+            # başına ikinci ağır istek kalktı). Yapı değişince (doğrulama/backorder, rota
+            # kapanışı, rotaya eklenen picking) istemci tam yeniler
+            'item_update': {'move_id': target_move.id, **self._packing_item_progress(target_move)},
+            'refresh_needed': bool(
+                picking_completed or validate_error or pending_route_add
+                or batch.state == 'done'),
         }
         if validate_error:
             # Okutma sayıldı ama sevkiyat doğrulanamadı: istemci hatayı gösterir, etiket basmaz
@@ -982,20 +994,24 @@ class PackingApiController(BarcodeApiBase):
         synced_origins = set()
         deferred = []
         # NEDEN: bütçe istemci RPC süresinin (~90 sn) altında tutulur ki yanıt (ertelenen listesi)
-        # istemciye ulaşsın. Bütçe SİPARİŞLER ARASINDA kontrol edilir; başlamış bir sipariş zinciri
-        # (çağrı başına 60 sn) bütçeyi aşabilir. Süre dolunca kalanlar atlanır: picking'ler zaten
-        # done, nebim_* bayrakları yazılmadığı için tekrar "Tamamla" ya da cron aynı yerden devam eder.
+        # istemciye ulaşsın. Bütçe siparişler arasında kontrol edilir ve başlamış zincir de aynı
+        # `deadline`'ı connector'a taşır (BORC B8): toplam ~75 sn + küçük pay. Süre dolunca kalanlar
+        # atlanır: picking'ler zaten done, nebim_* bayrakları yazılmadığı için tekrar "Tamamla" ya da
+        # cron aynı yerden devam eder.
         deadline = time.monotonic() + NEBIM_COMPLETE_BUDGET
         for picking in shipped:
             key = picking.origin or picking.id
             if key in synced_origins:
                 continue
             synced_origins.add(key)
-            if time.monotonic() > deadline:
+            # NEDEN: yazma kalan süre WRITE_CHAIN_TIMEOUT'tan azken başlamaz (connector._timeouts); bu
+            # siparişin zinciri boşuna okuyup "bütçe doldu" hatası yazardı. Baştan ertelenir.
+            if deadline - time.monotonic() < WRITE_CHAIN_TIMEOUT:
                 deferred.append(picking.name)
                 continue
             try:
-                self._trigger_nebim_sync(picking)
+                # Paylaşılan bütçe: zincir de aynı bitiş zamanına bağlı (Tamamla toplamı ~75 sn + pay)
+                self._trigger_nebim_sync(picking, deadline=deadline)
             except PG_CONCURRENCY_EXCEPTIONS_TO_RETRY:
                 raise
             except Exception as e:
@@ -1543,9 +1559,13 @@ class PackingApiController(BarcodeApiBase):
                     pass
 
 
-    def _trigger_nebim_sync(self, picking):
+    def _trigger_nebim_sync(self, picking, deadline=None):
         """
         Nebim senkronizasyonunu başlatır (Müşteri -> Sipariş -> Fatura).
+
+        deadline: zincirin bitiş zamanı (time.monotonic); None = şimdi + NEBIM_COMPLETE_BUDGET.
+        Nebim ucu zaman aşımına düşerse (asılı) kalan aşamalar atlanır; sipariş sonraki Tamamla / cron'da
+        bayraklardan devam eder.
         
         Her aşama kendi savepoint'inde çalışır — Nebim hatası DB cursor'ı bozmaz.
         Hata olsa bile picking validation'ı ve UI çalışmaya devam eder.
@@ -1555,11 +1575,17 @@ class PackingApiController(BarcodeApiBase):
         # NEDEN: zincir (cari / sipariş / fatura) bir HTTP isteği içinde koşar; Nebim asılırsa
         # çağrı başına 300 sn x 2 deneme worker'ı dakikalarca tutuyordu. Context processor'lardan
         # connector'a kadar yayılır (bağlantı dahil yeniden deneme yok); cron yolunda bu context yok,
-        # 300 sn / 2 deneme kalır. 60 sn ÇAĞRI başınadır: Nebim tamamen asılıysa tek sipariş en kötü
-        # birkaç dakika sürebilir (bu yüzden Tamamla'da süre bütçesi var). Yeniden denemenin kapanması
-        # oturum süresi dolduğunda o çağrının hata vermesi demektir; mükerrer belge riski yoktur,
-        # sonraki Tamamla / cron nebim_* bayraklarından devam eder.
-        picking = picking.with_context(nebim_timeout=WRITE_CHAIN_TIMEOUT, nebim_retries=0)
+        # 300 sn / 2 deneme kalır. 60 sn ÇAĞRI başınadır; zincirin TOPLAMI `nebim_deadline` ile sınırlıdır
+        # (BORC B8): connector OKUMA çağrısının timeout'unu kalan süreye kısaltır, süre bitince ağa çıkmaz;
+        # asılı uçta ilk zaman aşımında kalan aşamalar da atlanır (aşağıda; önceden 6-7 x 60 sn worker).
+        # DIKKAT: YAZMA (cari / sipariş / fatura Post, numara SP'si) kısaltılmaz: kalan süre 60 sn'den azsa hiç
+        # gönderilmez. Kısaltılmış yazmada Nebim belgeyi açıp yanıtı yetiştiremezse nebim_* bayrağı yazılmaz ve
+        # tekrar denemede belge çiftlenir (K-1, mükerrer fatura). Başlamış yazma tam süreyle biter: zincir en
+        # kötü deadline + Connect süresi kadar uzar. Okuma zaman aşımı / atlanan yazma tekrar denemede güvenlidir.
+        if deadline is None:
+            deadline = time.monotonic() + NEBIM_COMPLETE_BUDGET
+        picking = picking.with_context(
+            nebim_timeout=WRITE_CHAIN_TIMEOUT, nebim_retries=0, nebim_deadline=deadline)
         sale_order = picking.sale_id
         if not sale_order and picking.origin:
             sale_order = picking.env['sale.order'].sudo().search([('name', '=', picking.origin)], limit=1)
@@ -1591,7 +1617,8 @@ class PackingApiController(BarcodeApiBase):
         )
         
         nebim_errors = []
-        
+        timed_out = False   # ilk zaman aşımından sonra kalan Nebim aşamaları atlanır
+
         # ═══ DB'den taze okuma — ORM cache güncel olmayabilir ═══
         # (cron veya başka HTTP request henüz commit etmemiş olabilir)
         picking.env.cr.execute(
@@ -1617,19 +1644,23 @@ class PackingApiController(BarcodeApiBase):
                     })
                     _logger.info("Nebim Cari başarılı: %s → %s", sale_order.name, cust_code)
             except Exception as e:
+                timed_out = isinstance(e, NebimTimeoutError)
                 nebim_errors.append(f"[Cari] {str(e)}")
                 _logger.error("Nebim Cari hatası (%s): %s", sale_order.name, e)
         elif not customer_enabled:
             _logger.info("Nebim Cari toggle kapalı: %s", sale_order.name)
             
         # ═══ Aşama B: Sipariş Aktarımı (savepoint korumalı) ═══
-        if order_enabled and not _db_order_sent:
+        if timed_out:
+            _logger.warning("Nebim zaman aşımı: %s için sipariş / fatura aşamaları atlandı", sale_order.name)
+        elif order_enabled and not _db_order_sent:
             try:
                 with picking.env.cr.savepoint():
                     order_proc = picking.env['odoougurlar.order.processor'].sudo()
                     order_proc.sync_order(sale_order, mapping)
                     _logger.info("Nebim Sipariş başarılı: %s", sale_order.name)
             except Exception as e:
+                timed_out = isinstance(e, NebimTimeoutError)
                 nebim_errors.append(f"[Sipariş] {str(e)}")
                 _logger.error("Nebim Sipariş hatası (%s): %s", sale_order.name, e)
         elif not order_enabled:
@@ -1638,6 +1669,8 @@ class PackingApiController(BarcodeApiBase):
         # ═══ Aşama C: Fatura Oluşturma ve Aktarımı ═══
         # Aynı sipariş için iki istek (iki operatör, okutma + etiket) aynı anda fatura kesmesin:
         # sipariş satırı kilitlenir, kilitliyse bu istek faturalamayı diğerine bırakır
+        if timed_out:
+            invoice_enabled = False
         if invoice_enabled:
             try:
                 with picking.env.cr.savepoint():
@@ -1710,7 +1743,9 @@ class PackingApiController(BarcodeApiBase):
                             update_payload = dict(result)  # Tam response'u kopyala
                             update_payload['IsPostingJournal'] = True
                             update_payload['IsCompleted'] = True
-                            update_result = connector.post_data('Post', update_payload)
+                            # NEDEN write=False: HeaderID'li güncelleme yeni belge açmaz; bütçe sonunda
+                            # atlanırsa yevmiye hiç işlenmezdi (bu adımı tekrar deneyen yol yok), kısaltılması güvenli
+                            update_result = connector.post_data('Post', update_payload, write=False)
                             _logger.info("Nebim IsPostingJournal güncellendi: HeaderID=%s", result.get('HeaderID'))
                             
                             # Güncelleme sonucu varsa result'ı güncelle
@@ -1747,7 +1782,7 @@ class PackingApiController(BarcodeApiBase):
             except Exception as e:
                 nebim_errors.append(f"[Fatura] {str(e)}")
                 _logger.error("Nebim Fatura hatası (%s): %s", sale_order.name, e)
-        else:
+        elif not timed_out:
             _logger.info("Nebim Fatura toggle kapalı: %s", sale_order.name)
         
         # ═══ Hata özeti yaz (savepoint dışında, güvenli) ═══

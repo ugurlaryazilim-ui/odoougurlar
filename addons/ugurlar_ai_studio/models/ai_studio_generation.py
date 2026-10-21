@@ -153,7 +153,7 @@ class AiStudioGeneration(models.Model):
         ('processing', 'İşleniyor'),
         ('done', 'Tamamlandı'),
         ('failed', 'Başarısız'),
-    ], string='Durum', default='pending')
+    ], string='Durum', default='pending', index=True)
     error_message = fields.Text(string='Hata Mesajı')
     retry_count = fields.Integer(string='Tekrar Deneme Sayısı', default=0)
 
@@ -452,11 +452,18 @@ class AiStudioGeneration(models.Model):
         self.revision_prompt_en = self._translate_prompt(self.revision_prompt)
 
 
-    @api.model_create_multi
-    def create(self, vals_list):
-        # Batch create'de çeviri yapmıyoruz — performans için
-        # Onchange zaten UI'dan gelen kayıtlarda çeviriyi yapıyor
-        return super().create(vals_list)
+    # Onay sonrası ('saving'/'done') değişirse onaylanandan farklı görsel/ürün yazılır (A4 O1).
+    # Kilit kayıt kuralında (rule_generation_operator_edit); burada yalnız kuralın göremediği taşıma
+    # ve yerel klasöre aktarım işareti.
+    def write(self, vals):
+        if set(vals) == {'is_exported_to_local'} and not self.env.su:
+            # NEDEN: senkron ajanı 'done' üretimleri klasöre aktarınca işaretler; kilit kuralı engellerdi.
+            # Ürüne yazılan içeriği etkilemez; okuyabildiği ve modelde yazma hakkı olduğu kayıtla sınırlı.
+            self.check_access('read')
+            self.browse().check_access('write')
+            return super(AiStudioGeneration, self.sudo()).write(vals)
+        self.env['ai.studio.session']._check_target_session_unlocked(vals, _('üretim'))
+        return super().write(vals)
 
     def action_reject(self):
         """Red dialog'u aç — revize için."""

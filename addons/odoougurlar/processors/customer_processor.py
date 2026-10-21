@@ -2,6 +2,8 @@ import json as _json
 import logging
 from odoo import models, api
 
+from odoo.addons.odoougurlar.services.nebim_connector import chain_timeout
+
 _logger = logging.getLogger(__name__)
 
 
@@ -100,6 +102,10 @@ class CustomerProcessor(models.AbstractModel):
                         elif not sp_res:
                             nebim_still_exists = False
             except Exception as e:
+                # NEDEN: zincirde (nebim_deadline) asılı uçta sıradaki sorgular da tam timeout bekler ve
+                # doğrulanamayan cariye yeni POST gider; zincir bu cariyi sonra yeniden dener. Cron: eski davranış.
+                if chain_timeout(self.env, e):
+                    raise
                 _logger.warning("Nebim cari doğrulama hatası (committed code %s): %s", committed_code, e)
                 # SP çalışmadıysa mevcut kodu kabul et (bağlantı hatası olabilir)
                 nebim_still_exists = True
@@ -155,6 +161,8 @@ class CustomerProcessor(models.AbstractModel):
                                 _mask_contact(email), partner.name, found_code, found_addr
                             )
             except Exception as e:
+                if chain_timeout(self.env, e):
+                    raise
                 _logger.warning("Nebim SP (sp_GetCustomer_Hamurlabs) sorgu hatası: %s", e)
 
             # sp_GetCustomer_Hamurlabs bulamadıysa, usp_GetCustomer_ent ile de dene
@@ -177,6 +185,8 @@ class CustomerProcessor(models.AbstractModel):
                                     _mask_contact(email), partner.name, found_code2
                                 )
                 except Exception as e:
+                    if chain_timeout(self.env, e):
+                        raise
                     _logger.warning("Nebim SP (usp_GetCustomer_ent) sorgu hatası: %s", e)
 
         cust_phone = (partner.phone or getattr(partner, 'mobile', '') or '').strip()
@@ -226,6 +236,8 @@ class CustomerProcessor(models.AbstractModel):
                                 _mask_contact(cust_phone), partner.name, found_code, found_addr
                             )
             except Exception as e:
+                if chain_timeout(self.env, e):
+                    raise
                 _logger.warning("Nebim SP telefon sorgu hatası: %s", e)
 
         # ─── Odoo DB: Aynı email veya telefon ile daha önce Nebim cari kodu almış partner var mı? ───
@@ -676,7 +688,10 @@ class CustomerProcessor(models.AbstractModel):
                                 if address_id:
                                     _logger.info("Adres ID Nebim SP ile çekildi: %s → %s", customer_code, address_id)
                 except Exception as e:
-                    _logger.warning("Cari sonrası Adres ID SP hatası: %s", e)
+                    # DIKKAT: zaman aşımı dahil YUTULUR. Cari Nebim'de açıldı; yeniden fırlatmak çağıranın
+                    # savepoint'ini geri alır, cari kodu kaybolur ve tekrar denemede mükerrer cari açılır
+                    # (Ö-1, DERSLER #14). Adres boş kalır; zincirin sonraki çağrısı bütçeye zaten takılır.
+                    _logger.warning("Cari sonrası Adres ID SP hatası (cari kodu %s korunuyor): %s", customer_code, e)
 
             # ORM üzerinde res.partner'ı güncelle
             try:
@@ -692,6 +707,9 @@ class CustomerProcessor(models.AbstractModel):
         except NebimCustomerError:
             raise  # Zaten request_json taşıyor
         except Exception as e:
+            if chain_timeout(self.env, e):
+                e.request_json = request_json  # sale_order_ext getattr ile okur
+                raise
             _logger.error("Cari Nebim'e gönderilemedi. Hata: %s", e)
             raise NebimCustomerError(f"Cari oluşturma başarısız: {str(e)}", request_json=request_json)
 
@@ -817,6 +835,9 @@ class CustomerProcessor(models.AbstractModel):
                 return empty
 
         except Exception as e:
+            # NEDEN: boş kodla devam etmek eksik il/ilçeli cari / fatura gönderirdi (yalnız zincirde)
+            if chain_timeout(self.env, e):
+                raise
             _logger.error("Nebim SP çağrısı başarısız: %s", e)
             return empty
 

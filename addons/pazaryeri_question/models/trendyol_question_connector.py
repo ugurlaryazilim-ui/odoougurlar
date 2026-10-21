@@ -1,5 +1,5 @@
 import logging
-from datetime import datetime, timedelta
+from datetime import datetime, timedelta, timezone
 from odoo import api, models, fields, _
 from odoo.exceptions import UserError
 
@@ -59,10 +59,12 @@ class TrendyolQuestionConnector(models.AbstractModel):
             
             _logger.info("Sayfa %d: %d soru işleniyor...", page, len(content))
             
+            # NEDEN: soru başına 2-3 search yerine sayfa başına 2 toplu sorgu (mevcut sorular + cevap geçmişi).
+            cache = self._prefetch_existing([str(q.get('id', '')) for q in content])
             for question_data in content:
                 try:
                     with self.env.cr.savepoint():
-                        res = self._process_question(question_data, store)
+                        res = self._process_question(question_data, store, cache=cache)
                         if res == 'created':
                             total_created += 1
                         elif res == 'updated':
@@ -97,20 +99,67 @@ class TrendyolQuestionConnector(models.AbstractModel):
         
         return {'created': total_created, 'updated': total_updated}
 
-    def _process_question(self, data, store):
-        """Tek bir soruyu işle — oluştur veya güncelle."""
+    @staticmethod
+    def _ts(millis):
+        """Trendyol ms zaman damgası → Odoo'nun UTC naive, saniye hassasiyetli datetime'ı.
+
+        NEDEN: fromtimestamp() sunucu saat dilimine bağlıydı ve mikrosaniye taşıyordu; Odoo alanı
+        mikrosaniyeyi atınca her karşılaştırma 'değişti' çıkıyordu (sahte güncelleme)."""
+        return datetime.fromtimestamp(millis / 1000, tz=timezone.utc).replace(tzinfo=None, microsecond=0)
+
+    @api.model
+    def _prefetch_existing(self, ext_ids):
+        """Verilen pazaryeri soru ID'leri için mevcut kayıtları ve cevap geçmişini toplu getir."""
+        Question = self.env['marketplace.question'].sudo()
+        ext_ids = [i for i in ext_ids if i]
+        questions = Question.search([
+            ('marketplace_type', '=', 'trendyol'),
+            ('external_question_id', 'in', ext_ids),
+        ]) if ext_ids else Question
+        by_ext = {}
+        for q in questions:
+            by_ext.setdefault(q.external_question_id, q)  # eski davranış: limit=1
+        sent, rejected = {}, {}
+        if questions:
+            for a in self.env['marketplace.question.answer'].sudo().search_read(
+                    [('question_id', 'in', questions.ids)],
+                    ['question_id', 'answer_type', 'external_answer_id', 'answer_text']):
+                qid = a['question_id'][0]
+                if a['answer_type'] == 'rejected':
+                    rejected.setdefault(qid, set()).add(a['answer_text'])
+                elif a['external_answer_id']:
+                    sent.setdefault(qid, set()).add(a['external_answer_id'])
+        return {'questions': by_ext, 'sent': sent, 'rejected': rejected}
+
+    @staticmethod
+    def _differs(rec, vals):
+        """vals içinde kayıttan gerçekten farklı olan alan var mı (tip bilinçli karşılaştırma)."""
+        for key, new_val in vals.items():
+            field = rec._fields[key]
+            old_val = rec[key]
+            if field.type == 'many2one':
+                old_val = old_val.id
+            elif field.type == 'boolean':
+                old_val, new_val = bool(old_val), bool(new_val)
+            elif field.type in ('char', 'text'):
+                old_val, new_val = old_val or '', new_val or ''
+            if old_val != new_val:
+                return True
+        return False
+
+    def _process_question(self, data, store, cache=None):
+        """Tek bir soruyu işle — oluştur veya güncelle. Dönüş: created / updated / unchanged / skipped."""
         Question = self.env['marketplace.question'].sudo()
         question_id = str(data.get('id', ''))
-        
+
         if not question_id:
             _logger.warning("Soru ID boş, atlanıyor: %s", data)
             return 'skipped'
-        
-        existing = Question.search([
-            ('marketplace_type', '=', 'trendyol'),
-            ('external_question_id', '=', question_id),
-        ], limit=1)
-        
+
+        if cache is None:
+            cache = self._prefetch_existing([question_id])
+        existing = cache['questions'].get(question_id) or Question
+
         # Status mapping
         status_map = {
             'WAITING_FOR_ANSWER': 'waiting',
@@ -153,7 +202,7 @@ class TrendyolQuestionConnector(models.AbstractModel):
         # Question date from timestamp
         creation_date = data.get('creationDate')
         if creation_date:
-            vals['question_date'] = datetime.fromtimestamp(creation_date / 1000)
+            vals['question_date'] = self._ts(creation_date)
         
         # Answer data
         answer = data.get('answer')
@@ -161,7 +210,7 @@ class TrendyolQuestionConnector(models.AbstractModel):
             vals['answer_text'] = answer.get('text', '')
             vals['external_answer_id'] = str(answer.get('id', ''))
             if answer.get('creationDate'):
-                vals['answer_date'] = datetime.fromtimestamp(answer['creationDate'] / 1000)
+                vals['answer_date'] = self._ts(answer['creationDate'])
         
         # Rejected answer data
         rejected = data.get('rejectedAnswer')
@@ -169,7 +218,7 @@ class TrendyolQuestionConnector(models.AbstractModel):
             vals['rejected_answer_text'] = rejected.get('text', '')
             vals['rejection_reason'] = rejected.get('reason', '')
             if rejected.get('creationDate'):
-                vals['rejected_answer_date'] = datetime.fromtimestamp(rejected['creationDate'] / 1000)
+                vals['rejected_answer_date'] = self._ts(rejected['creationDate'])
         
         # Root-level reason (soru red sebebi)
         if data.get('reason') and not vals.get('rejection_reason'):
@@ -179,9 +228,9 @@ class TrendyolQuestionConnector(models.AbstractModel):
         if data.get('reportReason'):
             vals['report_reason'] = data.get('reportReason', '')
         if data.get('reportedDate'):
-            vals['reported_date'] = datetime.fromtimestamp(data['reportedDate'] / 1000)
+            vals['reported_date'] = self._ts(data['reportedDate'])
         if data.get('rejectedDate'):
-            vals['rejected_answer_date'] = datetime.fromtimestamp(data['rejectedDate'] / 1000)
+            vals['rejected_answer_date'] = self._ts(data['rejectedDate'])
         
         if existing:
             old_status = existing.status
@@ -192,19 +241,13 @@ class TrendyolQuestionConnector(models.AbstractModel):
                 vals.pop('answer_text', None)
             
             # Gereksiz update'leri atla — sadece gerçekten değişen alanlar varsa güncelle
-            changed = False
-            for key, new_val in vals.items():
-                old_val = getattr(existing, key, None)
-                if key == 'store_id':
-                    old_val = existing.store_id.id if existing.store_id else False
-                if str(old_val) != str(new_val):
-                    changed = True
-                    break
-            
+            changed = self._differs(existing, vals)
             if changed:
                 existing.write(vals)
                 # Hemen flush et — ORM'in dirty record biriktirmesini önle
                 self.env.flush_all()
+            # NEDEN: 'Güncellenen' sayacı yalnız gerçek değişikliği saysın (alan farkı, yeni cevap/red kaydı).
+            modified = changed
             
             # Cevap geçmişi — yeni veya mevcut cevaplanmış sorular için
             AnswerModel = self.env['marketplace.question.answer'].sudo()
@@ -212,17 +255,14 @@ class TrendyolQuestionConnector(models.AbstractModel):
             if answer_data and answer_data.get('text'):
                 ext_answer_id = str(answer_data.get('id', ''))
                 # Aynı external_answer_id ile kayıt var mı kontrol et
-                existing_answer = False
-                if ext_answer_id:
-                    existing_answer = AnswerModel.search([
-                        ('question_id', '=', existing.id),
-                        ('external_answer_id', '=', ext_answer_id),
-                    ], limit=1)
-                
+                existing_answer = ext_answer_id and ext_answer_id in cache['sent'].get(existing.id, ())
+
                 if not existing_answer:
+                    modified = True
+                    cache['sent'].setdefault(existing.id, set()).add(ext_answer_id)
                     answer_date = None
                     if answer_data.get('creationDate'):
-                        answer_date = datetime.fromtimestamp(answer_data['creationDate'] / 1000)
+                        answer_date = self._ts(answer_data['creationDate'])
                     AnswerModel.create({
                         'question_id': existing.id,
                         'answer_text': answer_data['text'],
@@ -241,15 +281,13 @@ class TrendyolQuestionConnector(models.AbstractModel):
             rejected_data = data.get('rejectedAnswer')
             if rejected_data and rejected_data.get('text'):
                 # Reddedilen cevap kayıt var mı?
-                has_rejected = AnswerModel.search([
-                    ('question_id', '=', existing.id),
-                    ('answer_type', '=', 'rejected'),
-                    ('answer_text', '=', rejected_data['text']),
-                ], limit=1)
+                has_rejected = rejected_data['text'] in cache['rejected'].get(existing.id, ())
                 if not has_rejected:
+                    modified = True
+                    cache['rejected'].setdefault(existing.id, set()).add(rejected_data['text'])
                     rejected_date = None
                     if rejected_data.get('creationDate'):
-                        rejected_date = datetime.fromtimestamp(rejected_data['creationDate'] / 1000)
+                        rejected_date = self._ts(rejected_data['creationDate'])
                     AnswerModel.create({
                         'question_id': existing.id,
                         'answer_text': rejected_data['text'],
@@ -266,12 +304,13 @@ class TrendyolQuestionConnector(models.AbstractModel):
                          f"Sebep: {vals.get('rejection_reason', 'Belirtilmemiş')}",
                 )
             
-            return 'updated'
+            return 'updated' if modified else 'unchanged'
         else:
             _logger.info("Yeni soru oluşturuluyor: ID=%s, status=%s, ürün=%s", 
                         question_id, mapped_status, data.get('productName', ''))
             new_question = Question.create(vals)
             self.env.flush_all()
+            cache['questions'][question_id] = new_question  # aynı sayfada tekrar gelen ID çift kayıt açmasın
             
             # Yeni soru zaten cevaplanmışsa → cevap geçmişine kaydet
             AnswerModel = self.env['marketplace.question.answer'].sudo()
@@ -280,7 +319,7 @@ class TrendyolQuestionConnector(models.AbstractModel):
                 ext_answer_id = str(answer.get('id', ''))
                 answer_date = None
                 if answer.get('creationDate'):
-                    answer_date = datetime.fromtimestamp(answer['creationDate'] / 1000)
+                    answer_date = self._ts(answer['creationDate'])
                 AnswerModel.create({
                     'question_id': new_question.id,
                     'answer_text': answer['text'],
@@ -294,7 +333,7 @@ class TrendyolQuestionConnector(models.AbstractModel):
             if rejected and rejected.get('text'):
                 rejected_date = None
                 if rejected.get('creationDate'):
-                    rejected_date = datetime.fromtimestamp(rejected['creationDate'] / 1000)
+                    rejected_date = self._ts(rejected['creationDate'])
                 AnswerModel.create({
                     'question_id': new_question.id,
                     'answer_text': rejected['text'],

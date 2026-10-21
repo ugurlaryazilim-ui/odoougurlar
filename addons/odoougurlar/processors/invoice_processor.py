@@ -204,6 +204,11 @@ class InvoiceProcessor(models.AbstractModel):
             export_file_number = sale_order.nebim_export_file_number
             _logger.info("Fatura ExportFileNumber siparişten alındı: %s", export_file_number)
         else:
+            # EKIP-BORC: yedek yol. Numara SP'si (yazma, tam timeout ister) ile hemen ardından gelen Post
+            # (o da tam timeout ister) arasında bütçe eşiği geçilirse Post hiç başlamaz ve alınan numara
+            # boşa gider (yetim cdExportFile; mükerrer belge değil). Olasılık düşük. Yükseltme: numarayı
+            # SP'den önce `2 × WRITE_CHAIN_TIMEOUT` kalıp kalmadığına bakarak almak ya da siparişe ayrı
+            # commit'le yazıp tekrar denemede yeniden kullanmak. Sipariş yolundaki not: order_processor.py.
             try:
                 connector = self.env['odoougurlar.nebim.connector']
                 next_num_res = connector.run_proc('sp_GetNextExportFileNumber_Hamurlabs')

@@ -20,7 +20,23 @@ def _mask(text):
     return _SESSION_RE.sub('(S(***))', str(text))
 
 
-# Veri değiştiren SP'ler: yanıt alınamasa da Nebim'de çalışmış olabilir, yeniden gönderilmez
+class NebimTimeoutError(Exception):
+    """Nebim ucu yanıt vermedi (okuma / bağlantı zaman aşımı) ya da zincir süre bütçesi doldu.
+
+    DIKKAT: `except Exception` ile yutulan işlem sıradaki çağrıya geçer ve asılı uçta her çağrı
+    tam timeout kadar bekler. İş hatalarını yutan işlemciler bu istisnayı yeniden fırlatmalıdır
+    (`except NebimTimeoutError: raise`); zinciri başlatan kod ilk zaman aşımında kalan aşamaları atlar.
+    """
+
+
+def chain_timeout(env, exc):
+    """True: `exc` zaman aşımı VE çağıran süre bütçeli bir zincirde (context `nebim_deadline`) -> yutmayıp
+    yeniden fırlat. NEDEN: cron yolu (deadline yok) eski yutma davranışını korur."""
+    return isinstance(exc, NebimTimeoutError) and env.context.get('nebim_deadline') is not None
+
+
+# Veri değiştiren (YAZMA) SP'ler: yanıt alınamasa da Nebim'de çalışmış olabilir; yeniden gönderilmez ve
+# zincir süre bütçesiyle kısaltılmaz. Yeni yazma SP'si eklenirse buraya yazılmalı (ad tahmini yapılmaz).
 _NON_IDEMPOTENT_SPS = ('sp_GetNextExportFileNumber', 'sp_DeleteOrder')
 
 
@@ -70,9 +86,15 @@ MAX_RETRIES = 2            # 2 deneme yeterli (toplam maks ~25s)
 # 300 sn x 2 deneme bir worker'ı ~10 dk tutuyordu. Varsayılan (cron / toplu içe aktarma) 300 sn, 2 deneme kalır;
 # etkileşimli çağıran `timeout=` / `retries=` verir ya da `with_context(nebim_timeout=..., nebim_retries=0)` ile
 # zincire yayar. Not: timeout yalnız ÇAĞRI BAŞINA okuma süresidir; zincirde birden çok çağrı olduğundan
-# toplam süre bunların toplamıdır (tek sipariş: cari + sipariş + fatura + Post, her biri en çok 60 sn).
+# toplam süre `nebim_deadline` context'i ile ayrıca sınırlanır (aşağıda).
 INTERACTIVE_TIMEOUT = 15   # Mağaza / depo ekranı okuma uçları (yeniden deneme yok)
 WRITE_CHAIN_TIMEOUT = 60   # Paketleme cari / sipariş / fatura zinciri: çağrı başına (HTTP isteği içinde)
+# NEDEN: çağrı başına timeout zincirin toplamını sınırlamaz (cari 5 + sipariş 1 + fatura 1-2 çağrı =
+# asılı Nebim'de ~7 x 60 sn worker). Zinciri başlatan kod `nebim_deadline` (time.monotonic mutlak zamanı)
+# context'ini verir; OKUMA çağrısının timeout'u kalan süreyle kısalır, süre bitince ağa çıkılmaz. YAZMA
+# (Post, _NON_IDEMPOTENT_SPS) kısaltılmaz: ya tam timeout ile başlar ya hiç başlamaz (bkz. _timeouts).
+# Context yoksa (cron / toplu içe aktarma) davranış değişmez.
+MIN_CALL_BUDGET = 0.2      # kalan süre bundan azsa ağ çağrısı başlatılmaz
 
 # Session token cache: (token, expiry_timestamp)
 _session_cache = {'token': None, 'expires': 0}
@@ -179,8 +201,9 @@ class NebimConnector(models.AbstractModel):
         _logger.info("Nebim bağlantısı kuruluyor: %s", url)
 
         for attempt in range(1, max_attempts + 1):
+            connect_timeout = self._timeouts(CONNECT_TIMEOUT, 'Connect')[1]
             try:
-                resp = _http_session.post(url, json=payload, timeout=CONNECT_TIMEOUT)
+                resp = _http_session.post(url, json=payload, timeout=connect_timeout)
                 resp.raise_for_status()
                 data = resp.json()
 
@@ -210,7 +233,7 @@ class NebimConnector(models.AbstractModel):
                 if attempt < max_attempts:
                     time.sleep(2 ** attempt)  # Exponential backoff: 2s, 4s
                 else:
-                    raise Exception(f'Nebim bağlantı hatası ({max_attempts} deneme sonrası): {_mask(e)}')
+                    raise self._failure(e, f'Nebim bağlantı hatası ({max_attempts} deneme sonrası): {_mask(e)}')
 
     @api.private
     def _build_session_url(self, token, endpoint):
@@ -236,6 +259,34 @@ class NebimConnector(models.AbstractModel):
         return MAX_RETRIES if retries is None else retries + 1
 
     @api.private
+    def _timeouts(self, read_timeout, what, write=False):
+        """(bağlantı, okuma) zaman aşımı; context `nebim_deadline` varsa OKUMA kalan süreyle kısaltılır.
+        Süre yetmiyorsa ağ çağrısı yapmadan NebimTimeoutError.
+
+        write=True (belge / kayıt oluşturan çağrı): kısaltılmaz; kalan süre `read_timeout`'tan azsa hiç başlamaz.
+        DIKKAT: kısaltılmış süreyle başlayan yazmada Nebim belgeyi kaydedip yanıtı yetiştiremezse
+        nebim_sent / cari kodu yazılmaz ve tekrar denemede belge ikinci kez açılır (mükerrer fatura / cari, K-1).
+        NEDEN (bedel): yazma bütçenin son `read_timeout` saniyesinde başlamaz (sipariş sonraki Tamamla / cron'a
+        kalır); başlayan yazma tam süreyle biter, zincir toplamı en kötü deadline + CONNECT_TIMEOUT olur.
+
+        DIKKAT: requests zaman aşımı TOPLAM değil, soket okuma başınadır; bayt bayt yanıtlayan bir uç
+        bütçeyi aşabilir. Asılı (hiç yanıt vermeyen) uç için sınır tutar."""
+        deadline = self.env.context.get('nebim_deadline')
+        if deadline is None:
+            return CONNECT_TIMEOUT, read_timeout
+        left = deadline - time.monotonic()
+        if left < (read_timeout if write else MIN_CALL_BUDGET):
+            raise NebimTimeoutError(f'Nebim zincir süre bütçesi doldu, çağrı yapılmadı ({what})')
+        if write:
+            return CONNECT_TIMEOUT, read_timeout
+        return min(CONNECT_TIMEOUT, left), min(read_timeout, left)
+
+    @staticmethod
+    def _failure(exc, message):
+        """Ağ hatasının istisnası: zaman aşımı ayrı türde (zincir atlama kararı için)."""
+        return (NebimTimeoutError if isinstance(exc, requests.exceptions.Timeout) else Exception)(message)
+
+    @api.private
     def _call_policy(self, timeout, retries):
         """(okuma zaman aşımı, azami deneme) — açık parametre > context (`nebim_timeout` / `nebim_retries`) > varsayılan."""
         timeout = timeout or self.env.context.get('nebim_timeout') or DATA_TIMEOUT
@@ -253,6 +304,10 @@ class NebimConnector(models.AbstractModel):
         varsayılan 1; 0 = yeniden deneme yok).
         """
         timeout, max_attempts = self._call_policy(timeout, retries)
+        # Yazma / okuma ayrımı açık listeden (_NON_IDEMPOTENT_SPS): yeniden deneme ve süre bütçesi aynı kaynaktan
+        idempotent = not str(proc_name).startswith(_NON_IDEMPOTENT_SPS)
+        if not idempotent:
+            self._timeouts(timeout, proc_name, write=True)   # bütçe yetmiyorsa Connect'e de çıkma
         token = self._connect(retries=retries)
         url = self._build_session_url(token, 'RunProc')
 
@@ -263,12 +318,12 @@ class NebimConnector(models.AbstractModel):
         headers = {}
 
         _logger.info("Nebim SP çalıştırılıyor: %s → %s", proc_name, _mask(url))
-        idempotent = not str(proc_name).startswith(_NON_IDEMPOTENT_SPS)
 
         for attempt in range(1, max_attempts + 1):
+            call_timeouts = self._timeouts(timeout, proc_name, write=not idempotent)
             try:
                 resp = _http_session.post(
-                    url, json=payload, headers=headers, timeout=(CONNECT_TIMEOUT, timeout)
+                    url, json=payload, headers=headers, timeout=call_timeouts
                 )
                 resp.raise_for_status()
                 result = resp.json()
@@ -291,9 +346,9 @@ class NebimConnector(models.AbstractModel):
                     url = self._build_session_url(token, 'RunProc')
                     time.sleep(2 ** attempt)
                 else:
-                    raise Exception(f'Nebim SP çalıştırma hatası ({proc_name}): {_http_error_detail(e)}')
+                    raise self._failure(e, f'Nebim SP çalıştırma hatası ({proc_name}): {_http_error_detail(e)}')
 
-    def post_data(self, endpoint, payload, timeout=None, retries=None):
+    def post_data(self, endpoint, payload, timeout=None, retries=None, write=True):
         """
         Nebim'e veri gönderir (fatura, müşteri vb.).
 
@@ -301,8 +356,12 @@ class NebimConnector(models.AbstractModel):
 
         timeout / retries: bkz. run_proc. Yazmada yeniden deneme zaten yalnız istek Nebim'e
         ulaşmadıysa / oturum reddedildiyse yapılır (okuma zaman aşımında asla).
+        write: True = yeni belge / kayıt açar; süre bütçesiyle kısaltılmaz (bkz. _timeouts). False yalnız
+        mevcut belgeyi güncelleyen (HeaderID'li) çağrı içindir: kesilse de belge çiftlenmez.
         """
         timeout, max_attempts = self._call_policy(timeout, retries)
+        if write:
+            self._timeouts(timeout, endpoint, write=True)   # bütçe yetmiyorsa Connect'e de çıkma
         token = self._connect(retries=retries)
         url = self._build_session_url(token, endpoint)
 
@@ -311,9 +370,10 @@ class NebimConnector(models.AbstractModel):
         _logger.info("Nebim'e veri gönderiliyor: %s → %s", endpoint, _mask(url))
 
         for attempt in range(1, max_attempts + 1):
+            call_timeouts = self._timeouts(timeout, endpoint, write=write)
             try:
                 resp = _http_session.post(
-                    url, json=payload, headers=headers, timeout=(CONNECT_TIMEOUT, timeout)
+                    url, json=payload, headers=headers, timeout=call_timeouts
                 )
                 resp.raise_for_status()
                 result = resp.json()
@@ -332,7 +392,7 @@ class NebimConnector(models.AbstractModel):
                     url = self._build_session_url(token, endpoint)
                     time.sleep(2 ** attempt)
                 else:
-                    raise Exception(f'Nebim veri gönderim hatası ({endpoint}): {_http_error_detail(e)}')
+                    raise self._failure(e, f'Nebim veri gönderim hatası ({endpoint}): {_http_error_detail(e)}')
 
     def delete_data(self, payload):
         """

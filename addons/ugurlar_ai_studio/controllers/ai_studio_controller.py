@@ -675,7 +675,7 @@ class AiStudioController(http.Controller):
     def complete_session(self, session_id, approved_items=None):
         """Oturumu tamamla ve gorselleri urune kaydet. Sadece onaycı ve yönetici.
         
-        Doğrudan senkron kaydetme yapar (cron'a bırakmaz).
+        Doğrulama + işaretleme burada; ürüne yazma kuyrukta (`_run_save_job`).
         """
         try:
             if not request.env.user.has_group('ugurlar_ai_studio.group_ai_studio_reviewer'):
@@ -721,24 +721,13 @@ class AiStudioController(http.Controller):
                 primary = front or approved[0]
                 primary.is_primary = True
 
-            # 4. Doğrudan ürüne kaydet (senkron)
-            session._save_to_product(approved)
-            # Seçilmeyen alternatif adaylar artık gereksiz — depolamayı boşalt
-            session.generation_ids.candidate_ids.unlink()
-
-            # 5. Oturumu tamamlandı olarak işaretle
-            session.write({
-                'reviewer_id': request.env.user.id,
-                'state': 'done',
-                'date_done': fields.Datetime.now(),
-            })
-            session.message_post(
-                body=_('%d onaylı görsel ürüne başarıyla kaydedildi.') % len(approved),
-            )
-
-            _logger.info("complete_session: %s (%s) başarıyla tamamlandı, %d görsel kaydedildi.",
+            # 4. Ağır kısmı (görsel yazımı) kuyruğa bırak: 'saving' → cron slotu ürüne kaydeder.
+            # NEDEN: sibling varyant x görsel kadar resize/INSERT HTTP worker'ını dakikalarca tutuyordu.
+            session.write({'reviewer_id': request.env.user.id, 'state': 'saving'})
+            session._trigger_ai_queue()
+            _logger.info("complete_session: %s (%s) ürüne kaydetmeye alındı, %d görsel.",
                          session.name, session.id, len(approved))
-            return {'success': True}
+            return {'success': True, 'saving': True}
 
         except psycopg2.Error:
             # Tüm PostgreSQL hatalarını Odoo'nun retrying mekanizmasına bırak

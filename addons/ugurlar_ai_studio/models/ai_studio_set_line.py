@@ -1,9 +1,9 @@
-from odoo import models, fields, api
+from odoo import models, fields, _
 
 
 class AiStudioSetLine(models.Model):
     """Takım çekimindeki her bir ürün parçası.
-    
+
     Örnek: Pantolon + Ceket takımında 2 set_line olur:
       - Ana Parça (primary): Pantolon
       - Takım Parçası (companion): Ceket
@@ -52,3 +52,9 @@ class AiStudioSetLine(models.Model):
         'set_line_id',
         string='Fotoğraflar',
     )
+
+    # DIKKAT: 'saving'/'done' oturumda set satırı değişirse kuyruk onaylanandan farklı ürüne yazar (A4 O1).
+    # Kilit kayıt kuralında (rule_set_line_operator_edit); burada yalnız kuralın göremediği taşıma.
+    def write(self, vals):
+        self.env['ai.studio.session']._check_target_session_unlocked(vals, _('takım parçası'))
+        return super().write(vals)

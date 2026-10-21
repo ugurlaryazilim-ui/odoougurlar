@@ -212,7 +212,10 @@ class N11OrderSync(models.Model):
         if changed or not rec.sale_order_id:
             rec._reconcile_sale_order(store)
         rec._auto_accept(store)
-        rec.last_checked = fields.Datetime.now()
+        # NEDEN: last_checked yalnız bayatlama ölçütü; değişmeyen kayda her turda yazılmaz.
+        now = fields.Datetime.now()
+        if changed or action == 'created' or not rec.last_checked or rec.last_checked < now - _STALE_CHECK_AFTER:
+            rec.last_checked = now
         if action == 'created':
             return action
         return 'updated' if changed else 'unchanged'

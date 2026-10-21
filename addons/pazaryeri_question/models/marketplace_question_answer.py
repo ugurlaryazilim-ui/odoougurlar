@@ -5,7 +5,7 @@ class MarketplaceQuestionAnswer(models.Model):
     _description = 'Pazaryeri Soru Cevap Geçmişi'
     _order = 'sent_date desc'
 
-    question_id = fields.Many2one('marketplace.question', string='Soru', required=True, ondelete='cascade')
+    question_id = fields.Many2one('marketplace.question', string='Soru', required=True, ondelete='cascade', index=True)
     answer_text = fields.Text('Cevap', required=True)
     answer_type = fields.Selection([
         ('sent', 'Gönderildi'), 
