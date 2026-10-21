@@ -20,6 +20,9 @@ _HIST_MAX_PAGES = 40
 # Tarih filtresi reddedilirse eski yöntem (filtresiz) — üst sınır
 _FALLBACK_MAX_PAGES = 20
 _HB_DATE_FMT = '%Y-%m-%d %H:%M'
+# İptal taraması: engellenen/başarısız iptal warning_message'a bu önekle yazılır ve süre dolana dek atlanır
+_CANCEL_MARK = 'Otomatik iptal edilmedi'
+_CANCEL_RETRY_AFTER = timedelta(hours=24)
 
 # (endpoint, Odoo'ya yazılacak statü, yanıttaki tarih alanı)
 _HISTORY_ENDPOINTS = (
@@ -457,33 +460,63 @@ class HepsiburadaOrderSync(models.AbstractModel):
         _logger.info("HB sipariş %s: %s → %s yerine %s",
                      hb_order.hb_order_number, reason, old.name if old else '-', new.name if new else '-')
 
+    # NEDEN: Idefix/Amazon'daki _cancel_blocker kopyası; diğer pazaryeri modülleri odoougurlar'a bağlı değil,
+    # dördü de aynı kalıbı kullansın diye burada da yerel (deploy-new-dependency riski yok).
+    def _cancel_blocker(self, so):
+        """Otomatik iptali engelleyen durum (sevk edilmiş / faturası kesilmiş) — yoksa False."""
+        if so.picking_ids.filtered(lambda p: p.state == 'done'):
+            return 'sevk edildiği'
+        if so.invoice_ids.filtered(lambda m: m.state == 'posted'):
+            return 'faturası kesildiği'
+        return False
+
     @api.private
     def _cancel_odoo_order(self, hb_order, store=None):
-        """Odoo siparişini iptal et."""
+        """Odoo siparişini iptal eder. Gerçekten iptal edildiyse True döner.
+
+        Sevk edilmiş / faturası kesilmiş siparişe dokunulmaz (iptal Nebim'den de siler); engel ve hata
+        hb_order.warning_message'a _CANCEL_MARK ile yazılır, tarama bunları _CANCEL_RETRY_AFTER boyunca atlar.
+        """
         if store and not store.auto_cancel:
-            return
+            return False
         so = hb_order.sale_order_id
-        if so and so.state != 'cancel':
-            try:
-                with self.env.cr.savepoint():
-                    so._action_cancel()
-                _logger.info("HB — Odoo sipariş iptal edildi: %s (HB: %s)", so.name, hb_order.hb_order_number)
-            except Exception as e:
-                _logger.warning("HB — Sipariş iptal hatası: %s - %s", so.name, e)
+        if not so or so.state == 'cancel':
+            return False
+        blocker = self._cancel_blocker(so)
+        if blocker:
+            msg = (f"{_CANCEL_MARK}: Hepsiburada siparişi {hb_order.hb_order_number} iptal edildi ancak "
+                   f"{so.name} {blocker} için iptal edilmedi; elle kontrol edin.")
+            if hb_order.warning_message != msg:
+                so.message_post(body=msg)
+                _logger.warning("HB — %s", msg)
+            hb_order.write({'warning_message': msg})  # değişmese de yazılır: write_date geri çekilme süresini başlatır
+            return False
+        try:
+            with self.env.cr.savepoint():
+                so._action_cancel()
+        except Exception as e:
+            _logger.warning("HB — Sipariş iptal hatası: %s - %s", so.name, e)
+            hb_order.write({'warning_message': f"{_CANCEL_MARK}: iptal hatası ({so.name}): {e}"[:500]})
+            return False
+        if _CANCEL_MARK in (hb_order.warning_message or ''):
+            hb_order.write({'warning_message': False})
+        _logger.info("HB — Odoo sipariş iptal edildi: %s (HB: %s)", so.name, hb_order.hb_order_number)
+        return True
 
     @api.private
     def _cancel_pending_orders(self, store):
-        """Tamamen iptal HB siparişlerinden Odoo'da hâlâ açık olanları iptal et."""
+        """Tamamen iptal HB siparişlerinden Odoo'da hâlâ açık olanları iptal et.
+        Gerçekten iptal edilenlerin sayısını döner."""
         if not store.auto_cancel:
             return 0
         cancelled_orders = self.env['hepsiburada.order'].search([
             ('status', 'in', list(HB_CANCEL_STATUSES) + ['cancelled']),
             ('sale_order_id', '!=', False),
             ('sale_order_id.state', '!=', 'cancel'),
+            '|', ('warning_message', 'not like', _CANCEL_MARK),
+            ('write_date', '<', fields.Datetime.now() - _CANCEL_RETRY_AFTER),
         ] + self._store_domain(store))
-        for hb_order in cancelled_orders:
-            self._cancel_odoo_order(hb_order, store)
-        return len(cancelled_orders)
+        return sum(1 for hb_order in cancelled_orders if self._cancel_odoo_order(hb_order, store))
 
     # ═════════════════════════════════════════════════════════════
     # SİPARİŞ İŞLEME
