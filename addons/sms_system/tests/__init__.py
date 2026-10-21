@@ -24,3 +24,4 @@ from . import test_json_single_receiver
 from . import test_iys_consent
 from . import test_placeholder_widget
 from . import test_iys_contact
+from . import test_perf_j6

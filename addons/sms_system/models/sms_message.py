@@ -50,6 +50,8 @@ STATUS_WINDOW_HOURS = 48          # bu süreyi aşan 'bekliyor' kayıt 'bilinmey
 STATUS_TRACKED = ('pending', 'unknown')   # unknown: tanınmayan (belgesiz) kod, 48 saat boyunca yeniden sorulur
 STATUS_UNCERTAIN_LOOKBACK = 30    # dk; belirsiz kaydın gönderimi write_date'ten en çok bu kadar önce olabilir
 STATUS_TIME_BUDGET = 120          # sn; durum cron'u çalışma başına en çok bu kadar sorgu yapar
+STATUS_MAX_CANDIDATES = 20000     # durum cron'u çalışma başına en çok bu kadar kaydı belleğe alır (en yeniden başlayarak)
+STATUS_EXPIRE_BATCH = 5000        # 48 saat geçen kayıtlar çalışma başına bu kadarlık parçayla 'bilinmeyen' olur
 STATUS_MIN_TIME_LEFT = 20         # sn; cron süresinin sonuna bu kadar kala dur
 # ConfirmSms (Turatel cevabı 4): onay zorunlu hesapta SendSms sonrası paket onayı; kolon yok, delivery_code işareti
 CONFIRM_PENDING = 'confirm_pending'
@@ -904,14 +906,15 @@ class SmsSystemMessage(models.Model):
         IrCron = self.env['ir.cron']
         started = time.monotonic()
         since = fields.Datetime.now() - timedelta(hours=STATUS_WINDOW_HOURS)
+        # NEDEN: kampanya sonrası on binlerce kayıt tek seferde yüklenip yazılmasın; kalanı sonraki çalışma alır.
         expired = Message.search([('state', '=', 'sent'), ('delivery_state', '=', 'pending'),
-                                  ('sent_at', '<', since)])
+                                  ('sent_at', '<', since)], limit=STATUS_EXPIRE_BATCH)
         if expired:
             expired.write({'delivery_state': 'unknown'})
         # Eski eşlemenin yanlış 'iletildi' (kod 0) dediği, 48 saati geçmiş kayıtlar: yeniden sorgulanamaz, doğrulanmadı
         stale = Message.search([('state', '=', 'sent'), ('provider_service', 'in', JSON_SERVICES),
                                 ('delivery_state', '=', 'delivered'), ('delivery_code', '=', LEGACY_DELIVERED_CODE),
-                                ('sent_at', '<', since)])
+                                ('sent_at', '<', since)], limit=STATUS_EXPIRE_BATCH)
         if stale:
             stale.write({'delivery_state': 'unknown'})
         IrCron._commit_progress()
@@ -926,7 +929,7 @@ class SmsSystemMessage(models.Model):
             ('delivery_state', 'in', STATUS_TRACKED),
             '&', ('delivery_state', '=', 'delivered'), ('delivery_code', '=', LEGACY_DELIVERED_CODE),
             '&', ('state', '=', 'uncertain'), ('write_date', '>=', since),
-        ], order='id')
+        ], order='id desc', limit=STATUS_MAX_CANDIDATES)   # DIKKAT: limitsiz yüklemede bellek/süre sınırsızdı; en yeni önce
         chunks = defaultdict(list)
         for msg in candidates:
             for day in msg._status_days():
