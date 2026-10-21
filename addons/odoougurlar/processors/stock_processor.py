@@ -215,14 +215,17 @@ class StockProcessor(models.AbstractModel):
                 quant_map[(prod_id, loc_id)] = (qid, float(qty or 0))
 
         # ── Alt raf quant'ları: raflanmış ürünleri ana depoya yazma ──
-        # (product_id, parent_loc_id) → (child_quant_id, child_loc_id)
+        # (product_id, parent_loc_id) → [(child_quant_id, child_loc_id, child_qty), ...]
+        # NEDEN: eskiden yalnız ilk/son quant id'si tutuluyor ve miktarı quant_map'te
+        # (yalnız kök lokasyonlar) arıyordu; bulamayınca mevcut=0 sayıp her turda yeniden yazıyordu.
         shelf_product_map = {}
         parent_loc_ids = list(set(_STOCK_CACHE['warehouse_map'].values()))
         parent_loc_ids = [lid for lid in parent_loc_ids if lid]
         if parent_loc_ids:
             self.env.cr.execute("""
                 SELECT sq.product_id, pl.id AS parent_loc_id,
-                       sq.id AS quant_id, sq.location_id AS child_loc_id
+                       sq.id AS quant_id, sq.location_id AS child_loc_id,
+                       sq.quantity
                 FROM stock_quant sq
                 JOIN stock_location cl ON sq.location_id = cl.id
                 JOIN stock_location pl ON cl.parent_path LIKE pl.parent_path || '%%'
@@ -231,9 +234,11 @@ class StockProcessor(models.AbstractModel):
                   AND cl.usage = 'internal'
                   AND sq.quantity > 0
                   AND sq.product_id = ANY(%s)
+                ORDER BY sq.id
             """, (tuple(parent_loc_ids), matched_ids))
-            for prod_id, ploc_id, qid, cloc_id in self.env.cr.fetchall():
-                shelf_product_map[(prod_id, ploc_id)] = (qid, cloc_id)
+            for prod_id, ploc_id, qid, cloc_id, cqty in self.env.cr.fetchall():
+                shelf_product_map.setdefault((prod_id, ploc_id), []).append(
+                    (qid, cloc_id, float(cqty or 0)))
 
         _logger.info("Quant cache yüklendi: %d quant, %d location, %d raflanmış ürün",
                       len(quant_map), len(location_ids), len(shelf_product_map))
@@ -279,19 +284,40 @@ class StockProcessor(models.AbstractModel):
 
                 # Quant kontrol
                 # Raflanmış ürünse, ana depoya değil alt raf quant'ına yönlendir
-                shelf_info = shelf_product_map.get((product_id, location_id))
-                if shelf_info:
-                    child_qid, child_loc_id = shelf_info
-                    # Quant zaten alt rafta; güncellemeyi oraya yap
-                    quant_key = (product_id, child_loc_id)
-                    existing = (child_qid, 0)  # güncelleme için
-                    # Mevcut child quant qty'yi quant_map'ten al
-                    cached = quant_map.get(quant_key)
-                    if cached:
-                        existing = cached
-                else:
-                    quant_key = (product_id, location_id)
-                    existing = quant_map.get(quant_key)
+                shelf_quants = shelf_product_map.get((product_id, location_id))
+                if shelf_quants:
+                    # Karşılaştırma depo toplamıyla yapılır (kök quant + raf quant'ları)
+                    root_cached = quant_map.get((product_id, location_id))
+                    root_qty = root_cached[1] if root_cached else 0.0
+                    total_qty = root_qty + sum(q[2] for q in shelf_quants)
+                    if abs(total_qty - qty) <= 0.001:
+                        stats['skipped'] += 1
+                        continue
+                    if len(shelf_quants) > 1:
+                        # DIKKAT: farkı hangi rafa yazacağımız belirsiz; rafları ezmemek için yazma.
+                        _logger.warning(
+                            "Stok: ürün %d birden çok raf quant'ına sahip (%d adet), Nebim=%s "
+                            "depo toplamı=%s; yazma yapılmadı",
+                            product_id, len(shelf_quants), qty, total_qty,
+                        )
+                        stats['skipped'] += 1
+                        continue
+                    child_qid, _child_loc, child_qty = shelf_quants[0]
+                    # Fark tek rafa yazılır; kök quant'a dokunulmaz (kök 0 ise hedef = Nebim miktarı)
+                    new_child_qty = child_qty + (qty - total_qty)
+                    if new_child_qty < -0.001:
+                        _logger.warning(
+                            "Stok: ürün %d için raf miktarı negatif olurdu (Nebim=%s, kök=%s, raf=%s); "
+                            "yazma yapılmadı", product_id, qty, root_qty, child_qty,
+                        )
+                        stats['skipped'] += 1
+                        continue
+                    batch_updates.append((child_qid, new_child_qty))
+                    stats['updated'] += 1
+                    continue
+
+                quant_key = (product_id, location_id)
+                existing = quant_map.get(quant_key)
 
                 if existing:
                     qid, current_qty = existing
