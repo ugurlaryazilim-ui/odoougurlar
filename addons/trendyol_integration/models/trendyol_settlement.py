@@ -92,7 +92,8 @@ class TrendyolSettlement(models.Model):
     trendyol_id = fields.Char(string='Trendyol ID', index=True, readonly=True)
     store_id = fields.Many2one('trendyol.store', string='Mağaza', index=True, readonly=True)
     order_id = fields.Many2one('trendyol.order', string='Trendyol Sipariş', readonly=True)
-    transaction_date = fields.Datetime(string='İşlem Tarihi', readonly=True)
+    # NEDEN: relink / kargo faturası / İşlem Kontrol görünümü yaş penceresiyle bu alana göre süzer
+    transaction_date = fields.Datetime(string='İşlem Tarihi', readonly=True, index=True)
     transaction_type = fields.Selection(SETTLEMENT_TYPES, string='İşlem Türü', readonly=True)
     transaction_type_raw = fields.Char(string='Ham İşlem Türü', readonly=True)
     description = fields.Char(string='Açıklama', readonly=True)
@@ -284,8 +285,17 @@ class TrendyolSettlement(models.Model):
     # ═══════════════════════════════════════════════════════
 
     @api.private
-    def _find_order(self, store, package_id='', order_number=''):
-        """Sipariş eşleştirme: önce shipmentPackageId, sonra orderNumber."""
+    def _find_order(self, store, package_id='', order_number='', cache=None):
+        """Sipariş eşleştirme: önce shipmentPackageId, sonra orderNumber.
+
+        cache (`_order_cache` sonucu) verilirse sorgu atılmaz; sonuç tek tek aramayla aynıdır.
+        """
+        if cache is not None:
+            if package_id and ('pkg', package_id) in cache:
+                return cache[('pkg', package_id)]
+            if order_number:
+                return cache.get(('num', str(order_number))) or False
+            return False
         TrendyolOrder = self.env['trendyol.order']
         if package_id:
             order = TrendyolOrder.search([
@@ -302,6 +312,27 @@ class TrendyolSettlement(models.Model):
             if order:
                 return order.id
         return False
+
+    @api.private
+    def _order_cache(self, store, keys):
+        """(paket_id, sipariş_no) çiftleri için toplu sipariş araması (2 sorgu; öğe başına 2 yerine).
+
+        Dönüş: {('pkg', paket_id): order_id, ('num', sipariş_no): order_id}. Aynı sipariş
+        numarasına birden çok kayıt varsa `limit=1` aramasındaki gibi ilk kayıt (model sırası) kalır.
+        """
+        pkgs = {p for p, _n in keys if p}
+        nums = {str(n) for _p, n in keys if n}
+        Order = self.env['trendyol.order']
+        cache = {}
+        if pkgs:
+            for o in Order.search_fetch([('shipment_package_id', 'in', list(pkgs)), ('store_id', '=', store.id)],
+                                        ['shipment_package_id']):
+                cache.setdefault(('pkg', o.shipment_package_id), o.id)
+        if nums:
+            for o in Order.search_fetch([('trendyol_order_number', 'in', list(nums)), ('store_id', '=', store.id)],
+                                        ['trendyol_order_number']):
+                cache.setdefault(('num', o.trendyol_order_number), o.id)
+        return cache
 
     # ═══════════════════════════════════════════════════════
     # SENKRONİZASYON
@@ -509,7 +540,7 @@ class TrendyolSettlement(models.Model):
             else:
                 # Son adım: fatura kalemleri, eşleştirme ve tüm siparişlerin özeti
                 self._process_invoice_details(api, store, recent_only=False)
-                self._relink_unlinked_settlements(store)
+                self._relink_unlinked_settlements(store, full=True)
                 self._allocate_commission_invoices(store)
                 self._update_order_financial_summary(store)
             self.env.cr.commit()
@@ -620,8 +651,7 @@ class TrendyolSettlement(models.Model):
                                     payment_order_id, source, result.get('error'))
                     break
                 data = result.get('data') or {}
-                for item in data.get('content') or []:
-                    self._process_settlement_item(item, store, source)
+                self._process_settlement_page(data.get('content') or [], store, source)
                 page += 1
                 if page >= (data.get('totalPages') or 1):
                     break
@@ -637,9 +667,7 @@ class TrendyolSettlement(models.Model):
             return 0
 
         data = result.get('data', {})
-        for item in data.get('content', []):
-            if self._process_settlement_item(item, store, 'settlements'):
-                created += 1
+        created += self._process_settlement_page(data.get('content', []), store, 'settlements')
 
         total_pages = data.get('totalPages', 1)
         for page in range(1, total_pages):
@@ -647,9 +675,8 @@ class TrendyolSettlement(models.Model):
                 start_date, end_date, transaction_types=types,
                 page=page, size=1000)
             if page_result.get('success'):
-                for item in page_result.get('data', {}).get('content', []):
-                    if self._process_settlement_item(item, store, 'settlements'):
-                        created += 1
+                created += self._process_settlement_page(
+                    page_result.get('data', {}).get('content', []), store, 'settlements')
         return created
 
     @api.private
@@ -669,6 +696,7 @@ class TrendyolSettlement(models.Model):
                 _logger.warning("Platform hizmet bedeli API hatası [%s]: %s", store.name, result.get('error'))
                 break
             data = result.get('data') or {}
+            items = []
             for item in data.get('content') or []:
                 total += 1
                 package_id = item.get('shipmentPackageId')
@@ -676,8 +704,8 @@ class TrendyolSettlement(models.Model):
                     linked += 1
                     if package_id and item.get('id'):
                         item = dict(item, id=f"{item['id']}_{package_id}")
-                if self._process_settlement_item(item, store, 'otherfinancials'):
-                    created += 1
+                items.append(item)
+            created += self._process_settlement_page(items, store, 'otherfinancials')
             page += 1
             if page >= (data.get('totalPages') or 1):
                 break
@@ -699,9 +727,7 @@ class TrendyolSettlement(models.Model):
 
         hint = _OTHER_TYPE_HINT.get(tx_type)
         data = result.get('data', {})
-        for item in data.get('content', []):
-            if self._process_settlement_item(item, store, 'otherfinancials', type_hint=hint):
-                created += 1
+        created += self._process_settlement_page(data.get('content', []), store, 'otherfinancials', type_hint=hint)
 
         total_pages = data.get('totalPages', 1)
         for page in range(1, total_pages):
@@ -709,10 +735,11 @@ class TrendyolSettlement(models.Model):
                 start_date, end_date, transaction_type=tx_type,
                 page=page, size=1000)
             if page_result.get('success'):
-                for item in page_result.get('data', {}).get('content', []):
-                    if self._process_settlement_item(item, store, 'otherfinancials', type_hint=hint):
-                        created += 1
+                created += self._process_settlement_page(
+                    page_result.get('data', {}).get('content', []), store, 'otherfinancials', type_hint=hint)
         return created
+
+    _CARGO_RETRY_DAYS = 60
 
     @api.private
     def _process_cargo_invoices(self, api, store, recent_only=True):
@@ -725,27 +752,32 @@ class TrendyolSettlement(models.Model):
         """
         created = 0
 
-        cargo_invoices = self.search([
+        # Kalemleri alınmış eski faturalar her senkronda yeniden çekilmesin; son 7 gün
+        # yine de kontrol edilir (fatura kalemleri geç tamamlanabilir)
+        processed_serials = [r for (r,) in self._read_group(
+            [('store_id', '=', store.id), ('source', '=', 'cargo_invoice')], ['receipt_id']) if r]
+        now = fields.Datetime.now()
+        recent = now - timedelta(days=7)
+        domain = [
             ('store_id', '=', store.id),
             ('transaction_type', '=', 'shipping_cargo'),
             ('source', '=', 'otherfinancials'),
-        ])
-
-        # Kalemleri alınmış eski faturalar her senkronda yeniden çekilmesin; son 7 gün
-        # yine de kontrol edilir (fatura kalemleri geç tamamlanabilir)
-        processed_serials = set(self.search([
-            ('store_id', '=', store.id),
-            ('source', '=', 'cargo_invoice'),
-        ]).mapped('receipt_id'))
-        recent = fields.Datetime.now() - timedelta(days=7)
+            ('trendyol_id', '!=', False),
+        ]
+        if recent_only:
+            # NEDEN: kalemi hiç dönmeyen fatura her saat yeniden sorulurdu (fatura başına API çağrısı);
+            # cron yalnız son _CARGO_RETRY_DAYS günün faturalarına bakar. Geçmişi tamamla (recent_only=False)
+            # işlenmemiş tüm faturaları dener. İşlenmiş faturalar yalnız son 7 gün tekrar kontrol edilir.
+            domain += ['|', ('transaction_date', '=', False),
+                       ('transaction_date', '>=', now - timedelta(days=self._CARGO_RETRY_DAYS)),
+                       '|', ('transaction_date', '=', False), '|', ('transaction_date', '>=', recent),
+                       ('trendyol_id', 'not in', processed_serials)]
+        else:
+            domain.append(('trendyol_id', 'not in', processed_serials))
+        cargo_invoices = self.search(domain)
 
         for invoice in cargo_invoices:
             serial_number = invoice.trendyol_id
-            if not serial_number:
-                continue
-            if serial_number in processed_serials and (
-                    not recent_only or (invoice.transaction_date or recent) < recent):
-                continue
 
             try:
                 result = api.get_cargo_invoice_items(serial_number)
@@ -793,8 +825,8 @@ class TrendyolSettlement(models.Model):
         if recent_only:
             domain.append(('transaction_date', '>=', fields.Datetime.now() - timedelta(days=7)))
         invoices = self.search(domain)
-        done = set(self.search([('store_id', '=', store.id), ('source', '=', 'platform_invoice')])
-                   .mapped('receipt_id'))
+        done = {r for (r,) in self._read_group(
+            [('store_id', '=', store.id), ('source', '=', 'platform_invoice')], ['receipt_id'])}
         created = tried = with_items = 0
         for invoice in invoices:
             serial = (invoice.trendyol_id or '').split('_')[0]
@@ -818,18 +850,23 @@ class TrendyolSettlement(models.Model):
                 items = [i for i in (data.get('content') or []) if i.get('orderNumber')]
                 if items:
                     with_items += 1
+                # Sayfa başına 2 toplu sorgu (kalem başına 2-3 yerine)
+                uids = {f"pf_{serial}_{i.get('parcelUniqueId') or i.get('orderNumber')}" for i in items}
+                known = set(self.search([('trendyol_id', 'in', list(uids)), ('store_id', '=', store.id),
+                                         ('source', '=', 'platform_invoice')]).mapped('trendyol_id'))
+                order_cache = self._order_cache(store, {('', str(i.get('orderNumber'))) for i in items})
                 for item in items:
                     order_number = str(item.get('orderNumber'))
                     unique_id = f"pf_{serial}_{item.get('parcelUniqueId') or order_number}"
-                    if self.search_count([('trendyol_id', '=', unique_id), ('store_id', '=', store.id),
-                                          ('source', '=', 'platform_invoice')]):
+                    if unique_id in known:
                         continue
+                    known.add(unique_id)
                     try:
                         with self.env.cr.savepoint():
                             self.create({
                                 'trendyol_id': unique_id,
                                 'store_id': store.id,
-                                'order_id': self._find_order(store, order_number=order_number),
+                                'order_id': self._find_order(store, order_number=order_number, cache=order_cache),
                                 'transaction_date': invoice.transaction_date,
                                 'transaction_type': 'platform_fee',
                                 'transaction_type_raw': invoice.transaction_type_raw,
@@ -857,6 +894,13 @@ class TrendyolSettlement(models.Model):
     def _process_cargo_items(self, items, serial_number, invoice, store):
         """Tek bir kargo faturasının kalemlerini işle."""
         created = 0
+        # Sayfa başına toplu sorgu: mevcut kalemler + sipariş eşleşmeleri (kalem başına 3 yerine)
+        known = set(self.search([
+            ('trendyol_id', 'in', [f"cargo_{serial_number}_{str(i.get('parcelUniqueId', '') or '')}" for i in items]),
+            ('source', '=', 'cargo_invoice'),
+            ('store_id', '=', store.id),
+        ]).mapped('trendyol_id')) if items else set()
+        order_cache = self._order_cache(store, {('', str(i.get('orderNumber', '') or '')) for i in items})
         for item in items:
             order_number = str(item.get('orderNumber', '') or '')
             amount = item.get('amount', 0) or 0
@@ -870,15 +914,11 @@ class TrendyolSettlement(models.Model):
 
             unique_id = f"cargo_{serial_number}_{parcel_id}"
 
-            existing = self.search([
-                ('trendyol_id', '=', unique_id),
-                ('source', '=', 'cargo_invoice'),
-                ('store_id', '=', store.id),
-            ], limit=1)
-            if existing:
+            if unique_id in known:
                 continue
+            known.add(unique_id)
 
-            order_id = self._find_order(store, order_number=order_number)
+            order_id = self._find_order(store, order_number=order_number, cache=order_cache)
 
             vals = {
                 'trendyol_id': unique_id,
@@ -903,47 +943,96 @@ class TrendyolSettlement(models.Model):
                                 unique_id, e)
         return created
 
+    # NEDEN: eşleşmeyen kayıtlar (siparişi hiç içeri alınmamış) her saat yeniden denenir ve tablo
+    # büyüdükçe cron uzar; yeni gelen/yeni değişen siparişler son günlerdedir, eskiler sınırlı alınır.
+    _RELINK_DAYS = 30
+    _RELINK_LIMIT = 2000
+
     @api.private
-    def _relink_unlinked_settlements(self, store):
-        """Sipariş bağlantısı olmayan settlement'ları orderlara bağla."""
-        unlinked = self.search([
+    def _relink_unlinked_settlements(self, store, full=False):
+        """Sipariş bağlantısı olmayan settlement'ları orderlara bağla.
+
+        Cron'da yalnız son `_RELINK_DAYS` günün kayıtları ve en çok `_RELINK_LIMIT` adet (yeniden
+        eskiye) denenir; full=True ("geçmişi tamamla" son adımı) tüm bağsız kayıtları tarar.
+        """
+        domain = [
             ('store_id', '=', store.id),
             ('order_id', '=', False),
             '|',
             ('order_number', '!=', False),
             ('shipment_package_id', '!=', False),
-        ])
+        ]
+        if full:
+            unlinked = self.search(domain)
+        else:
+            unlinked = self.search(
+                domain + ['|', ('transaction_date', '=', False),
+                          ('transaction_date', '>=', fields.Datetime.now() - timedelta(days=self._RELINK_DAYS))],
+                order='id desc', limit=self._RELINK_LIMIT)
+        if not unlinked:
+            return
 
-        linked_count = 0
+        cache = self._order_cache(store, {(r.shipment_package_id or '', r.order_number or '')
+                                          for r in unlinked})
+        by_order = defaultdict(list)
         for record in unlinked:
             order_id = self._find_order(
                 store,
                 package_id=record.shipment_package_id or '',
                 order_number=record.order_number or '',
+                cache=cache,
             )
             if order_id:
-                record.sudo().write({'order_id': order_id})
-                linked_count += 1
+                by_order[order_id].append(record.id)
+        linked_count = 0
+        for order_id, ids in by_order.items():
+            self.browse(ids).sudo().write({'order_id': order_id})
+            linked_count += len(ids)
 
         if linked_count:
             _logger.info("Finansal kayıt eşleştirme [%s]: %s kayıt bağlandı",
                           store.name, linked_count)
 
     @api.private
-    def _process_settlement_item(self, data, store, source, type_hint=None):
+    def _process_settlement_page(self, items, store, source, type_hint=None):
+        """Bir sayfa kaydı işle. Dönüş: oluşturulan sayısı.
+
+        NEDEN: öğe başına 3 sorgu (mevcut kayıt + sipariş paket/no) yerine sayfa başına 3 toplu
+        sorgu; sonuç öğe öğe işlemeyle aynıdır.
+        """
+        tids = {str(i.get('id', '')) for i in items} - {''}
+        if not tids:
+            return 0
+        existing_map = {r.trendyol_id: r for r in self.search([
+            ('trendyol_id', 'in', list(tids)), ('source', '=', source), ('store_id', '=', store.id)])}
+        order_cache = self._order_cache(store, {(str(i.get('shipmentPackageId', '') or ''),
+                                                 str(i.get('orderNumber', '') or '')) for i in items})
+        created = 0
+        for item in items:
+            if self._process_settlement_item(item, store, source, type_hint=type_hint,
+                                             existing_map=existing_map, order_cache=order_cache):
+                created += 1
+        return created
+
+    @api.private
+    def _process_settlement_item(self, data, store, source, type_hint=None, existing_map=None, order_cache=None):
         """Tek bir finansal kayıt işle. Dönüş: True=oluşturuldu, False=zaten var.
 
         type_hint: istekteki işlem tipinden bilinen sınıf (Türkçe adı belirsiz tipler için).
+        existing_map / order_cache: `_process_settlement_page` toplu önbellekleri (yoksa tek tek aranır).
         """
         tid = str(data.get('id', ''))
         if not tid:
             return False
 
-        existing = self.search([
-            ('trendyol_id', '=', tid),
-            ('source', '=', source),
-            ('store_id', '=', store.id),
-        ], limit=1)
+        if existing_map is not None:
+            existing = existing_map.get(tid) or self.browse()
+        else:
+            existing = self.search([
+                ('trendyol_id', '=', tid),
+                ('source', '=', source),
+                ('store_id', '=', store.id),
+            ], limit=1)
 
         tx_ts = data.get('transactionDate', 0)
         tx_date = datetime.fromtimestamp(tx_ts / 1000, tz=timezone.utc).replace(tzinfo=None) if tx_ts else None
@@ -956,7 +1045,7 @@ class TrendyolSettlement(models.Model):
 
         order_number = str(data.get('orderNumber', '') or '')
         package_id = str(data.get('shipmentPackageId', '') or '')
-        order_id = self._find_order(store, package_id, order_number)
+        order_id = self._find_order(store, package_id, order_number, cache=order_cache)
 
         vals = {
             'trendyol_id': tid,
@@ -992,7 +1081,9 @@ class TrendyolSettlement(models.Model):
         try:
             # Savepoint: çakışma (unique) tüm finans senkronunun işlemini bozmasın
             with self.env.cr.savepoint():
-                self.create(vals)
+                rec = self.create(vals)
+            if existing_map is not None:
+                existing_map[tid] = rec  # aynı sayfada tekrar gelirse güncelleme yolu (tek tek işlemeyle aynı)
             return True
         except Exception as e:
             if 'unique' in str(e).lower() or 'duplicate' in str(e).lower():

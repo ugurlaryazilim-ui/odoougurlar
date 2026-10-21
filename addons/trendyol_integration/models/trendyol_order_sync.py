@@ -31,8 +31,11 @@ class TrendyolOrderSync(models.Model):
     _inherit = 'trendyol.order'
 
     @api.model
-    def sync_orders_from_trendyol(self):
-        """Tüm aktif mağazalardan siparişleri senkronize et."""
+    def sync_orders_from_trendyol(self, commit=False):
+        """Tüm aktif mağazalardan siparişleri senkronize et.
+
+        commit=True (cron): her paket kendi savepoint'inde işlenip hemen kaydedilir.
+        """
         stores = self.env['trendyol.store'].search([('active', '=', True), ('auto_sync', '=', True)])
         if not stores:
             _logger.warning("Senkronize edilecek aktif mağaza bulunamadı!")
@@ -44,11 +47,16 @@ class TrendyolOrderSync(models.Model):
 
         for store in stores:
             try:
-                result = self.sync_orders_for_store(store)
+                result = self.sync_orders_for_store(store, commit=commit)
                 total_created += result.get('created', 0)
                 total_updated += result.get('updated', 0)
                 total_errors += result.get('errors', 0)
+                if commit:
+                    self.env.cr.commit()  # senkron günlüğü sonraki mağazanın hatasıyla geri alınmasın
             except Exception as e:
+                if commit:
+                    self.env.cr.rollback()
+                    self.env.invalidate_all()
                 _logger.exception("Mağaza %s senkronizasyon hatası: %s", store.name, e)
                 total_errors += 1
 
@@ -59,25 +67,48 @@ class TrendyolOrderSync(models.Model):
         }
 
     @api.model
-    def sync_orders_for_store(self, store):
+    def sync_orders_for_store(self, store, commit=False):
         """Tek bir mağazadan siparişleri senkronize et.
 
         Trendyol'un periyodik senkron için önerdiği akış (stream) servisi kullanılır: son
         senkrondan beri değişen TÜM statülerdeki paketler tek akışta gelir. Akış servisi
         yanıt vermezse statü bazlı v2 sorgularına düşülür.
+
+        commit=True (cron): her paket işlendikçe kaydedilir; tek uzun işlem (kilitler, şişen
+        transaction) yerine paket başına kısa işlem. Elle "Şimdi Senkronize Et" tek işlemde kalır.
         """
         store_name = store.name or ''
         store_id = store.id
 
         # Aynı mağaza için tek senkron: cron sürerken "Şimdi Senkronize Et" (veya ikinci cron
         # işçisi) aynı paketleri paralel işleyip duplicate key / serialization hataları üretiyordu.
+        if commit:
+            # NEDEN: xact kilidi ana işlemin commit'iyle düşerdi; paket başına commit yapıldığı için kilit
+            # senkron boyunca açık duran ayrı bir cursor'da tutulur, bloktan çıkınca bırakılır.
+            # DIKKAT: bu cursor'a başka iş yazılmaz; yalnız kilit taşır.
+            with self.pool.cursor() as lock_cr:
+                lock_cr.execute("SELECT pg_try_advisory_xact_lock(%s, %s)", (_SYNC_LOCK_NS, store_id))
+                if not lock_cr.fetchone()[0]:
+                    return self._sync_busy(store_name)
+                return self.with_context(ty_commit_per_package=True)._sync_orders_locked(store)
         # İşlem (transaction) bitince kilit kendiliğinden bırakılır.
         self.env.cr.execute("SELECT pg_try_advisory_xact_lock(%s, %s)", (_SYNC_LOCK_NS, store_id))
         if not self.env.cr.fetchone()[0]:
-            _logger.info("Trendyol senkronizasyon [%s] atlandı: başka bir senkron çalışıyor", store_name)
-            return {'error': f"{store_name} mağazasında senkronizasyon şu anda zaten çalışıyor. "
-                             f"Birkaç dakika sonra tekrar deneyin.",
-                    'busy': True, 'created': 0, 'updated': 0, 'errors': 0}
+            return self._sync_busy(store_name)
+        return self._sync_orders_locked(store)
+
+    @api.model
+    def _sync_busy(self, store_name):
+        _logger.info("Trendyol senkronizasyon [%s] atlandı: başka bir senkron çalışıyor", store_name)
+        return {'error': f"{store_name} mağazasında senkronizasyon şu anda zaten çalışıyor. "
+                         f"Birkaç dakika sonra tekrar deneyin.",
+                'busy': True, 'created': 0, 'updated': 0, 'errors': 0}
+
+    @api.private
+    def _sync_orders_locked(self, store):
+        """Senkron gövdesi (mağaza kilidi alınmış olarak çağrılır)."""
+        store_name = store.name or ''
+        store_id = store.id
 
         try:
             api = store.get_api()
@@ -209,6 +240,10 @@ class TrendyolOrderSync(models.Model):
                 with self.env.cr.savepoint():
                     res = self._sync_one_package(package, store, order_cutoff)
                     self.env.flush_all()
+                if self.env.context.get('ty_commit_per_package'):
+                    # DIKKAT: savepoint bloğunun DIŞINDA (commit savepoint'i düşürür); hata yolu
+                    # savepoint'i geri aldığından yarım paket asla commit'e girmez
+                    self.env.cr.commit()
                 if res == 'created':
                     counters['created'] += 1
                 elif res == 'updated':
@@ -337,6 +372,8 @@ class TrendyolOrderSync(models.Model):
     def cron_sync_trendyol_orders(self):
         """Cron ile otomatik senkronizasyon — tüm aktif mağazalar."""
         try:
-            self.sync_orders_from_trendyol()
+            self.sync_orders_from_trendyol(commit=True)
         except Exception as e:
+            self.env.cr.rollback()
+            self.env.invalidate_all()
             _logger.exception("Trendyol cron senkronizasyon hatası: %s", e)
