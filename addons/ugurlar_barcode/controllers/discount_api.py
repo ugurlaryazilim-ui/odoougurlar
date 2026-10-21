@@ -3,6 +3,7 @@ import json
 
 from odoo import http
 from odoo.http import request
+from odoo.addons.odoougurlar.services.nebim_connector import INTERACTIVE_TIMEOUT
 
 from .base_api import BarcodeApiBase
 
@@ -65,8 +66,10 @@ class DiscountApiController(BarcodeApiBase):
             # SP çağrısı
             # Not: SP ismi sabit veya ayarlardan çekilebilir. Burada sabit bırakıldı.
             sp_name = request.env['ir.config_parameter'].sudo().get_param('odoougurlar.nebim_sp_basket_discount', 'sp_Odoougurlar_GetBasketDiscounts')
-            results = NebimConnector.run_proc(sp_name, params=proc_params)
-            
+            # NEDEN: kasadaki telefon bekliyor; Nebim asılırsa HTTP worker'ı 10 dk tutulmasın
+            results = NebimConnector.run_proc(
+                sp_name, params=proc_params, timeout=INTERACTIVE_TIMEOUT, retries=0)
+
             # Nebim'den dönen results genelde dict listesidir. Eğer boşsa, sepet hesaplanamadı demektir.
             if not results:
                 return {'error': 'Nebim V3 indirim hesaplama sonucu boş döndü.'}
@@ -178,7 +181,8 @@ class DiscountApiController(BarcodeApiBase):
         try:
             proc_params = [{'Name': 'SearchText', 'Value': query}]
             sp_name = request.env['ir.config_parameter'].sudo().get_param('odoougurlar.nebim_sp_search_customer', 'sp_Odoougurlar_SearchCustomer')
-            results = NebimConnector.run_proc(sp_name, params=proc_params)
+            results = NebimConnector.run_proc(
+                sp_name, params=proc_params, timeout=INTERACTIVE_TIMEOUT, retries=0)
 
             if isinstance(results, dict) and results.get('ExceptionMessage'):
                 _logger.error('Nebim V3 Müşteri Arama Hatası: %s', results.get('ExceptionMessage'))
