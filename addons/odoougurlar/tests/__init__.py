@@ -4,3 +4,4 @@ from . import test_marketplace_mapping
 from . import test_nebim_connector
 from . import test_nebim_misc
 from . import test_invoice_datetime
+from . import test_sale_line_barcode
