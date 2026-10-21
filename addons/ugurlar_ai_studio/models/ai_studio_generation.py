@@ -153,7 +153,7 @@ class AiStudioGeneration(models.Model):
         ('processing', 'İşleniyor'),
         ('done', 'Tamamlandı'),
         ('failed', 'Başarısız'),
-    ], string='Durum', default='pending')
+    ], string='Durum', default='pending', index=True)
     error_message = fields.Text(string='Hata Mesajı')
     retry_count = fields.Integer(string='Tekrar Deneme Sayısı', default=0)
 

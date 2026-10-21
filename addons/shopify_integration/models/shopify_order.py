@@ -60,7 +60,7 @@ class ShopifyOrderLine(models.Model):
     _name = 'shopify.order.line'
     _description = 'Shopify Sipariş Satırı'
 
-    order_id = fields.Many2one('shopify.order', string='Shopify Siparişi', ondelete='cascade')
+    order_id = fields.Many2one('shopify.order', string='Shopify Siparişi', ondelete='cascade', index=True)
     line_item_id = fields.Char(string='Line Item ID', index=True)
 
     product_shopify_id = fields.Char(string='Shopify Product ID')
