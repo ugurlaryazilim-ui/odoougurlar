@@ -64,20 +64,26 @@ class ProductProcessor(models.AbstractModel):
         # birebir aynı olmalı; farklı olursa kısıtlı cache'te kayıt "yok" görünür ve
         # mükerrer nitelik değeri / kategori oluşur.
         """
+        # NEDEN: bozuk kayıt (dict olmayan satır, str olmayan alan) burada patlamamalı; ad
+        # toplama yalnız cache kapsamını belirler, bozuk kaydı asıl işleme kendi başına hataya düşürür.
+        def text(value):
+            return str(value or '').strip()
+
         val_names, categ_names, barcodes = set(), set(), set()
         for row in rows:
-            color = (row.get('ColorDescription') or row.get('ColorCode') or '').strip()
-            size = (row.get('ItemDim1Code') or '').strip()
+            if not isinstance(row, dict):
+                continue
+            color = text(row.get('ColorDescription')) or text(row.get('ColorCode'))
+            size = text(row.get('ItemDim1Code'))
             val_names.update(n for n in (color, size) if n)
             for json_field in self.PRODUCT_ATT_MAP:
-                value = (row.get(json_field) or '').strip()
+                value = text(row.get(json_field))
                 if value:
                     val_names.add(value)
-            categ = (row.get('ProductAtt04Desc') or '').strip()
+            categ = text(row.get('ProductAtt04Desc'))
             if categ:
                 categ_names.add(categ)
-            barcodes.update(
-                b for b in ((row.get('Barcode1') or '').strip(), (row.get('Barcode2') or '').strip()) if b)
+            barcodes.update(b for b in (text(row.get('Barcode1')), text(row.get('Barcode2'))) if b)
         return val_names, categ_names, barcodes
 
     @api.private
@@ -93,7 +99,12 @@ class ProductProcessor(models.AbstractModel):
 
         restricted = rows is not None
         if restricted:
-            val_names, categ_names, batch_barcodes = self._batch_names(rows)
+            try:
+                val_names, categ_names, batch_barcodes = self._batch_names(rows)
+            except Exception as e:
+                # Ad toplanamadıysa tam yükleme: parti takılmaz, bozuk kayıt işlemede error olur
+                _logger.warning("Parti adları toplanamadı, tam cache yüklenecek: %s", e)
+                restricted = False
 
         _CACHE['attrs'] = {}
         for attr in self.env['product.attribute'].sudo().search([]):

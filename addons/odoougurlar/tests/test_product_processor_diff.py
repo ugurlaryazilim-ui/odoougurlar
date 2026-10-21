@@ -1,5 +1,6 @@
 # -*- coding: utf-8 -*-
 """Nebim ürün senkronu: karşılaştırmalı write, toplu nebim_last_sync, kısıtlı cache."""
+import json
 from unittest.mock import patch
 
 from odoo import fields
@@ -131,3 +132,34 @@ class TestProductProcessorDiff(TransactionCase):
             self.env['product.attribute.value'].search_count([('name', '=', 'H2Kirmizi')]), count)
         self.assertEqual(
             self.env['product.category'].search_count([('name', '=', 'H2 Kategori')]), 1)
+
+
+@tagged('post_install', '-at_install')
+class TestQueueBadRecord(TransactionCase):
+
+    def test_bad_record_errors_alone_rest_of_batch_processed(self):
+        """Bozuk kayıt (dict, [None], str olmayan alan) yalnız kendisi error olur."""
+        Queue = self.env['odoougurlar.product.queue'].sudo()
+        Queue.search([]).unlink()
+        good_row = {'ItemCode': 'H2-BAD-OK', 'ItemDescription': 'Iyi', 'Price': 10,
+                    'ColorDescription': 'H2BadRenk', 'ItemDim1Code': 'S',
+                    'Barcode1': 'H2BAD0001'}
+        raw = {
+            'H2-BAD-DICT': {'ItemCode': 'H2-BAD-DICT'},
+            'H2-BAD-NULL': [None],
+            'H2-BAD-INT': [{'ItemCode': 'H2-BAD-INT', 'ColorDescription': 5,
+                            'Barcode1': 123}],
+            'H2-BAD-OK': [good_row],
+        }
+        recs = {code: Queue.create({'item_code': code, 'raw_data': json.dumps(data)})
+                for code, data in raw.items()}
+
+        # TransactionCase'te cr.commit yasak; kuyruk kendi commit'ini yapar
+        with patch.object(self.env.cr, 'commit', lambda: None):
+            Queue.process_queue_batch()
+
+        self.assertEqual(recs['H2-BAD-OK'].state, 'done')
+        for code in ('H2-BAD-DICT', 'H2-BAD-NULL', 'H2-BAD-INT'):
+            self.assertEqual(recs[code].state, 'error', code)
+        self.assertTrue(
+            self.env['product.template'].search_count([('nebim_code', '=', 'H2-BAD-OK')]))
