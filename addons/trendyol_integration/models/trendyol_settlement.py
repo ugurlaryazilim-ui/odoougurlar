@@ -944,16 +944,34 @@ class TrendyolSettlement(models.Model):
         return created
 
     # NEDEN: eşleşmeyen kayıtlar (siparişi hiç içeri alınmamış) her saat yeniden denenir ve tablo
-    # büyüdükçe cron uzar; yeni gelen/yeni değişen siparişler son günlerdedir, eskiler sınırlı alınır.
-    _RELINK_DAYS = 30
+    # büyüdükçe cron uzar; tur başına kayıt sayısı sınırlıdır. Tarih kesmesi YOK: sipariş bağlamanın tek
+    # yolu burası olduğundan, geç içeri alınan eski siparişin kayıtları 30 gün kesmesiyle kalıcı bağsız
+    # kalıyordu (A4 Ö2). Bunun yerine dönen imleç (ICP, son işlenen id) tüm bağsızları sırayla dener.
     _RELINK_LIMIT = 2000
+
+    def _relink_batch(self, domain, store):
+        """Dönen imleçle bir tur: id > imleç ilk, sona gelince baştan tamamlar. Dönüş: kayıtlar."""
+        icp = self.env['ir.config_parameter'].sudo()
+        key = 'trendyol_integration.relink_cursor.%s' % store.id
+        cursor = int(icp.get_param(key, 0) or 0)
+        limit = self._RELINK_LIMIT
+        batch = self.search(domain + [('id', '>', cursor)], order='id', limit=limit)
+        new_cursor = batch[-1].id if len(batch) == limit else 0
+        if len(batch) < limit:
+            # sona gelindi: başa dön ve turun kalan kotasını baştan doldur
+            room = limit - len(batch)
+            head = self.search(domain + [('id', '<=', cursor)], order='id', limit=room)
+            batch |= head
+            new_cursor = head[-1].id if len(head) == room else 0
+        icp.set_param(key, str(new_cursor))
+        return batch
 
     @api.private
     def _relink_unlinked_settlements(self, store, full=False):
         """Sipariş bağlantısı olmayan settlement'ları orderlara bağla.
 
-        Cron'da yalnız son `_RELINK_DAYS` günün kayıtları ve en çok `_RELINK_LIMIT` adet (yeniden
-        eskiye) denenir; full=True ("geçmişi tamamla" son adımı) tüm bağsız kayıtları tarar.
+        Cron'da tur başına en çok `_RELINK_LIMIT` bağsız kayıt, dönen imleçle (sona gelince başa
+        döner); full=True ("geçmişi tamamla" son adımı) tüm bağsız kayıtları tarar.
         """
         domain = [
             ('store_id', '=', store.id),
@@ -962,13 +980,7 @@ class TrendyolSettlement(models.Model):
             ('order_number', '!=', False),
             ('shipment_package_id', '!=', False),
         ]
-        if full:
-            unlinked = self.search(domain)
-        else:
-            unlinked = self.search(
-                domain + ['|', ('transaction_date', '=', False),
-                          ('transaction_date', '>=', fields.Datetime.now() - timedelta(days=self._RELINK_DAYS))],
-                order='id desc', limit=self._RELINK_LIMIT)
+        unlinked = self.search(domain) if full else self._relink_batch(domain, store)
         if not unlinked:
             return
 

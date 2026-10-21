@@ -42,19 +42,30 @@ class TestIdefixSyncWrites(TransactionCase):
         self._sync({'id': 'W2', 'orderNumber': 'W2'})
         self.assertGreater(rec.last_checked, old)
 
-    def test_cron_window_capped_manual_not(self):
-        calls = []
+    def test_cron_uses_store_window_and_old_shipment_taken(self):
+        # A4 K1/Ö1: cron mağaza penceresini (7 gün) kullanır; 5 günlük yeni sevkiyat cron'da alınır.
+        calls, synced = [], []
+        old = (fields.Datetime.now() - timedelta(days=5)).strftime('%Y-%m-%dT%H:%M:%SZ')
 
         def fake_fetch(api_client, start_date=None, end_date=None, **kw):
             calls.append((end_date - start_date).days)
-            return [], False
+            return [{'id': 'OLD5', 'orderDate': old}], False
 
         M = type(self.Order)
         with patch.object(M, '_fetch_orders', side_effect=fake_fetch), \
+                patch.object(M, '_safe_sync', side_effect=lambda *a, **k: synced.append(a[2]['id'])), \
                 patch.object(M, '_refresh_stale_orders'), patch.object(M, '_cancel_pending_orders'), \
                 patch.object(M, '_send_pending_invoices'), \
                 patch.object(type(self.env['idefix.refund']), '_sync_refunds_if_due'), \
                 patch.object(type(self.store), 'get_api'):
-            self.Order.sync_orders_for_store(self.store, max_days=3)
             self.Order.sync_orders_for_store(self.store)
-        self.assertEqual(calls, [3, 7])
+            self.Order.sync_orders_for_store(self.store, max_days=3)
+        self.assertEqual(calls, [7, 3])
+        self.assertEqual(synced, ['OLD5'])  # max_days=3 turunda 5 günlük yeni sevkiyat atlanır
+
+    def test_cron_entry_passes_no_max_days(self):
+        seen = []
+        M = type(self.Order)
+        with patch.object(M, 'sync_orders_for_store', side_effect=lambda store, **kw: seen.append(kw)):
+            self.Order.sync_orders_from_idefix()
+        self.assertTrue(all(not kw for kw in seen))

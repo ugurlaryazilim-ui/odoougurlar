@@ -23,7 +23,6 @@ _STALE_CHECK_LIMIT = 200                    # her turda yoklanacak en fazla sevk
 _STALE_BATCH = 50                           # 'ids' parametresiyle tek istekte sorgulanan sevkiyat
 _STALE_RECENT = timedelta(days=30)          # bundan yeni açık sevkiyatlar her 30 dk yoklanır
 _STALE_OLD_CHECK_AFTER = timedelta(hours=6)  # daha eski açık sevkiyatlar 6 saatte bir yoklanır
-_AUTO_WINDOW_DAYS = 3                       # cron taraması en fazla bu kadar geriye bakar; elle senkron mağaza ayarını kullanır
 _STALE_LOOKBACK = timedelta(days=120)       # bundan eski açık sevkiyatlar otomatik yoklanmaz
 # Bundan eski siparişler otomatik iptal edilmez — Idefix'te statüsü yakın zamanda değişmediyse
 # (geç gelen iptal: haftalarca "Sevke Hazır" bekleyip sonradan iptal edilen sipariş yine düşer)
@@ -63,9 +62,10 @@ class IdefixOrderSync(models.Model):
         stores = self.env['idefix.store'].search([('active', '=', True), ('auto_sync', '=', True)])
         for store in stores:
             try:
-                # NEDEN: eski geniş pencere her 5 dk'da yüzlerce değişmeyen sevkiyatı yeniden işletiyordu;
-                # 3 günden eskiler _refresh_stale_orders ile shipment ID üzerinden yoklanır.
-                self.sync_orders_for_store(store, max_days=_AUTO_WINDOW_DAYS)
+                # DIKKAT: cron mağaza ayarındaki pencereyi (order_day_range) kullanır, daraltılmaz: API değişen
+                # siparişi (iptal/sevkiyat) pencere dışından döndürdüğü doğrulanmadı; dar pencere iptal gecikmesine
+                # ve kesintide kaçan siparişe yol açar (A4 K1, DERSLER 22.10).
+                self.sync_orders_for_store(store)
             except Exception as e:
                 self.env.invalidate_all(flush=False)
                 _logger.exception("Idefix %s senkronizasyon hatası: %s", store.name, e)

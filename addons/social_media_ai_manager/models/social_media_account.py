@@ -9,6 +9,7 @@ _logger = logging.getLogger(__name__)
 # süreç belleğinde tutulur. Başka süreç/yeniden bağlanma token'ı değiştirirse eşleşmez ve yenileme yapılır.
 _YOUTUBE_TOKEN_EXPIRY = {}
 _TOKEN_MARGIN = 300  # sn: süre dolmadan önce yenile
+_YOUTUBE_TOKEN_TTL = 3600  # sn: Google access token ömrü (expires_in her zaman 3600)
 
 class SocialMediaAccount(models.Model):
     _name = 'social.media.account'
@@ -222,6 +223,24 @@ class SocialMediaAccount(models.Model):
 
         return False
 
+    def _youtube_token_from_other_process(self):
+        """DB'de, bu işlemin görmediği (başka süreç yazmış) yeni ve hâlâ geçerli token varsa
+        (token, kalan_saniye) döndürür.
+
+        DIKKAT: ayrı cursor gerekli; bu işlem REPEATABLE READ anlık görüntüsünde, başka sürecin commit'ini
+        göremez. write_date'in token yazımından başka bir yazımla da yenilenmiş olması token'ı olduğundan
+        yeni göstermez; en kötü sonuç bir sonraki çağrıda 401 ve write_date yaşlanınca yenilemedir.
+        """
+        self.ensure_one()
+        self.flush_recordset(['api_token'])
+        with self.pool.cursor() as cr:
+            cr.execute("SELECT api_token, write_date FROM social_media_account WHERE id = %s", (self.id,))
+            row = cr.fetchone()
+        if not row or not row[0] or not row[1] or row[0] == self.api_token:
+            return None
+        remaining = _YOUTUBE_TOKEN_TTL - _TOKEN_MARGIN - (fields.Datetime.now() - row[1]).total_seconds()
+        return (row[0], remaining) if remaining > 0 else None
+
     def _refresh_youtube_token(self):
         """ Refresh YouTube Access Token using the refresh token """
         self.ensure_one()
@@ -232,6 +251,15 @@ class SocialMediaAccount(models.Model):
         cached = _YOUTUBE_TOKEN_EXPIRY.get(cache_key)
         if cached and cached[0] == self.api_token and cached[1] > time.monotonic():
             return True  # token hâlâ geçerli: Google'a gitme, DB'ye yazma
+
+        # NEDEN: süreç önbelleği süreçler arası paylaşılmaz; çok süreçte her biri kendi yenilemesini
+        # yapıp token'ı gidip geldirirdi (A4 Ö3). Başka süreç az önce yenilediyse onun token'ı kullanılır.
+        other = self._youtube_token_from_other_process()
+        if other:
+            token, remaining = other
+            self._update_cache({'api_token': token})   # DB'de zaten var: yazma (ve serileştirme çakışması) yok
+            _YOUTUBE_TOKEN_EXPIRY[cache_key] = (token, time.monotonic() + remaining)
+            return True
 
         client_id = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.youtube_client_id')
         client_secret = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.youtube_client_secret')

@@ -22,7 +22,6 @@ _PAGE_SIZE = 100
 _MAX_PAGES = 100
 _STALE_CHECK_AFTER = timedelta(hours=6)    # açık siparişler en geç bu aralıkla tek tek yoklanır
 _STALE_CHECK_LIMIT = 20                    # her turda yoklanacak en fazla sipariş
-_AUTO_WINDOW_DAYS = 3                       # cron taraması en fazla bu kadar geriye bakar; elle senkron mağaza ayarını kullanır
 _STALE_LOOKBACK = timedelta(days=180)      # sipariş no ile sorgu en fazla 6 ay geriye gider
 _ACCEPT_RETRY_AFTER = timedelta(minutes=30)
 _CANCEL_MARK = 'Otomatik iptal edilmedi'      # error_message öneki; iptal taraması işaretli kaydı atlar
@@ -60,9 +59,10 @@ class PazaramaOrderSync(models.Model):
         stores = self.env['pazarama.store'].search([('active', '=', True), ('auto_sync', '=', True)])
         for store in stores:
             try:
-                # NEDEN: 14 günlük pencere her 5 dk'da değişmeyen siparişleri yeniden işletiyordu;
-                # 3 günden eskiler _refresh_stale_orders ile (6 saatte bir) yoklanır.
-                self.sync_orders_for_store(store, max_days=_AUTO_WINDOW_DAYS)
+                # DIKKAT: cron mağaza ayarındaki pencereyi (order_day_range) kullanır, daraltılmaz: API değişen
+                # siparişi (iptal/sevkiyat) pencere dışından döndürdüğü doğrulanmadı; dar pencere iptal gecikmesine
+                # ve kesintide kaçan siparişe yol açar (A4 K1, DERSLER 22.10).
+                self.sync_orders_for_store(store)
             except Exception as e:
                 _logger.exception("Pazarama %s senkronizasyon hatası: %s", store.name, e)
                 store._write_sync_state(error=str(e))

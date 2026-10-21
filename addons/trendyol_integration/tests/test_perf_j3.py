@@ -43,27 +43,49 @@ class TestTrendyolPerfJ3(TransactionCase):
 
     # ── KK-1: finans ──────────────────────────────────────────
 
-    def test_relink_window_limit_and_full(self):
-        order_new = self._order('J3-N', 'J3-NP')
+    def test_relink_old_records_are_linked_without_date_cut(self):
+        # A4 Ö2: geç içeri alınan eski siparişin kayıtları da cron'da bağlanır (tarih kesmesi yok)
         order_old = self._order('J3-O', 'J3-OP')
-        recent = self._settle('j3r', 2, order_number='J3-N')
         old = self._settle('j3o', 90, order_number='J3-O')
         self.S._relink_unlinked_settlements(self.store)
-        self.assertEqual(recent.order_id, order_new)
-        self.assertFalse(old.order_id, "30 günden eski bağsız kayıt cron'da denenmez")
-        self.S._relink_unlinked_settlements(self.store, full=True)
-        self.assertEqual(old.order_id, order_old, "geçmişi tamamla tüm bağsız kayıtları tarar")
+        self.assertEqual(old.order_id, order_old)
 
-    def test_relink_batch_limit_takes_newest(self):
-        o1, o2 = self._order('J3-A', 'J3-AP'), self._order('J3-B', 'J3-BP')
-        older = self._settle('j3a', 5, order_number='J3-A')
-        newer = self._settle('j3b', 1, order_number='J3-B')
-        with patch.object(type(self.S), '_RELINK_LIMIT', 1):
+    def test_relink_rotating_cursor_covers_all_in_two_turns(self):
+        # 5 bağsız kayıt, tur başına 3: ilk 3, sonra kalan 2; imleç başa döner
+        ICP = self.env['ir.config_parameter'].sudo()
+        key = 'trendyol_integration.relink_cursor.%s' % self.store.id
+        ICP.set_param(key, '0')
+        recs = []
+        for i in range(5):
+            order = self._order('J3-R%d' % i, 'J3-RP%d' % i)
+            recs.append((self._settle('j3r%d' % i, i, order_number='J3-R%d' % i), order))
+        with patch.object(type(self.S), '_RELINK_LIMIT', 3):
             self.S._relink_unlinked_settlements(self.store)
-        self.assertEqual(newer.order_id, o2)
-        self.assertFalse(older.order_id)
-        self.S._relink_unlinked_settlements(self.store)
-        self.assertEqual(older.order_id, o1)
+            first = [r.order_id == o for r, o in recs]
+            self.assertEqual(first.count(True), 3)
+            self.assertEqual(int(ICP.get_param(key)), recs[2][0].id)
+            self.S._relink_unlinked_settlements(self.store)
+        self.assertTrue(all(r.order_id == o for r, o in recs), "2 turda tüm bağsızlar denenir")
+
+    def test_relink_cursor_unmatched_records_do_not_starve_others(self):
+        # siparişi hiç olmayan 3 kayıt tur kotasını doldursa da imleç ilerler, sonraki kayıt bağlanır
+        for i in range(3):
+            self._settle('j3u%d' % i, 1, order_number='J3-NONE%d' % i)
+        order = self._order('J3-L', 'J3-LP')
+        late = self._settle('j3late', 1, order_number='J3-L')
+        ICP = self.env['ir.config_parameter'].sudo()
+        ICP.set_param('trendyol_integration.relink_cursor.%s' % self.store.id, '0')
+        with patch.object(type(self.S), '_RELINK_LIMIT', 3):
+            self.S._relink_unlinked_settlements(self.store)
+            self.assertFalse(late.order_id)
+            self.S._relink_unlinked_settlements(self.store)
+        self.assertEqual(late.order_id, order)
+
+    def test_relink_full_scans_everything(self):
+        order_old = self._order('J3-F', 'J3-FP')
+        old = self._settle('j3f', 90, order_number='J3-F')
+        self.S._relink_unlinked_settlements(self.store, full=True)
+        self.assertEqual(old.order_id, order_old)
 
     def test_find_order_cache_matches_single_lookup(self):
         """Toplu önbellek tek tek aramayla aynı sonucu verir: önce paket, sonra sipariş no."""

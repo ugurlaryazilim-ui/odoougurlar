@@ -452,11 +452,22 @@ class AiStudioGeneration(models.Model):
         self.revision_prompt_en = self._translate_prompt(self.revision_prompt)
 
 
+    # Onay sonrası ('saving'/'done') değişirse onaylanandan farklı görsel/ürün yazılır (A4 O1).
+    # NEDEN: kara liste değil TÜM alanlar kilitli; yalnız yerel klasöre aktarım işareti açık.
+    # DIKKAT: kilit mevcut VE hedef (session_id taşıma) oturuma bakar.
+    _APPROVED_WRITE_ALLOW = frozenset(('is_exported_to_local',))
+
     @api.model_create_multi
     def create(self, vals_list):
         # Batch create'de çeviri yapmıyoruz — performans için
         # Onchange zaten UI'dan gelen kayıtlarda çeviriyi yapıyor
+        self.env['ai.studio.session']._check_approved_lock_create(vals_list, _('üretim'))
         return super().create(vals_list)
+
+    def write(self, vals):
+        self.env['ai.studio.session']._check_approved_lock_on(
+            self.session_id, vals, self._APPROVED_WRITE_ALLOW, _('üretim'))
+        return super().write(vals)
 
     def action_reject(self):
         """Red dialog'u aç — revize için."""

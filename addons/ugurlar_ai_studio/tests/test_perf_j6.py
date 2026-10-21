@@ -87,7 +87,9 @@ class TestCompleteSessionQueued(TransactionCase):
         with patch.object(type(self.Session), '_save_to_product', side_effect=ValueError('disk dolu')):
             self.Session._run_save_job(session.id)
         self.assertEqual(session.state, 'review', "başarısız kayıt 'saving'de takılı kalıp kuyruğu döndürmemeli")
-        self.assertIn('disk dolu', session.message_ids[0].body)
+        # A4 D1: beklenmeyen hatanın ham metni chatter'a girmez (ayrıntı log'da)
+        self.assertNotIn('disk dolu', session.message_ids[0].body)
+        self.assertIn('Tamamla', session.message_ids[0].body)
         self.assertFalse(self.Session.search_count(self.Session._queue_saving_domain()))
 
     # --- J9: 'saving' yalnız onay yolundan ---
