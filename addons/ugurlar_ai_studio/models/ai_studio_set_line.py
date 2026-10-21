@@ -1,4 +1,4 @@
-from odoo import models, fields, api, _
+from odoo import models, fields, _
 
 
 class AiStudioSetLine(models.Model):
@@ -54,12 +54,7 @@ class AiStudioSetLine(models.Model):
     )
 
     # DIKKAT: 'saving'/'done' oturumda set satırı değişirse kuyruk onaylanandan farklı ürüne yazar (A4 O1).
-    # Tüm alanlar kilitli (izin listesi yok); kilit mevcut VE hedef (session_id taşıma) oturuma bakar.
-    @api.model_create_multi
-    def create(self, vals_list):
-        self.env['ai.studio.session']._check_approved_lock_create(vals_list, _('takım parçası'))
-        return super().create(vals_list)
-
+    # Kilit kayıt kuralında (rule_set_line_operator_edit); burada yalnız kuralın göremediği taşıma.
     def write(self, vals):
-        self.env['ai.studio.session']._check_approved_lock_on(self.session_id, vals, label=_('takım parçası'))
+        self.env['ai.studio.session']._check_target_session_unlocked(vals, _('takım parçası'))
         return super().write(vals)
