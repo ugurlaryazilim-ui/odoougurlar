@@ -158,10 +158,12 @@ class SanalPosProviderParatika(models.AbstractModel):
 
     def _secrets(self):
         """Log/mesajlardan süzülecek sır değerleri."""
-        secrets = [self._param('sanal_pos.paratika_merchant_password'),
-                   self._param('sanal_pos.paratika_secret_key')]
+        raw = [self._param('sanal_pos.paratika_merchant_password'),
+               self._param('sanal_pos.paratika_secret_key')]
         # Bağlantı testinde ekrandaki (henüz kaydedilmemiş) şifre de süzülür
-        return secrets + list(self.env.context.get('sanal_pos_extra_secrets') or [])
+        raw += list(self.env.context.get('sanal_pos_extra_secrets') or [])
+        # İstekte boşluksuz gönderildiği için hem ham hem boşluksuz hali süzülür
+        return [s for s in dict.fromkeys(raw + [(v or '').strip() for v in raw]) if s]
 
     def _api_url(self, payment, environment=None):
         """Kayıt ortamına göre kök adres (KK-52: ayar değil, kaydın ortamı geçerli)."""

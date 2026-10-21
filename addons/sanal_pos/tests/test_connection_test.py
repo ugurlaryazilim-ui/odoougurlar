@@ -144,6 +144,14 @@ class TestCredentialWhitespace(SanalPosCase):
         self.assertEqual(ICP.get_param('sanal_pos.paratika_merchant_password'), PASSWORD)
         self.assertEqual(ICP.get_param('sanal_pos.paratika_merchant_user'), 'api.user@ugurlar.test')
 
+    def test_bosluklu_kayitli_sifre_yanitta_gecse_de_maskelenir(self):
+        self.env['ir.config_parameter'].sudo().set_param(
+            'sanal_pos.paratika_merchant_password', ' %s ' % PASSWORD)
+        self.mock.queue('QUERYTRANSACTION', err_body('ERR10030', 'echo %s' % PASSWORD))
+        payment = self.make_payment()
+        self.env['sanal.pos.provider.paratika'].query_status(payment)
+        self.assertNotIn(PASSWORD, self.all_log_text())
+
     def test_kayitli_bosluklu_deger_istekte_temizlenir(self):
         """Eski sürümde boşlukla kaydedilmiş değerler de temiz gönderilir."""
         self.env['ir.config_parameter'].sudo().set_param(
