@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <record id="view_sanal_pos_connection_test_wizard_form" model="ir.ui.view">
+        <field name="name">sanal.pos.connection.test.wizard.form</field>
+        <field name="model">sanal.pos.connection.test.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Paratika Bağlantı Testi">
+                <field name="level" invisible="1"/>
+                <div class="alert alert-success" role="alert" invisible="level != 'success'">
+                    <strong><field name="summary" class="d-inline"/></strong>
+                </div>
+                <div class="alert alert-warning" role="alert" invisible="level != 'warning'">
+                    <strong><field name="summary" class="d-inline"/></strong>
+                </div>
+                <div class="alert alert-danger" role="alert" invisible="level != 'danger'">
+                    <strong><field name="summary" class="d-inline"/></strong>
+                </div>
+                <field name="details" nolabel="1"/>
+                <footer>
+                    <button string="Kapat" special="cancel" class="btn-primary"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+</odoo>

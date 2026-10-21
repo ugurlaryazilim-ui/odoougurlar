@@ -50,6 +50,12 @@
                         <setting help="Paratika link adresi biçimi teyit edilene kadar kapalı kalmalıdır.">
                             <field name="sanal_pos_paratika_show_link_url"/>
                         </setting>
+                        <setting string="Bağlantıyı test et"
+                                 help="Seçili ortam ve kayıtlı bilgilerle Paratika'ya salt-okuma bir sorgu gönderir; link oluşmaz, para hareketi olmaz. Değişiklik yaptıysanız önce Kaydet'e basın.">
+                            <button name="action_sanal_pos_test_connection" type="object"
+                                    class="btn-secondary" string="Bağlantıyı test et"
+                                    icon="fa-plug" groups="base.group_system"/>
+                        </setting>
                         <setting string="Bildirim adresi" help="Bu adresi Paratika panelinde bildirim URL'si olarak tanımlayın.">
                             <field name="sanal_pos_notify_url" readonly="1"/>
                         </setting>
