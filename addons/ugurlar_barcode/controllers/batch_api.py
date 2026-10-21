@@ -512,9 +512,11 @@ class BatchApiController(BarcodeApiBase):
                         src_wh = depot_map[product.id]
                         # Kalıcı olarak move'a yaz
                         try:
-                            move.sudo().write({'source_warehouse_id': src_wh.id})
+                            with request.env.cr.savepoint():
+                                move.sudo().write({'source_warehouse_id': src_wh.id})
                         except Exception:
-                            pass
+                            _logger.warning('Move depo bilgisi yazılamadı (move=%s)',
+                                            move.id, exc_info=True)
 
                     # Önceden çekilen toplu dict'ten raf konumunu bul
                     loc_data = location_data_dict.get(product.id, {'location_name': '', 'location_parts': {}})
@@ -700,24 +702,20 @@ class BatchApiController(BarcodeApiBase):
                         target_picking.name, batch.name)
 
         # İşlem logu
+        # NEDEN: okutma başına ürün chatter'ı yazılmaz (mail_message + bildirim hesabı, tablo
+        # sınırsız büyür); iz ugurlar.barcode.operation kaydında
         try:
-            user = request.env.user
-            request.env['ugurlar.barcode.operation'].sudo().create({
-                'operation_type': 'picking',
-                'barcode': barcode,
-                'product_id': product.id,
-                'quantity': 1,
-                'state': 'done',
-            })
-            
-            # Varyant chatter log
-            msg = Markup(
-                '<b>&#128722; Rota Toplama:</b> <em>%s</em> tarafından '
-                '<b>%s</b> rotasında (Sipariş: %s) <b>1</b> adet sepete eklendi.'
-            ) % (user.name, batch.name, target_picking.name)
-            self._log_chatter(product, msg)
+            with request.env.cr.savepoint():
+                request.env['ugurlar.barcode.operation'].sudo().create({
+                    'operation_type': 'picking',
+                    'barcode': barcode,
+                    'product_id': product.id,
+                    'quantity': 1,
+                    'state': 'done',
+                })
         except Exception:
-            pass
+            _logger.warning('Rota toplama operasyon logu yazılamadı (barkod=%s)',
+                            barcode, exc_info=True)
 
         # Tamamlanma durumu
         item_complete = new_qty >= target_move.product_uom_qty
@@ -772,14 +770,21 @@ class BatchApiController(BarcodeApiBase):
         new_qty = move.wave_collected_qty - 1
         move.sudo().write({'wave_collected_qty': new_qty})
 
-        # Log kaydı
-        user = request.env.user
-        product = move.product_id
-        msg = Markup(
-            '<b>&#10060; Hatalı Toplamayı Geri Alma:</b> <em>%s</em> tarafından '
-            'bu siparişi içeren rotada <b>%s</b> ürününden 1 adet çıkarıldı (Eksi işlemi).'
-        ) % (user.name, product.display_name)
-        self._log_chatter(product, msg)
+        # NEDEN: ürün chatter'ı yerine operation kaydı (iz kaybı yok); eksi miktar + not geri almayı gösterir
+        try:
+            with request.env.cr.savepoint():
+                request.env['ugurlar.barcode.operation'].sudo().create({
+                    'operation_type': 'picking',
+                    'barcode': move.product_id.barcode,
+                    'product_id': move.product_id.id,
+                    'quantity': -1,
+                    'notes': 'Rota toplama geri alma: %s (%s)' % (
+                        move.picking_id.name, move.picking_id.batch_id.name or ''),
+                    'state': 'done',
+                })
+        except Exception:
+            _logger.warning('Toplama geri alma operasyon logu yazılamadı (move=%s)',
+                            move.id, exc_info=True)
 
         return {
             'success': True,
@@ -852,26 +857,24 @@ class BatchApiController(BarcodeApiBase):
         except Exception as e:
             _logger.error("Batch %s tamamlama hatası: %s", batch.name, e)
 
-        # ─── 3. Ürün chatter'larına toplama tamamlanma logu ───
+        # ─── 3. Rota üzerinde tek özet not ───
+        # NEDEN: önceden toplanan her move için ayrı ürün chatter mesajı yazılıyordu (rota başına
+        # yüzlerce mail_message + bildirim hesabı); tek özet not yeterli
         try:
-            user = request.env.user
+            lines = []
             for picking in all_pickings:
-                source_name = picking.location_id.display_name or ''
-                for move in picking.move_ids:
-                    collected = move.wave_collected_qty or 0
-                    if collected > 0 and move.product_id:
-                        msg = Markup(
-                            '<b>&#128722; Toplama Tamamlandı:</b> <em>%s</em> tarafından '
-                            '<b>%s</b> rotasında (Sipariş: %s)<br/>'
-                            '&#128230; <b>%s</b> adet <b>%s</b> konumundan toplandı; '
-                            'sevkiyat paketlemede doğrulanır'
-                        ) % (
-                            user.name, batch.name, picking.name,
-                            int(collected), source_name,
-                        )
-                        self._log_chatter(move.product_id, msg)
+                total_collected = sum(int(m.wave_collected_qty or 0) for m in picking.move_ids
+                                      if m.product_id)
+                if total_collected > 0:
+                    lines.append(Markup('%s: %s adet') % (picking.name, total_collected))
+            if lines:
+                msg = Markup(
+                    '<b>&#128722; Toplama Tamamlandı:</b> <em>%s</em> tarafından toplama '
+                    'tamamlandı; sevkiyat paketlemede doğrulanır.<br/>%s'
+                ) % (request.env.user.name, Markup('<br/>').join(lines))
+                self._log_chatter(batch, msg)
         except Exception as e:
-            _logger.warning("Chatter log hatası: %s", e)
+            _logger.warning("Chatter log hatası: %s", e, exc_info=True)
 
         batch_done = self._route_finished(all_pickings)
         result_msg = (f'{batch.name}: {collected_moves}/{total_moves} ürün toplandı; '

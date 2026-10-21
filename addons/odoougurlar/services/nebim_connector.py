@@ -66,6 +66,13 @@ def _http_error_detail(exc):
 CONNECT_TIMEOUT = 8       # Connect/login — kısa tutulmalı
 DATA_TIMEOUT = 300         # Veri gönder/al — tüm ürünleri çekmek uzun sürer
 MAX_RETRIES = 2            # 2 deneme yeterli (toplam maks ~25s)
+# NEDEN: Depo telefonları JSON-RPC ile bekler ve HTTP worker sayısı sınırlı (10); Nebim asılı kalınca
+# 300 sn x 2 deneme bir worker'ı ~10 dk tutuyordu. Varsayılan (cron / toplu içe aktarma) 300 sn, 2 deneme kalır;
+# etkileşimli çağıran `timeout=` / `retries=` verir ya da `with_context(nebim_timeout=..., nebim_retries=0)` ile
+# zincire yayar. Not: timeout yalnız ÇAĞRI BAŞINA okuma süresidir; zincirde birden çok çağrı olduğundan
+# toplam süre bunların toplamıdır (tek sipariş: cari + sipariş + fatura + Post, her biri en çok 60 sn).
+INTERACTIVE_TIMEOUT = 15   # Mağaza / depo ekranı okuma uçları (yeniden deneme yok)
+WRITE_CHAIN_TIMEOUT = 60   # Paketleme cari / sipariş / fatura zinciri: çağrı başına (HTTP isteği içinde)
 
 # Session token cache: (token, expiry_timestamp)
 _session_cache = {'token': None, 'expires': 0}
@@ -140,17 +147,20 @@ class NebimConnector(models.AbstractModel):
         return parts[0] if len(parts) == 2 else url
 
     @api.private
-    def _connect(self, force=False):
+    def _connect(self, force=False, retries=None):
         """
         Nebim IntegratorService'e bağlanır ve session token döner.
         Token cache'lenir (5dk TTL); force=True ile zorunlu yenileme.
-        
+        retries: ilk denemeden sonraki ek deneme sayısı (None = context `nebim_retries`, o da yoksa varsayılan;
+        0 = yeniden deneme yok).
+
         URL: POST {base_url}/Connect
-        
+
         Returns:
             str: SessionID
         """
         global _session_cache
+        max_attempts = self._max_attempts(retries)
 
         # Cached token varsa ve süresi dolmamışsa kullan
         if not force and _session_cache['token'] and time.time() < _session_cache['expires']:
@@ -168,7 +178,7 @@ class NebimConnector(models.AbstractModel):
 
         _logger.info("Nebim bağlantısı kuruluyor: %s", url)
 
-        for attempt in range(1, MAX_RETRIES + 1):
+        for attempt in range(1, max_attempts + 1):
             try:
                 resp = _http_session.post(url, json=payload, timeout=CONNECT_TIMEOUT)
                 resp.raise_for_status()
@@ -185,7 +195,7 @@ class NebimConnector(models.AbstractModel):
                 if not token:
                     raise UserError('Nebim bağlantısı başarılı ama SessionID alınamadı!')
 
-                _logger.info("Nebim bağlantısı başarılı (deneme %d/%d)", attempt, MAX_RETRIES)
+                _logger.info("Nebim bağlantısı başarılı (deneme %d/%d)", attempt, max_attempts)
 
                 # Token'ı cache'le
                 _session_cache['token'] = token
@@ -195,12 +205,12 @@ class NebimConnector(models.AbstractModel):
             except requests.exceptions.RequestException as e:
                 _logger.warning(
                     "Nebim bağlantı hatası (deneme %d/%d): %s",
-                    attempt, MAX_RETRIES, _mask(e)
+                    attempt, max_attempts, _mask(e)
                 )
-                if attempt < MAX_RETRIES:
+                if attempt < max_attempts:
                     time.sleep(2 ** attempt)  # Exponential backoff: 2s, 4s
                 else:
-                    raise Exception(f'Nebim bağlantı hatası ({MAX_RETRIES} deneme sonrası): {_mask(e)}')
+                    raise Exception(f'Nebim bağlantı hatası ({max_attempts} deneme sonrası): {_mask(e)}')
 
     @api.private
     def _build_session_url(self, token, endpoint):
@@ -218,14 +228,32 @@ class NebimConnector(models.AbstractModel):
         root_url = self._get_root_url(config['url'])
         return f"{root_url}/(S({token}))/IntegratorService/{endpoint}"
 
-    def run_proc(self, proc_name, params=None):
+    @api.private
+    def _max_attempts(self, retries):
+        """Azami deneme: açık `retries` > context `nebim_retries` > MAX_RETRIES (ek deneme sayısı; 0 = tek deneme)."""
+        if retries is None:
+            retries = self.env.context.get('nebim_retries')
+        return MAX_RETRIES if retries is None else retries + 1
+
+    @api.private
+    def _call_policy(self, timeout, retries):
+        """(okuma zaman aşımı, azami deneme) — açık parametre > context (`nebim_timeout` / `nebim_retries`) > varsayılan."""
+        timeout = timeout or self.env.context.get('nebim_timeout') or DATA_TIMEOUT
+        return timeout, self._max_attempts(retries)
+
+    def run_proc(self, proc_name, params=None, timeout=None, retries=None):
         """
         Nebim üzerinde stored procedure çalıştırır.
-        
+
         URL: POST {root}/(S({SessionID}))/IntegratorService/RunProc
         Body: { ProcName, Parameters: [{Name, Value}] }
+
+        timeout: okuma zaman aşımı sn (None = context `nebim_timeout`, o da yoksa 300).
+        retries: ilk denemeden sonraki ek deneme sayısı (None = context `nebim_retries`, o da yoksa
+        varsayılan 1; 0 = yeniden deneme yok).
         """
-        token = self._connect()
+        timeout, max_attempts = self._call_policy(timeout, retries)
+        token = self._connect(retries=retries)
         url = self._build_session_url(token, 'RunProc')
 
         payload = {'ProcName': proc_name}
@@ -237,10 +265,10 @@ class NebimConnector(models.AbstractModel):
         _logger.info("Nebim SP çalıştırılıyor: %s → %s", proc_name, _mask(url))
         idempotent = not str(proc_name).startswith(_NON_IDEMPOTENT_SPS)
 
-        for attempt in range(1, MAX_RETRIES + 1):
+        for attempt in range(1, max_attempts + 1):
             try:
                 resp = _http_session.post(
-                    url, json=payload, headers=headers, timeout=(CONNECT_TIMEOUT, DATA_TIMEOUT)
+                    url, json=payload, headers=headers, timeout=(CONNECT_TIMEOUT, timeout)
                 )
                 resp.raise_for_status()
                 result = resp.json()
@@ -254,34 +282,38 @@ class NebimConnector(models.AbstractModel):
             except requests.exceptions.RequestException as e:
                 _logger.warning(
                     "Nebim SP hatası (deneme %d/%d): %s - %s",
-                    attempt, MAX_RETRIES, proc_name, _http_error_detail(e)
+                    attempt, max_attempts, proc_name, _http_error_detail(e)
                 )
                 retry = idempotent or _request_not_delivered(e) or _session_rejected(e)
-                if attempt < MAX_RETRIES and retry:
+                if attempt < max_attempts and retry:
                     # Session expire olmuş olabilir → yenile
-                    token = self._connect(force=True)
+                    token = self._connect(force=True, retries=retries)
                     url = self._build_session_url(token, 'RunProc')
                     time.sleep(2 ** attempt)
                 else:
                     raise Exception(f'Nebim SP çalıştırma hatası ({proc_name}): {_http_error_detail(e)}')
 
-    def post_data(self, endpoint, payload):
+    def post_data(self, endpoint, payload, timeout=None, retries=None):
         """
         Nebim'e veri gönderir (fatura, müşteri vb.).
-        
+
         URL: POST {root}/(S({SessionID}))/IntegratorService/{endpoint}
+
+        timeout / retries: bkz. run_proc. Yazmada yeniden deneme zaten yalnız istek Nebim'e
+        ulaşmadıysa / oturum reddedildiyse yapılır (okuma zaman aşımında asla).
         """
-        token = self._connect()
+        timeout, max_attempts = self._call_policy(timeout, retries)
+        token = self._connect(retries=retries)
         url = self._build_session_url(token, endpoint)
 
         headers = {}
 
         _logger.info("Nebim'e veri gönderiliyor: %s → %s", endpoint, _mask(url))
 
-        for attempt in range(1, MAX_RETRIES + 1):
+        for attempt in range(1, max_attempts + 1):
             try:
                 resp = _http_session.post(
-                    url, json=payload, headers=headers, timeout=(CONNECT_TIMEOUT, DATA_TIMEOUT)
+                    url, json=payload, headers=headers, timeout=(CONNECT_TIMEOUT, timeout)
                 )
                 resp.raise_for_status()
                 result = resp.json()
@@ -291,12 +323,12 @@ class NebimConnector(models.AbstractModel):
             except requests.exceptions.RequestException as e:
                 _logger.warning(
                     "Nebim veri gönderim hatası (deneme %d/%d): %s",
-                    attempt, MAX_RETRIES, _http_error_detail(e)
+                    attempt, max_attempts, _http_error_detail(e)
                 )
                 # Yalnız istek Nebim'e ulaşmadıysa / oturum reddedildiyse yeniden gönder:
                 # okuma zaman aşımında belge kaydedilmiş olabilir (mükerrer sipariş / e-fatura)
-                if attempt < MAX_RETRIES and (_request_not_delivered(e) or _session_rejected(e)):
-                    token = self._connect(force=True)
+                if attempt < max_attempts and (_request_not_delivered(e) or _session_rejected(e)):
+                    token = self._connect(force=True, retries=retries)
                     url = self._build_session_url(token, endpoint)
                     time.sleep(2 ** attempt)
                 else:

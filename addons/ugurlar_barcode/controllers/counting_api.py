@@ -1,6 +1,5 @@
 """Sayım API — count_save, count_list (sayım geçmişi)."""
 import logging
-from markupsafe import Markup
 from datetime import datetime, timedelta
 
 from odoo import http
@@ -71,18 +70,7 @@ class CountingApiController(BarcodeApiBase):
                         'state': 'done',
                     })
 
-                    # Varyant chatter log
-                    try:
-                        user = request.env.user
-                        msg = Markup(
-                            '<b>&#128203; Sayim:</b> <em>%s</em> tarafindan '
-                            '<b>%s</b> rafinda sayildi. '
-                            'Eski: <b>%d</b> &rarr; Yeni: <b>%d</b>'
-                        ) % (user.name, location.complete_name, int(old_qty), int(new_qty))
-                        product.sudo().message_post(
-                            body=msg, message_type='notification', subtype_xmlid='mail.mt_note')
-                    except Exception as e:
-                        _logger.warning('Chatter log hatasi: %s', e)
+                    # NEDEN: ürün chatter'ı yazılmaz; eski/yeni adet operation notunda
 
                 results.append({
                     'barcode': bc,
@@ -165,18 +153,7 @@ class CountingApiController(BarcodeApiBase):
                     continue
 
                 adjustments += 1
-                # Ürün chatter'ına uyarı notu
-                try:
-                    msg = Markup(
-                        '<b>&#9888; Sayım Düzeltmesi:</b> <em>%s</em> konumunda '
-                        '<b>%s</b> adet negatif bakiye tespit edildi ve stok hareketiyle '
-                        'sıfırlandı (%s). (Sayım: %s)'
-                    ) % (neg_location.complete_name, f'{old_neg:g}', move_ref, count_session.name)
-                    product.sudo().message_post(
-                        body=msg, message_type='notification',
-                        subtype_xmlid='mail.mt_note')
-                except Exception as e:
-                    _logger.warning('Düzeltme chatter hatası: %s', e)
+                # NEDEN: ürün chatter'ı yazılmaz; iz count_adjustment operation kaydı + sayım notunda
 
                 adjustment_notes.append(
                     f'{product.display_name}: {neg_location.complete_name} '

@@ -5,7 +5,7 @@ class AmazonSyncLog(models.Model):
     _description = 'Amazon Senkronizasyon Logları'
     _order = 'create_date desc'
 
-    store_id = fields.Many2one('amazon.store', string='Mağaza', required=True, ondelete='cascade')
+    store_id = fields.Many2one('amazon.store', string='Mağaza', required=True, ondelete='cascade', index=True)
     sync_type = fields.Selection([
         ('order', 'Sipariş Senkronizasyonu'),
         ('product', 'Ürün Senkronizasyonu'),
@@ -38,3 +38,11 @@ class AmazonSyncLog(models.Model):
             'state': 'error',
             'details': error_msg
         })
+
+    @api.autovacuum
+    def _gc_old_logs(self):
+        """30 günden eski logları sil."""
+        cutoff = fields.Datetime.subtract(fields.Datetime.now(), days=30)
+        # NEDEN: ORM unlink yerine tek DELETE; bu tabloya bağlı bir kayıt/FK yok, biriken satırlar hızlı silinsin.
+        self.env.cr.execute("DELETE FROM amazon_sync_log WHERE create_date < %s", (cutoff,))
+        self.invalidate_model()

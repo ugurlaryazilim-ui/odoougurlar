@@ -4,6 +4,7 @@ import logging
 import os
 import subprocess
 import tempfile
+import time
 from urllib.parse import quote
 
 import re
@@ -13,10 +14,14 @@ from markupsafe import Markup, escape
 from odoo import fields, http
 from odoo.http import request
 from odoo.service.model import PG_CONCURRENCY_EXCEPTIONS_TO_RETRY
+from odoo.addons.odoougurlar.services.nebim_connector import WRITE_CHAIN_TIMEOUT
 
 from .base_api import BarcodeApiBase
 
 _logger = logging.getLogger(__name__)
+
+# packing_complete'te Nebim zincirine ayrılan toplam süre (sn); aşılınca kalan siparişler ertelenir
+NEBIM_COMPLETE_BUDGET = 75
 
 
 # ── PDF etiket HTML'i: pazaryeri / şablon değerleri kaçışsız yazılırsa wkhtmltopdf
@@ -506,9 +511,12 @@ class PackingApiController(BarcodeApiBase):
                             done_replacement_picking.origin)
                         # Batch'e ekle
                         try:
-                            batch.sudo().all_picking_ids = [(4, done_replacement_picking.id)]
+                            with request.env.cr.savepoint():
+                                batch.sudo().all_picking_ids = [(4, done_replacement_picking.id)]
                         except Exception:
-                            pass
+                            _logger.warning(
+                                'Replacement picking rotaya eklenemedi (batch=%s, picking=%s)',
+                                batch.name, done_replacement_picking.name, exc_info=True)
                         # Nebim sync'i tetikle (fatura oluşsun)
                         try:
                             self._trigger_nebim_sync(done_replacement_picking)
@@ -669,25 +677,20 @@ class PackingApiController(BarcodeApiBase):
         target_move.write({'packing_scanned_qty': new_qty})
 
         # Log
+        # NEDEN: okutma başına ürün chatter'ı yazılmaz (mail_message + bildirim hesabı, tablo
+        # sınırsız büyür); iz ugurlar.barcode.operation kaydında tutulur
         try:
-            user = request.env.user
-            request.env['ugurlar.barcode.operation'].sudo().create({
-                'operation_type': 'picking',
-                'barcode': barcode,
-                'product_id': product.id,
-                'quantity': 1,
-                'state': 'done',
-            })
-
-            # Chatter log for scan
-            msg = Markup(
-                '<b>&#128230; Paketleme Eslestirme:</b> <em>%s</em> tarafindan '
-                '<b>%s</b> siparisinde <b>%s</b> 1 adet eslestirildi.'
-            ) % (user.name, target_picking.name, product.display_name)
-            product.sudo().message_post(
-                body=msg, message_type='notification', subtype_xmlid='mail.mt_note')
+            with request.env.cr.savepoint():
+                request.env['ugurlar.barcode.operation'].sudo().create({
+                    'operation_type': 'picking',
+                    'barcode': barcode,
+                    'product_id': product.id,
+                    'quantity': 1,
+                    'state': 'done',
+                })
         except Exception:
-            pass
+            _logger.warning('Paketleme okutma operasyon logu yazılamadı (barkod=%s)',
+                            barcode, exc_info=True)
 
         # Check if individual picking is complete (paketleme bazlı)
         progress = self._packing_progress(target_picking, all_pickings)
@@ -695,18 +698,19 @@ class PackingApiController(BarcodeApiBase):
         picking_matched = progress['picking_matched']
         picking_completed = progress['picking_completed']
 
-        # ─── DEBUG LOG ───
-        _logger.info(
-            "PACKING SCAN %s: product=%s, new_packing_qty=%s, "
-            "picking=%s (state=%s), picking_completed=%s, "
-            "moves=[%s]",
-            batch.name, product.display_name, new_qty,
-            target_picking.name, target_picking.state, picking_completed,
-            ', '.join(
-                f'{m.product_id.display_name}: packing={m.packing_scanned_qty}/{m.product_uom_qty} state={m.state}'
-                for m in target_picking.move_ids
+        # NEDEN: her okutmada INFO + tüm move display_name hesabı gereksizdi; yalnız debug açıkken
+        if _logger.isEnabledFor(logging.DEBUG):
+            _logger.debug(
+                "PACKING SCAN %s: product=%s, new_packing_qty=%s, "
+                "picking=%s (state=%s), picking_completed=%s, "
+                "moves=[%s]",
+                batch.name, product.display_name, new_qty,
+                target_picking.name, target_picking.state, picking_completed,
+                ', '.join(
+                    f'{m.product_id.display_name}: packing={m.packing_scanned_qty}/{m.product_uom_qty} state={m.state}'
+                    for m in target_picking.move_ids
+                )
             )
-        )
 
         # Picking'in ve aynı siparişin diğer picking'lerinin kalan ürünleri
         all_siblings_complete = progress['siblings_complete']
@@ -832,9 +836,11 @@ class PackingApiController(BarcodeApiBase):
                 '<b>&#10060; Hatalı Okutmayi Geri Alma:</b> <em>%s</em> tarafindan '
                 '<b>%s</b> siparisinden 1 adet <b>%s</b> cikarildi (Eksi islemi).'
             ) % (user.name, picking.name, product.display_name)
-            picking.message_post(body=msg, message_type='notification')
+            with request.env.cr.savepoint():
+                picking.message_post(body=msg, message_type='notification')
         except Exception:
-            pass
+            _logger.warning('Okutma geri alma notu yazılamadı (picking=%s)', picking.name,
+                            exc_info=True)
 
         return {'success': True, 'message': f'{product.name} siparişten 1 adet eksiltildi.'}
 
@@ -907,10 +913,12 @@ class PackingApiController(BarcodeApiBase):
             if picking.origin and picking.origin in cancelled_origins:
                 if picking.state not in ('done', 'cancel'):
                     try:
-                        picking.action_cancel()
+                        with request.env.cr.savepoint():
+                            picking.action_cancel()
                         _logger.info("İptal sipariş picking'i iptal edildi: %s", picking.name)
                     except Exception:
-                        pass
+                        _logger.warning("İptal sipariş picking'i iptal edilemedi: %s",
+                                        picking.name, exc_info=True)
                 skipped.append(f"{picking.name} (sipariş iptal)")
                 skipped_ids.append(picking.id)
                 continue
@@ -972,11 +980,20 @@ class PackingApiController(BarcodeApiBase):
         # Nebim sipariş başına bir kez, tüm doğrulamalardan sonra: fatura kapısı
         # (`_trigger_nebim_sync`) kardeşlerin son durumunu görür
         synced_origins = set()
+        deferred = []
+        # NEDEN: bütçe istemci RPC süresinin (~90 sn) altında tutulur ki yanıt (ertelenen listesi)
+        # istemciye ulaşsın. Bütçe SİPARİŞLER ARASINDA kontrol edilir; başlamış bir sipariş zinciri
+        # (çağrı başına 60 sn) bütçeyi aşabilir. Süre dolunca kalanlar atlanır: picking'ler zaten
+        # done, nebim_* bayrakları yazılmadığı için tekrar "Tamamla" ya da cron aynı yerden devam eder.
+        deadline = time.monotonic() + NEBIM_COMPLETE_BUDGET
         for picking in shipped:
             key = picking.origin or picking.id
             if key in synced_origins:
                 continue
             synced_origins.add(key)
+            if time.monotonic() > deadline:
+                deferred.append(picking.name)
+                continue
             try:
                 self._trigger_nebim_sync(picking)
             except PG_CONCURRENCY_EXCEPTIONS_TO_RETRY:
@@ -984,6 +1001,10 @@ class PackingApiController(BarcodeApiBase):
             except Exception as e:
                 _logger.exception("Sipariş Senkronizasyon Hatası %s:", picking.name)
                 errors.append(f"{picking.name}: {self._error_text(e)}")
+        if deferred:
+            errors.append(
+                f"Nebim aktarımı süre sınırı nedeniyle ertelendi ({', '.join(deferred)}): "
+                "Tamamla'ya tekrar basın.")
 
         # Rota kapanışı (tek kural). Filtresiz liste: iptal siparişin picking'i yukarıda
         # iptal edildi; iptal edilemeyen açık picking varken rota kapanmaz
@@ -1530,7 +1551,15 @@ class PackingApiController(BarcodeApiBase):
         Hata olsa bile picking validation'ı ve UI çalışmaya devam eder.
         """
         from odoo import fields
-        
+
+        # NEDEN: zincir (cari / sipariş / fatura) bir HTTP isteği içinde koşar; Nebim asılırsa
+        # çağrı başına 300 sn x 2 deneme worker'ı dakikalarca tutuyordu. Context processor'lardan
+        # connector'a kadar yayılır (bağlantı dahil yeniden deneme yok); cron yolunda bu context yok,
+        # 300 sn / 2 deneme kalır. 60 sn ÇAĞRI başınadır: Nebim tamamen asılıysa tek sipariş en kötü
+        # birkaç dakika sürebilir (bu yüzden Tamamla'da süre bütçesi var). Yeniden denemenin kapanması
+        # oturum süresi dolduğunda o çağrının hata vermesi demektir; mükerrer belge riski yoktur,
+        # sonraki Tamamla / cron nebim_* bayraklarından devam eder.
+        picking = picking.with_context(nebim_timeout=WRITE_CHAIN_TIMEOUT, nebim_retries=0)
         sale_order = picking.sale_id
         if not sale_order and picking.origin:
             sale_order = picking.env['sale.order'].sudo().search([('name', '=', picking.origin)], limit=1)

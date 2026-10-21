@@ -274,7 +274,7 @@ class HepsiburadaStore(models.Model):
     def action_sync_now(self):
         """Bu mağaza için manuel sipariş senkronizasyonu başlatır"""
         self.ensure_one()
-        self.env['hepsiburada.order.sync']._sync_store_orders(self.sudo())
+        self.env['hepsiburada.order.sync']._sync_store_orders(self.sudo(), force=True)
         return self._notify('Senkronizasyon', 'Sipariş senkronizasyonu tamamlandı. Detay için loglara bakın.', 'success')
 
     def action_view_orders(self):

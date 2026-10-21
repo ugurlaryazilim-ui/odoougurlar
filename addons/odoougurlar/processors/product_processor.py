@@ -2,6 +2,7 @@ import logging
 from collections import defaultdict
 
 from odoo import models, fields, api
+from odoo.tools import float_compare
 
 _logger = logging.getLogger(__name__)
 
@@ -16,7 +17,8 @@ _CACHE = {
     'categs': {},        # name → category record
     'taxes': {},         # (type_use, amount) → tax record
     'tax_groups': {},    # name → tax_group record
-    'barcodes': set(),   # tüm mevcut barkodlar
+    'barcodes': set(),   # mevcut barkodlar (kısıtlı yüklemede yalnız partidekiler)
+    'sync_ids': set(),   # nebim_last_sync'i toplu güncellenecek template id'leri
 }
 
 
@@ -54,23 +56,71 @@ class ProductProcessor(models.AbstractModel):
     # =================================================================
     #  Cache
     # =================================================================
+    @api.model
+    def _batch_names(self, rows):
+        """Partideki satırların ihtiyaç duyacağı (değer adı, kategori adı, barkod) kümeleri.
+
+        # DIKKAT: strip/yedek alan mantığı _process_product_group / _map_variant_details ile
+        # birebir aynı olmalı; farklı olursa kısıtlı cache'te kayıt "yok" görünür ve
+        # mükerrer nitelik değeri / kategori oluşur.
+        """
+        # NEDEN: bozuk kayıt (dict olmayan satır, str olmayan alan) burada patlamamalı; ad
+        # toplama yalnız cache kapsamını belirler, bozuk kaydı asıl işleme kendi başına hataya düşürür.
+        def text(value):
+            return str(value or '').strip()
+
+        val_names, categ_names, barcodes = set(), set(), set()
+        for row in rows:
+            if not isinstance(row, dict):
+                continue
+            color = text(row.get('ColorDescription')) or text(row.get('ColorCode'))
+            size = text(row.get('ItemDim1Code'))
+            val_names.update(n for n in (color, size) if n)
+            for json_field in self.PRODUCT_ATT_MAP:
+                value = text(row.get(json_field))
+                if value:
+                    val_names.add(value)
+            categ = text(row.get('ProductAtt04Desc'))
+            if categ:
+                categ_names.add(categ)
+            barcodes.update(b for b in (text(row.get('Barcode1')), text(row.get('Barcode2'))) if b)
+        return val_names, categ_names, barcodes
+
     @api.private
-    def _init_cache(self):
-        """Batch başında 1 kez çağrılır — tüm lookup'ları _CACHE'e yükler."""
+    def _init_cache(self, rows=None):
+        """Batch başında 1 kez çağrılır — lookup'ları _CACHE'e yükler.
+
+        rows verilirse (kuyruk partisi) nitelik değeri, kategori ve barkod cache'i yalnız
+        partideki adlarla sınırlı yüklenir; her 200'lük partide tüm tablolar yeniden
+        okunmaz. rows verilmezse (test butonları) eski gibi tam yükleme yapılır.
+        """
         global _CACHE
-        _logger.info("Cache yükleniyor...")
+        _logger.info("Cache yükleniyor (%s)...", 'kısıtlı' if rows is not None else 'tam')
+
+        restricted = rows is not None
+        if restricted:
+            try:
+                val_names, categ_names, batch_barcodes = self._batch_names(rows)
+            except Exception as e:
+                # Ad toplanamadıysa tam yükleme: parti takılmaz, bozuk kayıt işlemede error olur
+                _logger.warning("Parti adları toplanamadı, tam cache yüklenecek: %s", e)
+                restricted = False
 
         _CACHE['attrs'] = {}
         for attr in self.env['product.attribute'].sudo().search([]):
             _CACHE['attrs'][attr.name] = attr
 
         _CACHE['vals'] = {}
-        for val in self.env['product.attribute.value'].sudo().search([]):
-            _CACHE['vals'][(val.attribute_id.id, val.name)] = val
+        val_domain = [('name', 'in', list(val_names))] if restricted else []
+        if not restricted or val_names:
+            for val in self.env['product.attribute.value'].sudo().search(val_domain):
+                _CACHE['vals'][(val.attribute_id.id, val.name)] = val
 
         _CACHE['categs'] = {}
-        for cat in self.env['product.category'].sudo().search([]):
-            _CACHE['categs'][cat.name] = cat
+        categ_domain = [('name', 'in', list(categ_names))] if restricted else []
+        if not restricted or categ_names:
+            for cat in self.env['product.category'].sudo().search(categ_domain):
+                _CACHE['categs'][cat.name] = cat
 
         _CACHE['taxes'] = {}
         company_id = self.env.company.id
@@ -84,12 +134,24 @@ class ProductProcessor(models.AbstractModel):
             _CACHE['tax_groups'][tg.name] = tg
 
         _CACHE['barcodes'] = set()
-        self.env.cr.execute(
-            "SELECT barcode FROM product_product WHERE barcode IS NOT NULL"
-        )
-        _CACHE['barcodes'] = {r[0] for r in self.env.cr.fetchall()}
+        if restricted:
+            # Yalnız partideki barkodlar: tüm product_product.barcode'u Python'a çekmek yerine
+            # indeksli ANY() sorgusu.
+            if batch_barcodes:
+                self.env.cr.execute(
+                    "SELECT barcode FROM product_product WHERE barcode = ANY(%s)",
+                    [list(batch_barcodes)],
+                )
+                _CACHE['barcodes'] = {r[0] for r in self.env.cr.fetchall()}
+        else:
+            self.env.cr.execute(
+                "SELECT barcode FROM product_product WHERE barcode IS NOT NULL"
+            )
+            _CACHE['barcodes'] = {r[0] for r in self.env.cr.fetchall()}
 
         _CACHE['lines'] = {}
+        _CACHE['sync_ids'] = set()
+        _CACHE['restricted'] = restricted
 
         # Alan koruma ayarları (AI / Manuel başlık, açıklama, fiyat, kategori koruması)
         ICP = self.env['ir.config_parameter'].sudo()
@@ -123,6 +185,77 @@ class ProductProcessor(models.AbstractModel):
         if not _CACHE.get('loaded'):
             self._init_cache()
 
+    @api.private
+    def _reset_cache(self):
+        """Kısıtlı (parti) cache'i bırak: sonraki çağıran tam cache'i yeniden yükler.
+
+        # DIKKAT: kısıtlı cache'te yalnız partideki adlar var; kuyruk dışı bir çağıran
+        # (dashboard test butonları) onu görürse mevcut değer/kategori "yok" sanıp mükerrer
+        # oluşturur. Kuyruk partisi bitince mutlaka çağrılır.
+        """
+        _CACHE['loaded'] = False
+        _CACHE['restricted'] = False
+        _CACHE['sync_ids'] = set()
+
+    # =================================================================
+    #  Karşılaştırmalı yazma + toplu nebim_last_sync
+    # =================================================================
+    @api.model
+    def _changed_vals(self, record, vals):
+        """vals içinden kayıttaki mevcut değerden gerçekten farklı olanları döndürür.
+
+        NEDEN: Her senkronda karşılaştırmasız write, değişmeyen ürünlerde bile UPDATE,
+        stored compute ve default_code inverse'ünü (varyantlara) tetikliyordu.
+        """
+        changed = {}
+        for fname, new in vals.items():
+            field = record._fields[fname]
+            if field.type == 'many2many':
+                # Yalnız tek (6, 0, ids) komutu kullanılıyor: küme karşılaştırması
+                if set(record[fname].ids) != set(new[0][2]):
+                    changed[fname] = new
+            elif field.type == 'many2one':
+                if record[fname].id != new:
+                    changed[fname] = new
+            elif field.type == 'float':
+                # list_price vb.: Ürün Fiyatı ondalık hassasiyetiyle karşılaştır (0.001 farkı değişiklik değil)
+                digits = self.env['decimal.precision'].precision_get('Product Price')
+                if float_compare(record[fname] or 0.0, new or 0.0, precision_digits=digits) != 0:
+                    changed[fname] = new
+            elif field.type in ('char', 'text', 'html', 'selection'):
+                # False/'' aynı sayılır; html için alanın kendi sanitize'ı uygulanır
+                current = str(record[fname] or '')
+                incoming = str(field.convert_to_cache(new, record) or '')
+                if current != incoming:
+                    changed[fname] = new
+            elif record[fname] != new:
+                changed[fname] = new
+        return changed
+
+    @api.private
+    def _flush_last_sync(self):
+        """Biriken template'lerin nebim_last_sync'ini tek SQL UPDATE ile yazar.
+
+        NEDEN: nebim_last_sync her senkronda değiştiği için template.write içinde olursa
+        her ürün için kesin UPDATE + write_date/mail tracking + compute tetikler. Burada
+        ORM'siz yazılır; write_date'e de dokunulmaz (böylece write_date'e bakan pazaryeri/
+        senkron kodları yalnız gerçekten değişen ürünleri görür).
+        """
+        ids = list(_CACHE.get('sync_ids') or ())
+        _CACHE['sync_ids'] = set()
+        if not ids:
+            return
+        try:
+            with self.env.cr.savepoint():
+                self.env.cr.execute(
+                    "UPDATE product_template SET nebim_last_sync = %s WHERE id = ANY(%s)",
+                    [fields.Datetime.now(), ids],
+                )
+            self.env['product.template'].browse(ids).invalidate_recordset(['nebim_last_sync'])
+        except Exception as e:
+            # Bilgi amaçlı alan: yazılamaması ürün senkronunu düşürmemeli
+            _logger.warning("nebim_last_sync toplu güncellenemedi: %s", e)
+
     # =================================================================
     #  Ana İşlem
     # =================================================================
@@ -146,7 +279,8 @@ class ProductProcessor(models.AbstractModel):
             stats['processed'] += 1
             try:
                 with self.env.cr.savepoint():
-                    result = self._process_product_group(item_code, variants)
+                    result = self._process_product_group(
+                        item_code, variants, defer_last_sync=True)
                     if result == 'created':
                         stats['created'] += 1
                     elif result == 'updated':
@@ -155,11 +289,16 @@ class ProductProcessor(models.AbstractModel):
                 stats['failed'] += 1
                 _logger.error("Ürün işleme hatası [%s]: %s", item_code, str(e))
 
+        self._flush_last_sync()
         return stats
 
     @api.private
-    def _process_product_group(self, item_code, variants):
-        """Bir ItemCode → 1 template + N varyant."""
+    def _process_product_group(self, item_code, variants, defer_last_sync=False):
+        """Bir ItemCode → 1 template + N varyant.
+
+        defer_last_sync=True: nebim_last_sync güncellemesi çağıranın `_flush_last_sync`
+        çağrısına bırakılır (kuyruk partisi başına tek UPDATE). False: hemen yazılır.
+        """
         self._ensure_cache()
 
         ProductTemplate = self.env['product.template'].sudo()
@@ -184,7 +323,6 @@ class ProductProcessor(models.AbstractModel):
             'default_code': item_code,
             'nebim_code': item_code,
             'nebim_synced': True,
-            'nebim_last_sync': fields.Datetime.now(),
             'type': 'consu',
             'is_storable': True,
         }
@@ -224,10 +362,20 @@ class ProductProcessor(models.AbstractModel):
             if _CACHE.get('prevent_categ', False):
                 template_vals.pop('categ_id', None)
 
-            template.write(template_vals)
+            # NEDEN: varyanta ItemSku geliyorsa varyant eşlemesi (_map_variant_details) iç
+            # referansı belirler (tek varyantta template.default_code = varyant SKU'su). Template'e
+            # ItemCode yazmak her senkronda inverse ile varyantı ItemCode'a çekip sonra SKU'ya
+            # geri döndürüyordu (karşılaştırma hep "değişti" derdi). SKU yoksa ItemCode yazılır.
+            if any((v.get('ItemSku') or '').strip() for v in variants):
+                template_vals.pop('default_code', None)
+
+            changed = self._changed_vals(template, template_vals)
+            if changed:
+                template.write(changed)
             result = 'updated'
         else:
             # Yeni ürün: İlk kez oluşturulurken tüm alanlar Nebim'den atanır
+            template_vals['nebim_last_sync'] = fields.Datetime.now()
             template = ProductTemplate.create(template_vals)
             result = 'created'
 
@@ -252,6 +400,13 @@ class ProductProcessor(models.AbstractModel):
 
         # ProductAtt nitelikleri
         self._sync_product_attributes(template, first)
+
+        # Grup başarıyla bittikten sonra işaretlenir (savepoint geri alınan grup işaretlenmez).
+        # Yeni ürünün nebim_last_sync'i create ile yazıldı; yalnız mevcutlar toplu güncellenir.
+        if result == 'updated':
+            _CACHE['sync_ids'].add(template.id)
+            if not defer_last_sync:
+                self._flush_last_sync()
 
         return result
 
@@ -378,6 +533,10 @@ class ProductProcessor(models.AbstractModel):
                 update_vals['nebim_variant_code'] = f"{color_code}-{size}"
             elif color_code:
                 update_vals['nebim_variant_code'] = color_code
+
+            # Yalnız değişenler yazılır (default_code değişimi template'e compute/inverse
+            # tetiklediği için değişmeyende write hiç yapılmaz).
+            update_vals = self._changed_vals(variant, update_vals)
 
             # Maliyet (Price2, KDV dahil): 0/boş gelirse mevcut maliyet ezilmez
             if _CACHE.get('update_cost'):
