@@ -173,7 +173,7 @@ class TestPaymentModel(ModelCase):
             'sanal_pos.paratika_live_url', '  https://vpos.example/paratika/api/v2/  ')
         payment = self.make_payment(provider_token='TOK-LINK-3', environment='live')
         expected = self.env['sanal.pos.provider.paratika']._link_url(payment, 'TOK-LINK-3')
-        self.assertEqual(expected, 'https://vpos.example/merchant/payment/TOK-LINK-3')
+        self.assertEqual(expected, 'https://vpos.example/payment/TOK-LINK-3?lang=tr')
         self.assertEqual(payment.link_url, expected)
 
     def test_kk17_token_yoksa_link_yok(self):

@@ -77,7 +77,7 @@ Sıralı özet (ayrıntılar aşağıda ve 1-5. bölümlerde):
 - **R-3 / REFUND `pgTranId`:** REFUND yanıtındaki `pgTranId` iade işleminin mi, satışın mı? QUERYTRANSACTION VOID/REFUND/PTREFUND'u hangi biçimde döndürüyor? (Eşleşmezse iade satırı `Belirsiz` kalır ve yönetici uyarılır; para çıkışı için kritik.) Gerçek yanıtları `tests/` taklitlerine örnek olarak ekleyin.
 - **P-10 gün sonu saati:** VOID'den REFUND'a geçiş saati ve kısmi iade sayısı sınırı.
 - **Telefon biçimi:** hangi biçim SMS'i ulaştırıyor (Ayarlar > Telefon biçimi).
-- **Link token ve adres:** `sessionToken` = `PAYBYLINKTOKEN` mi (yeniden gönder ve iptal bunu kullanır); link adresi `/merchant/payment/<token>` mı? Doğruysa "Link adresini göster" açılır.
+- ~~**Link token ve adres**~~ — teyit edildi (2026-10-21, canlı SMS): `sessionToken` linkteki token ile aynı; adres `https://vpos.paratika.com.tr/payment/<token>?lang=tr` (`/merchant/payment/` hata verir).
 - **QUERYTRANSACTION boş yanıt:** Paratika'da hiç oluşmamış bir `MERCHANTPAYMENTID` için `responseCode=00` + boş liste mi döner, hata kodu mu? (Hata kodu dönerse "link bulunamadı" kayıtları link süresi boyunca kilitli kalır.)
 - **PAYBYLINKSTATUS değerleri:** yalnız `SD` görüldü; tüm değerler listelenip eşleme doğrulanır.
 - Dönüşün POST olduğunu doğrulayın (GET gelirse tasarım değişikliği gerekir).
