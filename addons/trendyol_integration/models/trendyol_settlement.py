@@ -948,13 +948,23 @@ class TrendyolSettlement(models.Model):
     # yolu burası olduğundan, geç içeri alınan eski siparişin kayıtları 30 gün kesmesiyle kalıcı bağsız
     # kalıyordu (A4 Ö2). Bunun yerine dönen imleç (ICP, son işlenen id) tüm bağsızları sırayla dener.
     _RELINK_LIMIT = 2000
+    # NEDEN: kotanın 1/4'ü en yeni bağsızlara ayrılır; imleç (id artan) yalnız eskiden yeniye ilerlediği için
+    # kalıcı bağsız birikim büyükse geç içeri alınan YENİ siparişin kaydı "birikim/kota" saat beklerdi (A4 YÖ-3).
+    _RELINK_NEWEST_SHARE = 4
 
     def _relink_batch(self, domain, store):
-        """Dönen imleçle bir tur: id > imleç ilk, sona gelince baştan tamamlar. Dönüş: kayıtlar."""
-        icp = self.env['ir.config_parameter'].sudo()
+        """Bir tur: en yeni N + dönen imleç (id > imleç ilk, sona gelince baştan tamamlar).
+
+        Dönüş: (kayıtlar, yeni_imleç). İmleç burada YAZILMAZ: çağıran turun sonunda bir kez yazar.
+        """
         key = 'trendyol_integration.relink_cursor.%s' % store.id
-        cursor = int(icp.get_param(key, 0) or 0)
+        cursor = int(self.env['ir.config_parameter'].sudo().get_param(key, 0) or 0)
         limit = self._RELINK_LIMIT
+        n_newest = limit // self._RELINK_NEWEST_SHARE
+        # DIKKAT: Odoo'da limit=0 "sınırsız" demektir; kota küçükse en yeni parçayı hiç aramayız.
+        newest = self.search(domain, order='id desc', limit=n_newest) if n_newest else self.browse()
+        limit -= len(newest)
+        domain = domain + [('id', 'not in', newest.ids)]   # aynı kayıt iki kez kota yemesin
         batch = self.search(domain + [('id', '>', cursor)], order='id', limit=limit)
         new_cursor = batch[-1].id if len(batch) == limit else 0
         if len(batch) < limit:
@@ -963,8 +973,13 @@ class TrendyolSettlement(models.Model):
             head = self.search(domain + [('id', '<=', cursor)], order='id', limit=room)
             batch |= head
             new_cursor = head[-1].id if len(head) == room else 0
-        icp.set_param(key, str(new_cursor))
-        return batch
+        return newest | batch, new_cursor
+
+    def _relink_save_cursor(self, store, new_cursor):
+        # set_param değer aynıysa yazmaz; değişince ir.config_parameter yazımı ormcache'i temizler,
+        # bu yüzden tur başına en çok bir kez yazılır.
+        self.env['ir.config_parameter'].sudo().set_param(
+            'trendyol_integration.relink_cursor.%s' % store.id, str(new_cursor))
 
     @api.private
     def _relink_unlinked_settlements(self, store, full=False):
@@ -980,8 +995,14 @@ class TrendyolSettlement(models.Model):
             ('order_number', '!=', False),
             ('shipment_package_id', '!=', False),
         ]
-        unlinked = self.search(domain) if full else self._relink_batch(domain, store)
+        new_cursor = None
+        if full:
+            unlinked = self.search(domain)
+        else:
+            unlinked, new_cursor = self._relink_batch(domain, store)
         if not unlinked:
+            if new_cursor is not None:
+                self._relink_save_cursor(store, new_cursor)
             return
 
         cache = self._order_cache(store, {(r.shipment_package_id or '', r.order_number or '')
@@ -1000,6 +1021,9 @@ class TrendyolSettlement(models.Model):
         for order_id, ids in by_order.items():
             self.browse(ids).sudo().write({'order_id': order_id})
             linked_count += len(ids)
+        # NEDEN: imleç işlem bittikten sonra ilerler; tur ortasında hata olursa aynı parça yeniden denenir.
+        if new_cursor is not None:
+            self._relink_save_cursor(store, new_cursor)
 
         if linked_count:
             _logger.info("Finansal kayıt eşleştirme [%s]: %s kayıt bağlandı",

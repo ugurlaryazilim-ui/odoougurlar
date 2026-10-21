@@ -11,6 +11,7 @@ import requests
 
 from odoo import models, fields, api
 from odoo.exceptions import UserError
+from odoo.service.model import PG_CONCURRENCY_EXCEPTIONS_TO_RETRY
 
 _logger = logging.getLogger(__name__)
 
@@ -606,6 +607,13 @@ class UgurlarInvoiceCollectorWizard(models.Model):
                 # sonraki işin commit'ine taşımasın (A4 Ö-4).
                 with self.env.cr.savepoint():
                     retrigger = job._cron_process_one() or retrigger
+            except PG_CONCURRENCY_EXCEPTIONS_TO_RETRY:
+                # NEDEN: geçici kilit/serileştirme çakışması (ör. kullanıcı aynı satırı formda değiştiriyor)
+                # işi kalıcı 'error'a düşürmesin; savepoint geri alındı, iş 'downloading' kalır ve sonraki
+                # turda (cron aralığı ya da etkileşimli adım) yeniden denenir. Bilerek _trigger() yok:
+                # kalıcı çakışmada cron saniyelik döngüye girerdi.
+                _logger.warning("Cron: Job ID %d eşzamanlılık çakışması; sonraki turda denenecek.", job.id,
+                                exc_info=True)
             except Exception:
                 _logger.exception("Cron hatası (Job ID %d); iş geri alındı ve hataya çekildi.", job.id)
                 # NEDEN: aynı hatalı iş her dakika yeniden denenmesin; kullanıcı formdan sıfırlayabilir.
@@ -619,6 +627,7 @@ class UgurlarInvoiceCollectorWizard(models.Model):
 
     def _cron_process_one(self):
         """Tek işin bir cron dilimi; ilerleme sürüyorsa (bekleyen satır kaldıysa) True döner."""
+        self.ensure_one()
         job = self
         start_time = time.time()
         while time.time() - start_time < 25.0:

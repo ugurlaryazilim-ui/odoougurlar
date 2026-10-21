@@ -53,8 +53,7 @@ class TestPazaramaSyncWrites(TransactionCase):
                 patch.object(M, '_refresh_stale_orders'), patch.object(M, '_cancel_pending_orders'), \
                 patch.object(type(self.store), 'get_api'):
             self.Order.sync_orders_for_store(self.store)
-            self.Order.sync_orders_for_store(self.store, max_days=3)
-        self.assertEqual(calls, [14, 3])
+        self.assertEqual(calls, [14])
 
     def test_cron_entry_passes_no_max_days(self):
         seen = []

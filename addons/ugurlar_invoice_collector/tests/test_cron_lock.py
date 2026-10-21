@@ -3,6 +3,7 @@ import itertools
 from types import SimpleNamespace
 from unittest.mock import patch
 
+from odoo.service.model import PG_CONCURRENCY_EXCEPTIONS_TO_RETRY
 from odoo.tests import TransactionCase, tagged
 
 WIZ = 'odoo.addons.ugurlar_invoice_collector.wizard.invoice_collector_wizard'
@@ -63,6 +64,27 @@ class TestInvoiceCollectorCronLock(TransactionCase):
             self.Job._cron_process_download_jobs()
         self.assertEqual(self.job.state, 'error')
         self.assertEqual(set(self.job.line_ids.mapped('download_status')), {'pending'})
+
+    def test_cron_concurrency_error_keeps_job_pending_not_error(self):
+        # A4 YÖ-5: PG kilit/serileştirme çakışması geçicidir; iş 'error'a düşmez, yarım yazım geri alınır
+        cron = self.env.ref('ugurlar_invoice_collector.cron_process_invoice_collector_jobs')
+        triggers = self.env['ir.cron.trigger'].search_count([('cron_id', '=', cron.id)])
+        exc = PG_CONCURRENCY_EXCEPTIONS_TO_RETRY[0]('test kilit hatası')
+
+        def half_then_conflict(job, lines):
+            lines[:1].write({'download_status': 'success'})
+            raise exc
+
+        with patch.object(self.Job.__class__, '_process_batch_lines', half_then_conflict):
+            self.Job._cron_process_download_jobs()
+        self.assertEqual(self.job.state, 'downloading')
+        self.assertEqual(set(self.job.line_ids.mapped('download_status')), {'pending'})
+        self.assertEqual(self.env['ir.cron.trigger'].search_count([('cron_id', '=', cron.id)]), triggers)
+
+    def test_cron_process_one_requires_single_record(self):
+        # A4 YÖ-8
+        with self.assertRaises(ValueError):
+            (self.job | self.Job.create({}))._cron_process_one()
 
     def test_cron_failure_of_one_job_does_not_stop_next_job(self):
         other = self.Job.create({'state': 'downloading', 'batch_size': 1,

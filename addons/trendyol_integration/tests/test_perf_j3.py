@@ -81,6 +81,33 @@ class TestTrendyolPerfJ3(TransactionCase):
             self.S._relink_unlinked_settlements(self.store)
         self.assertEqual(late.order_id, order)
 
+    def test_relink_newest_share_links_late_new_order_in_first_turn(self):
+        # A4 YÖ-3: kalıcı bağsız birikim kotayı doldursa da en yeni kayıt ilk turda denenir (kota/4 = 1)
+        for i in range(5):
+            self._settle('j3n%d' % i, 1, order_number='J3-NONE-N%d' % i)
+        order = self._order('J3-NEW', 'J3-NEWP')
+        late = self._settle('j3new', 1, order_number='J3-NEW')
+        ICP = self.env['ir.config_parameter'].sudo()
+        key = 'trendyol_integration.relink_cursor.%s' % self.store.id
+        ICP.set_param(key, '0')
+        with patch.object(type(self.S), '_RELINK_LIMIT', 4):
+            self.S._relink_unlinked_settlements(self.store)
+        self.assertEqual(late.order_id, order)
+        # imleç en yeni parçayı atlayıp eski bağsızlar üzerinde ilerler (3 kayıt), kuyruğun sonuna sıçramaz
+        first_three = self.S.search([('trendyol_id', 'in', ['j3n0', 'j3n1', 'j3n2'])], order='id')
+        self.assertEqual(int(ICP.get_param(key)), first_three[-1].id)
+
+    def test_relink_cursor_not_advanced_when_turn_fails(self):
+        # imleç turun SONUNDA yazılır: tur ortasında hata olursa aynı parça yeniden denenir
+        self._settle('j3f1', 1, order_number='J3-FAIL')
+        ICP = self.env['ir.config_parameter'].sudo()
+        key = 'trendyol_integration.relink_cursor.%s' % self.store.id
+        ICP.set_param(key, '0')
+        with patch.object(type(self.S), '_find_order', side_effect=RuntimeError('boom')):
+            with self.assertRaises(RuntimeError):
+                self.S._relink_unlinked_settlements(self.store)
+        self.assertEqual(ICP.get_param(key), '0')
+
     def test_relink_full_scans_everything(self):
         order_old = self._order('J3-F', 'J3-FP')
         old = self._settle('j3f', 90, order_number='J3-F')

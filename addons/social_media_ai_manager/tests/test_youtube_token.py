@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
-from contextlib import nullcontext
 from unittest.mock import MagicMock, patch
 
+from odoo import SUPERUSER_ID, api
 from odoo.tests import TransactionCase, tagged
 
 POST = 'requests.post'
@@ -26,6 +26,43 @@ class TestYoutubeTokenRefresh(TransactionCase):
         r.json.return_value = {'access_token': token, 'expires_in': expires_in}
         return r
 
+    # ── Çok süreç: GERÇEK ayrı bağlantılar ────────────────────────────────────────────
+    # NEDEN: `_youtube_token_from_other_process` gerçek bir ikinci bağlantıyla okur (`pool.cursor()`); test
+    # işlemi bunu göremez (kaydedilmemiş veri). Bu yüzden satır gerçekten commit edilir, "bu süreç" taze bir
+    # bağlantıdır ve "diğer süreç" üçüncü bir bağlantıyla commit eder: üretimdeki anlık görüntü farkı birebir.
+
+    def _commit_account(self, **vals):
+        with self.registry.cursor() as cr:
+            acc = api.Environment(cr, SUPERUSER_ID, {})['social.media.account'].create(dict(
+                {'name': 'YT-MP', 'platform': 'youtube', 'youtube_refresh_token': 'rt', 'api_token': 'eski'},
+                **vals))
+            acc_id = acc.id
+        self.addCleanup(self._drop_account, acc_id)
+        return acc_id
+
+    def _drop_account(self, acc_id):
+        with self.registry.cursor() as cr:
+            cr.execute("DELETE FROM social_media_account WHERE id = %s", (acc_id,))
+
+    def _other_process_writes(self, acc_id, token, age_seconds):
+        with self.registry.cursor() as cr:
+            cr.execute("UPDATE social_media_account SET api_token = %s, write_date = "
+                       "(now() at time zone 'UTC') - %s * interval '1 second' WHERE id = %s",
+                       (token, age_seconds, acc_id))
+
+    def _run_as_process(self, acc_id, other_token, age_seconds):
+        """Anlık görüntüsü alınmış bir süreçte yenilemeyi çalıştır; diğer süreç araya commit eder."""
+        with self.registry.cursor() as cr:
+            acc = api.Environment(cr, SUPERUSER_ID, {})['social.media.account'].browse(acc_id)
+            self.assertEqual(acc.api_token, 'eski')   # anlık görüntü burada alındı
+            self._other_process_writes(acc_id, other_token, age_seconds)
+            self.assertEqual(acc.api_token, 'eski')   # bu süreç diğerinin commit'ini göremez
+            with patch(POST, return_value=self._resp('YENI')) as post, \
+                    patch.object(type(acc.env['ir.config_parameter']), 'get_param',
+                                 side_effect=lambda key, default=False: 'x'):
+                result = acc._refresh_youtube_token()
+            return result, post, acc.api_token
+
     def test_valid_token_is_not_refreshed_again(self):
         with patch(POST, return_value=self._resp()) as post:
             self.assertTrue(self.account._refresh_youtube_token())
@@ -43,30 +80,21 @@ class TestYoutubeTokenRefresh(TransactionCase):
         self.assertEqual(post.call_count, 2)
         self.assertEqual(self.account.api_token, 'T2')
 
-    # NEDEN: ham SQL, başka sürecin commit ettiği yazımı taklit eder (ORM önbelleği eski kalır, DB satırı yeni).
     def test_fresh_token_from_other_process_is_adopted_without_google_call(self):
-        acc = self.account.create({'name': 'YT2', 'platform': 'youtube', 'youtube_refresh_token': 'rt',
-                                   'api_token': 'eski'})
-        self.env.cr.execute("UPDATE social_media_account SET api_token = 'DIGER', write_date = "
-                            "(now() at time zone 'UTC') - 60 * interval '1 second' WHERE id = %s", (acc.id,))
-        with patch(POST, return_value=self._resp('YENI')) as post, \
-                patch.object(type(acc), 'write', autospec=True) as w, \
-                patch.object(acc.pool, 'cursor', return_value=nullcontext(self.env.cr)):
-            self.assertTrue(acc._refresh_youtube_token())
+        acc_id = self._commit_account()
+        result, post, token = self._run_as_process(acc_id, 'DIGER', age_seconds=60)
+        self.assertTrue(result)
         post.assert_not_called()
-        w.assert_not_called()
-        self.assertEqual(acc.api_token, 'DIGER')
+        self.assertEqual(token, 'DIGER')
 
     def test_old_token_in_db_is_refreshed_normally(self):
-        acc = self.account.create({'name': 'YT3', 'platform': 'youtube', 'youtube_refresh_token': 'rt',
-                                   'api_token': 'eski'})
-        self.env.cr.execute("UPDATE social_media_account SET api_token = 'DIGER', write_date = "
-                            "(now() at time zone 'UTC') - 4000 * interval '1 second' WHERE id = %s", (acc.id,))
-        with patch(POST, return_value=self._resp('YENI')) as post, \
-                patch.object(acc.pool, 'cursor', return_value=nullcontext(self.env.cr)):
-            self.assertTrue(acc._refresh_youtube_token())
+        acc_id = self._commit_account()
+        _result, post, token = self._run_as_process(acc_id, 'DIGER', age_seconds=4000)
+        # NEDEN: eski token benimsenmez, Google'a gidilir. Sonuç (True/False) bilerek denetlenmez: bu yapay
+        # senaryoda (eski write_date'li yazım anlık görüntüden SONRA commit) yeni token yazımı gerçek
+        # REPEATABLE READ altında serileştirme çakışmasına düşer; üretimde eski yazım zaten anlık görüntüden önce.
         self.assertEqual(post.call_count, 1)
-        self.assertEqual(acc.api_token, 'YENI')
+        self.assertNotEqual(token, 'DIGER')
 
     def test_expiring_token_is_refreshed(self):
         # süre payından kısa token önbelleğe girmez → her çağrıda yenilenir
