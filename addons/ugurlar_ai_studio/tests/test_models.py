@@ -594,3 +594,17 @@ class TestAiStudioModels(TransactionCase):
     def test_qty_available_not_stored(self):
         # Stok her okumada değişir; stored kopya bayatlıyordu (kolon DB'de kalır, yazılmaz)
         self.assertFalse(self.Session._fields['qty_available'].store)
+
+    # ── HTTP içi elle silme: toplam süre bütçesi ─────────────────────
+    def test_erase_regions_http_has_time_budget_and_clear_error(self):
+        session = self._session(self.red)
+        gen = self.Gen.create({'session_id': session.id, 'photo_type': 'front', 'state': 'done',
+                               'generated_image': _image_b64()})
+        self.env['ir.config_parameter'].sudo().set_param('ugurlar_ai_studio.fal_api_key', 'k')
+        from ..services.fal_provider import FalProvider
+        box = [[100, 100, 200, 200]]
+        with patch.object(FalProvider, 'erase_regions', side_effect=TimeoutError('x')) as er:
+            with self.assertRaises(UserError) as cm:
+                gen.action_erase_regions(box)
+        self.assertLessEqual(er.call_args.kwargs['budget'], 60, 'HTTP içi çağrı ≤60 sn olmalı')
+        self.assertIn('tekrar deneyin', str(cm.exception))

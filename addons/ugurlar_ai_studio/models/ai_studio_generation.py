@@ -315,6 +315,8 @@ class AiStudioGeneration(models.Model):
                 },
             )
 
+    ERASE_HTTP_BUDGET = 55  # sn; HTTP içi elle silme için toplam fal süre bütçesi
+
     def action_erase_regions(self, boxes):
         """Reviewer'ın işaretlediği bölgeleri (alarm, pim, etiket) maskeli AI ile sil.
 
@@ -345,7 +347,17 @@ class AiStudioGeneration(models.Model):
         import base64
         from ..services.fal_provider import FalProvider
         # Kutu tam işaretlendiği için dar dolgu: çevre kumaşı korunur
-        data, cost = FalProvider(fal_key).erase_regions(self.generated_image, clean, pad_ratio=0.12)
+        # NEDEN: bu metot HTTP isteğinden (controller) çalışır; kuyruk+polling yerine toplam
+        # süre ≤55 sn ile sınırlanır (Odoo worker'ı ve nginx zaman aşımı 60 sn civarı).
+        try:
+            data, cost = FalProvider(fal_key).erase_regions(
+                self.generated_image, clean, pad_ratio=0.12, budget=self.ERASE_HTTP_BUDGET)
+        except Exception as e:
+            # fal_client süre aşımı kendi sınıfını fırlatır; sınıf adında 'Timeout' geçer
+            if not (isinstance(e, TimeoutError) or 'Timeout' in type(e).__name__):
+                raise
+            raise UserError(_('Silme işlemi %d saniyede bitmedi; lütfen biraz sonra tekrar deneyin.')
+                            % self.ERASE_HTTP_BUDGET)
         if not data:
             raise UserError(_('Silme başarısız oldu, lütfen tekrar deneyin.'))
         previous = self.generated_image

@@ -713,6 +713,27 @@ class TestTagErasing(BaseCase):
         self.assertIsNone(data)
         fc.subscribe.assert_not_called()
 
+    def test_erase_regions_budget_caps_timeouts_and_skips_fallback(self):
+        # HTTP içi çağrı: Bria bütçeyi tüketirse FLUX Fill yedeği DENENMEZ, TimeoutError fırlar
+        import time
+        calls = []
+
+        def slow_bria(app, arguments=None, client_timeout=None, **kw):
+            calls.append((app, client_timeout))
+            time.sleep(3.2)
+            raise Exception('bria yavaş')
+
+        with patch.object(fal_provider_module, 'fal_client') as fc:
+            fc.upload.return_value = 'https://cdn/x'
+            fc.subscribe.side_effect = slow_bria
+            with self.assertRaises(TimeoutError):
+                FalProvider('k').erase_regions(
+                    _jpeg_b64(Image.new('RGB', (200, 300))),
+                    [{'box_2d': [100, 100, 150, 200], 'label': 'alarm_tag', 'confidence': 0.9}],
+                    budget=5)
+        self.assertEqual([c[0] for c in calls], [FalProvider.ERASE_APP], 'bütçe bitince yedek çağrılmamalı')
+        self.assertLessEqual(calls[0][1], 5, 'fal zaman aşımı kalan bütçeyi aşmamalı (varsayılan 120 değil)')
+
 
 @tagged('post_install', '-at_install', 'ugurlar_ai_studio')
 class TestImagePipeline(BaseCase):
