@@ -76,6 +76,20 @@ class TestNoScanChatter(PackingCase):
         ops = self._ops(self.prod_a, 'picking')
         self.assertEqual(ops.mapped('quantity'), [-1], 'geri alma eksi miktarlı operasyon kaydı')
 
+    def _picking_count(self):
+        return self.ops_ctl.operator_performance(days=1)['type_totals'].get('Sipariş Toplama', 0)
+
+    def test_scan_then_undo_keeps_picking_performance_count(self):
+        """Okut + geri al: operator_performance toplama sayısı değişmez (net sayım)."""
+        p = self._routed(self.prod_a, 2, wave=0)
+        batch = self._route(p)
+        base = self._picking_count()
+        self.assertTrue(self.batch_ctl.batch_collect_scan(
+            batch_id=batch.id, barcode='CH-A').get('success'))
+        self.assertEqual(self._picking_count(), base + 1)
+        self.assertTrue(self.batch_ctl.batch_undo(move_id=p.move_ids.id).get('success'))
+        self.assertEqual(self._picking_count(), base, 'geri alma performansı şişirmemeli')
+
     def test_collect_complete_writes_single_batch_note(self):
         p = self._routed(self.prod_a, 2, wave=2)
         q = self._routed(self.prod_b, 1, wave=1)

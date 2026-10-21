@@ -214,11 +214,19 @@ class OperationsApiController(BarcodeApiBase):
 
         # Sayımlar veritabanında gruplanır (kayıtlar Python'a yüklenmez): limit gerekmez, toplamlar
         # kesilmez. Yük `days` ≤ 90 sınırı ve gruplama (kullanıcı x tür) ile sınırlıdır.
-        groups = request.env['ugurlar.barcode.operation'].sudo()._read_group(
-            [('create_date', '>=', date_from), ('state', '=', 'done')],
+        Operation = request.env['ugurlar.barcode.operation'].sudo()
+        base_domain = [('create_date', '>=', date_from), ('state', '=', 'done')]
+        groups = Operation._read_group(
+            base_domain + [('quantity', '>=', 0)],
             groupby=['user_id', 'operation_type'],
             aggregates=['__count', 'create_date:max'],
         )
+        # NEDEN: eksi miktarlı satır geri almadır (batch_undo); net sayım için sayıdan düşülür,
+        # yoksa okut + geri al performansı şişirirdi
+        undo_counts = {
+            (user.id, op_type): count for user, op_type, count in Operation._read_group(
+                base_domain + [('quantity', '<', 0)],
+                groupby=['user_id', 'operation_type'], aggregates=['__count'])}
 
         user_stats = {}
         type_labels = {
@@ -237,6 +245,7 @@ class OperationsApiController(BarcodeApiBase):
         total_operations = 0
         for user, op_type, count, last_create in groups:
             uid = user.id if user else False
+            count = max(count - undo_counts.pop((user.id, op_type), 0), 0)
             if uid not in user_stats:
                 user_stats[uid] = {
                     'user_id': uid,
