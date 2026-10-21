@@ -20,7 +20,7 @@ class _ValidationIncomplete(Exception):
 # Basit in-process duplicate guard (son istek hash'i + timestamp)
 _last_requests = {}  # key: user_id + endpoint + args_hash → timestamp
 MAX_BULK_ITEMS = 500  # toplu raflama / sayım tek istekte en fazla bu kadar kalem
-_DEBOUNCE_SECONDS = 0.5 # 500ms içinde aynı istek tekrarlanırsa atla
+_DEBOUNCE_SECONDS = 0.5  # 500ms içinde aynı istek tekrarlanırsa atla
 
 
 class BarcodeApiBase(http.Controller):
