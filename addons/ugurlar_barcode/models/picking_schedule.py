@@ -13,6 +13,9 @@ IST = pytz.timezone('Europe/Istanbul')
 # siparişler her pencerede tekrar tekrar rotaya giriyordu)
 ORPHAN_MAX_AGE = timedelta(days=7)
 
+# Cron'da rezervasyon turunda kaç picking'te bir commit edilir (quant kilit süresi / önbellek maliyeti)
+ASSIGN_COMMIT_EVERY = 10
+
 _logger = logging.getLogger(__name__)
 
 
@@ -198,13 +201,26 @@ class PickingSchedule(models.Model):
                             "Auto-batch kapatıldı: %s (depo: %s)",
                             pt.display_name, schedule.warehouse_id.name)
 
+        # NEDEN: ara commit'ler (aşağıda) açık bir savepoint içinden yapılamaz; plan başına
+        # savepoint yerine commit + hatada rollback kullanılır. Rollback önceki planların
+        # ve auto-batch ayarının işini geri almasın diye burada ve her planın sonunda commit.
+        self.env.cr.commit()
         for schedule in schedules:
             try:
-                with self.env.cr.savepoint():
-                    schedule._check_and_create_batch()
+                schedule.with_context(ugurlar_commit_progress=True)._check_and_create_batch()
+                self.env.cr.commit()
             except Exception as e:
+                self.env.cr.rollback()
                 _logger.exception("Toplama zamanlayıcı hatası [%s]: %s",
                                   schedule.name, e)
+
+    def _commit_progress(self):
+        """Yalnız cron yolunda (bağlamda bayrak varken) ara commit. Rezervasyon (action_assign)
+        stock.quant satırlarını transaction sonuna kadar kilitler; rota saatinde mobil
+        okutmalar (toplama/paketleme/raf) aynı satırları beklerdi (TODO-27). Elle buton
+        (HTTP isteği) commit etmez: istek yeniden denemesi yarım işi çiftlemesin."""
+        if self.env.context.get('ugurlar_commit_progress'):
+            self.env.cr.commit()
 
     def _get_completed_times(self, today):
         """Bugün tamamlanan saat dilimlerini JSON'dan oku."""
@@ -606,6 +622,12 @@ class PickingSchedule(models.Model):
             else:
                 moves_from_return = set()
 
+        # Transfer doğrulaması yedek/ana depo quant'larını kilitledi; FAZ 4'ten önce bırak.
+        # Sonraki adım hata verirse transfer kalır ama stok ana depoda olduğundan yeniden
+        # denemede ikinci transfer açılmaz (talep zaten rezerve görünür)
+        if transfers_created:
+            self._commit_progress()
+
         # ═══ FAZ 4: Transfer sonrası tekrar stok rezervasyonu ═══
         if transfers_created:
             _logger.info(
@@ -741,13 +763,23 @@ class PickingSchedule(models.Model):
         return 'return_warehouse'
 
     def _safe_assign(self, pickings):
-        """Rezervasyon: her picking kendi savepoint'inde (SQL hatası tüm turu bozmasın)."""
-        for picking in pickings:
+        """Rezervasyon: her picking kendi savepoint'inde (SQL hatası tüm turu bozmasın).
+
+        Cron yolunda her ASSIGN_COMMIT_EVERY picking'te ve sonda commit edilir: quant kilitleri
+        tüm turun (iç transfer, etiketleme, rota kaydı) süresince değil, bir parti süresince
+        tutulur. # NEDEN: picking başına değil parti başına; commit ORM önbelleğini
+        temizler, 100+ picking'te her commit sonrası toplu ön-yükleme maliyetli olurdu.
+        # DIKKAT: savepoint bloğunun DIŞINDA commit edilir (açık savepoint içinde commit
+        RELEASE SAVEPOINT'i bozar)."""
+        for index, picking in enumerate(pickings, 1):
             try:
                 with self.env.cr.savepoint():
                     picking.action_assign()
             except Exception as e:
                 _logger.warning("Toplama: %s rezerve edilemedi: %s", picking.name, e)
+            if index % ASSIGN_COMMIT_EVERY == 0:
+                self._commit_progress()
+        self._commit_progress()
 
     def _create_auto_internal_transfer(self, product_qty_map, source_wh, dest_wh, label):
         """Otomatik iç transfer: başarısız olursa (done olmazsa) iptal edilir.

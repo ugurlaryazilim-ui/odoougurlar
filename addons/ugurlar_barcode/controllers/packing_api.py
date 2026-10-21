@@ -155,6 +155,18 @@ class PackingApiController(BarcodeApiBase):
         return move.product_uom_qty
 
     @staticmethod
+    def _packing_item_progress(move):
+        """Liste satırının okutma alanları. Detay listesi ve okutma yanıtındaki `item_update`
+        aynı hesabı kullanır: istemci yamalı satırı tam yenilemeyle aynı değerde görür."""
+        target = PackingApiController._packing_target(move)
+        return {
+            'target_qty': target,
+            'done_qty': PackingApiController._packing_done_qty(move),
+            'matched': move.packing_scanned_qty >= target,
+            'scanned_qty': move.packing_scanned_qty,
+        }
+
+    @staticmethod
     def _packing_progress(picking, all_pickings):
         """Paketleme (okutma sayacı) ilerlemesi: picking'in ve rotadaki aynı siparişe ait
         diğer picking'lerin durumu. Normal okutma ve soft match aynı hesabı kullanır."""
@@ -295,10 +307,7 @@ class PackingApiController(BarcodeApiBase):
                                         'product_name': product.display_name,
                                         'barcode': self._get_physical_barcode(product),
                                         'demand_qty': rm.product_uom_qty,
-                                        'target_qty': self._packing_target(rm),
-                                        'done_qty': self._packing_done_qty(rm),
-                                        'matched': rm.packing_scanned_qty >= self._packing_target(rm),
-                                        'scanned_qty': rm.packing_scanned_qty,
+                                        **self._packing_item_progress(rm),
                                         'origin': rp.origin or '',
                                         'customer_name': customer_name,
                                         'cargo_tracking': cargo_tracking,
@@ -323,10 +332,7 @@ class PackingApiController(BarcodeApiBase):
                             'product_name': product.display_name,
                             'barcode': self._get_physical_barcode(product),
                             'demand_qty': move.product_uom_qty,
-                            'target_qty': self._packing_target(move),
-                            'done_qty': self._packing_done_qty(move),
-                            'matched': move.packing_scanned_qty >= self._packing_target(move),
-                            'scanned_qty': move.packing_scanned_qty,
+                            **self._packing_item_progress(move),
                             'origin': picking.origin or '',
                             'customer_name': customer_name,
                             'cargo_tracking': cargo_tracking,
@@ -348,10 +354,7 @@ class PackingApiController(BarcodeApiBase):
                     'product_name': product.display_name,
                     'barcode': self._get_physical_barcode(product),
                     'demand_qty': move.product_uom_qty,
-                    'target_qty': self._packing_target(move),
-                    'done_qty': self._packing_done_qty(move),
-                    'matched': move.packing_scanned_qty >= self._packing_target(move),
-                    'scanned_qty': move.packing_scanned_qty,
+                    **self._packing_item_progress(move),
                     'origin': picking.origin or '',
                     'customer_name': customer_name,
                     'cargo_tracking': cargo_tracking,
@@ -544,6 +547,7 @@ class PackingApiController(BarcodeApiBase):
                             'complete': True,
                             'all_matched': all_matched,
                             'replacement_match': True,
+                            'refresh_needed': True,
                         }
 
             # Hâlâ bulunamadı ama iptal edilmiş move var →
@@ -624,6 +628,7 @@ class PackingApiController(BarcodeApiBase):
                         if m.state != 'cancel'
                     ),
                     'soft_match': True,
+                    'refresh_needed': True,
                 }
 
         if not target_move:
@@ -790,6 +795,13 @@ class PackingApiController(BarcodeApiBase):
             'remaining_items': remaining_items,
             'complete': new_qty >= self._packing_target(target_move),
             'all_matched': all_matched,
+            # Okutulan satırın yeni durumu: istemci listeyi yeniden çekmeden yamar (okutma
+            # başına ikinci ağır istek kalktı). Yapı değişince (doğrulama/backorder, rota
+            # kapanışı, rotaya eklenen picking) istemci tam yeniler
+            'item_update': {'move_id': target_move.id, **self._packing_item_progress(target_move)},
+            'refresh_needed': bool(
+                picking_completed or validate_error or pending_route_add
+                or batch.state == 'done'),
         }
         if validate_error:
             # Okutma sayıldı ama sevkiyat doğrulanamadı: istemci hatayı gösterir, etiket basmaz
