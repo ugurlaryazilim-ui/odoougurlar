@@ -12,6 +12,8 @@ _logger = logging.getLogger(__name__)
 _INVOICE_RETRY_AFTER = timedelta(minutes=30)
 _INVOICE_LOOKBACK = timedelta(days=30)
 _INVOICE_BATCH = 10
+# DIKKAT: sale.order.invoice_ids (hesaplanan, saklanmayan) ile aynı anlam: onaylı müşteri faturası/iadesi.
+_POSTED_INVOICE_DOMAIN = [('state', '=', 'posted'), ('move_type', 'in', ('out_invoice', 'out_refund'))]
 
 
 class PazaramaOrderInvoice(models.Model):
@@ -63,19 +65,19 @@ class PazaramaOrderInvoice(models.Model):
         if not store.auto_send_invoice:
             return
         now = fields.Datetime.now()
+        # NEDEN: "onaylı fatura var" koşulu limit'ten ÖNCE domain'de olmalı; Python'da sonradan süzülürse
+        # faturasız (invoice_attempt_date'i hiç dolmayan) ilk 200 kayıt listeyi doldurur, faturalı yeniler seçilmez.
         candidates = self.search([
             ('store_id', '=', store.id),
             ('invoice_sent', '=', False),
             ('sale_order_id', '!=', False),
             ('sale_order_id.state', '=', 'sale'),
+            ('sale_order_id.order_line.invoice_lines.move_id', 'any', _POSTED_INVOICE_DOMAIN),
             ('order_status', 'not in', list(PAZARAMA_CANCEL_STATUSES)),
             ('order_date', '>=', now - _INVOICE_LOOKBACK),
             '|', ('invoice_attempt_date', '=', False),
             ('invoice_attempt_date', '<', now - _INVOICE_RETRY_AFTER),
-        ], order='invoice_attempt_date asc nulls first, id', limit=200)
-        # Yalnızca Odoo'da faturası onaylanmış siparişler (Nebim faturası bu adımda kesilir)
-        candidates = candidates.filtered(
-            lambda o: o.sale_order_id.invoice_ids.filtered(lambda m: m.state == 'posted'))[:_INVOICE_BATCH]
+        ], order='invoice_attempt_date asc nulls first, id', limit=_INVOICE_BATCH)
         for rec in candidates:
             try:
                 with self.env.cr.savepoint():

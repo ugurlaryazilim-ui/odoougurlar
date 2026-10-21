@@ -2,7 +2,7 @@
 import logging
 from datetime import timedelta
 
-from odoo import _, api, fields, models
+from odoo import _, api, fields, models, tools
 from odoo.exceptions import UserError
 
 from .idefix_order import IDEFIX_CANCEL_STATUSES
@@ -13,6 +13,8 @@ _PICKING_RETRY_AFTER = timedelta(minutes=30)
 _INVOICE_RETRY_AFTER = timedelta(minutes=30)
 _INVOICE_LOOKBACK = timedelta(days=30)
 _INVOICE_BATCH = 10
+# DIKKAT: sale.order.invoice_ids (hesaplanan, saklanmayan) ile aynı anlam: onaylı müşteri faturası/iadesi.
+_POSTED_INVOICE_DOMAIN = [('state', '=', 'posted'), ('move_type', 'in', ('out_invoice', 'out_refund'))]
 
 # 'picking' bildirimi yalnızca hazırlanmaya hazır sevkiyata yapılır
 _PICKABLE_STATUSES = ('shipment_ready',)
@@ -28,19 +30,41 @@ class IdefixOrderInvoice(models.Model):
 
     # ─── 'Hazırlanıyor' (picking) ────────────────────────────
 
+    def _picking_failure_already_posted(self, so, error):
+        """Aynı sevkiyat için SO chatter'ındaki son 'Hazırlanıyor başarısız' mesajı aynı hatayı taşıyor mu?"""
+        prefix = f"Idefix sevkiyatı {self.order_id} 'Hazırlanıyor' bildirimi başarısız"
+        # NEDEN: body HTML kaçışlı saklanır (' → &#39;); DB'de kesme işaretsiz parçalarla ara, Python'da düz metinle doğrula.
+        messages = self.env['mail.message'].search([
+            ('model', '=', 'sale.order'), ('res_id', '=', so.id),
+            ('body', 'ilike', self.order_id), ('body', 'ilike', 'bildirimi başarısız'),
+        ], order='id desc')
+        for msg in messages:
+            text = tools.html2plaintext(msg.body or '')
+            if prefix in text:
+                return error in text
+        return False
+
     def _send_picking(self, api_client=None, source='Otomatik'):
         """Sevkiyatı Idefix'te 'picking' yapar (müşteri artık iptal edemez). Başarılıysa True."""
         self.ensure_one()
+        # NEDEN: idefix.order mail.thread değil; SO yokken API başarılı olup sonra message_post AttributeError
+        # verirse transaction geri alınır ve Idefix'te picking, Odoo'da picking_sent=False kalır. API'den ÖNCE kes.
+        so = self.sale_order_id
+        if not so:
+            _logger.warning("Idefix picking bildirimi atlandı %s: Odoo siparişi yok", self.order_id)
+            return False
         self.picking_attempt_date = fields.Datetime.now()
         api_client = api_client or self.store_id.get_api()
         res = api_client.update_shipment_status(self.order_id, 'picking')
-        record = self.sale_order_id or self
         if res.get('success'):
             self.write({'picking_sent': True, 'order_status': 'shipment_picking'})
-            record.message_post(body=f"Idefix sevkiyatı {self.order_id} 'Hazırlanıyor' (picking) bildirildi ({source}).")
+            so.message_post(body=f"Idefix sevkiyatı {self.order_id} 'Hazırlanıyor' (picking) bildirildi ({source}).")
             return True
         error = str(res.get('error') or 'Bilinmeyen hata')[:250]
-        record.message_post(body=f"Idefix 'Hazırlanıyor' bildirimi başarısız ({source}): {error}")
+        # NEDEN: başarısız picking 30 dk'da bir yeniden denenir; aynı hata her seferinde chatter'a yazılmasın.
+        if not self._picking_failure_already_posted(so, error):
+            so.message_post(
+                body=f"Idefix sevkiyatı {self.order_id} 'Hazırlanıyor' bildirimi başarısız ({source}): {error}")
         _logger.warning("Idefix picking bildirimi başarısız %s: %s", self.order_id, error)
         return False
 
@@ -65,6 +89,8 @@ class IdefixOrderInvoice(models.Model):
             if rec.order_status not in _PICKABLE_STATUSES:
                 raise UserError(_("%s: yalnızca 'Sevke Hazır' sevkiyat 'Hazırlanıyor' yapılabilir (şu an: %s).",
                                   rec.order_number, rec.order_status_display))
+            if not rec.sale_order_id:
+                raise UserError(_("%s: Odoo siparişi yok; Idefix'e 'Hazırlanıyor' bildirilemez.", rec.order_number))
             if not rec._send_picking(source='Manuel'):
                 raise UserError(_("%s: Idefix bildirimi başarısız. Ayrıntı sipariş geçmişinde.", rec.order_number))
         return self._notify('Hazırlanıyor', "Sevkiyat Idefix'te 'Hazırlanıyor' statüsüne alındı.", 'success')
@@ -148,19 +174,19 @@ class IdefixOrderInvoice(models.Model):
         if not store.auto_send_invoice:
             return
         now = fields.Datetime.now()
+        # NEDEN: "onaylı fatura var" koşulu limit'ten ÖNCE domain'de olmalı; Python'da sonradan süzülürse
+        # faturasız (invoice_attempt_date'i hiç dolmayan) ilk 200 kayıt listeyi doldurur, faturalı yeniler seçilmez.
         candidates = self.search([
             ('store_id', '=', store.id),
             ('invoice_sent', '=', False),
             ('sale_order_id', '!=', False),
             ('sale_order_id.state', '=', 'sale'),
+            ('sale_order_id.order_line.invoice_lines.move_id', 'any', _POSTED_INVOICE_DOMAIN),
             ('order_status', 'in', list(_INVOICE_LINK_STATUSES)),
             ('order_date', '>=', now - _INVOICE_LOOKBACK),
             '|', ('invoice_attempt_date', '=', False),
             ('invoice_attempt_date', '<', now - _INVOICE_RETRY_AFTER),
-        ], order='invoice_attempt_date asc nulls first, id', limit=200)
-        # Yalnızca Odoo'da faturası onaylanmış siparişler (Nebim faturası bu adımda kesilir)
-        candidates = candidates.filtered(
-            lambda o: o.sale_order_id.invoice_ids.filtered(lambda m: m.state == 'posted'))[:_INVOICE_BATCH]
+        ], order='invoice_attempt_date asc nulls first, id', limit=_INVOICE_BATCH)
         for rec in candidates:
             try:
                 with self.env.cr.savepoint():
