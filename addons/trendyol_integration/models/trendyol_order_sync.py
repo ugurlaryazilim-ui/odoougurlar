@@ -21,6 +21,7 @@ _STREAM_OVERLAP = timedelta(minutes=30)
 # Ödeme onayı bekleyen paketler: doküman "Created olana kadar işlem yapmayın" diyor
 _SKIP_STATUSES = {'awaiting', 'verified'}
 _CANCEL_STATUSES = {'cancelled', 'unsupplied'}
+_CANCEL_MARK = 'Otomatik iptal edilmedi'  # error_message öneki: engellenen / başarısız iptal uyarısı
 # Mağaza başına senkron kilidi (pg advisory lock ad alanı)
 _SYNC_LOCK_NS = 7471001
 
@@ -285,22 +286,50 @@ class TrendyolOrderSync(models.Model):
         self._process_package_batch(packages, store, order_cutoff, counters, error_details)
         return ok
 
+    # NEDEN: Idefix/Pazarama'daki _cancel_blocker kopyası; bu modül odoougurlar'a bağlı değil, ortak yardımcı için
+    # yeni bağımlılık eklemek canlıda kurulum sırası riski doğurur (deploy-new-dependency).
+    def _cancel_blocker(self, so):
+        """Otomatik iptali engelleyen durum (sevk edilmiş / faturası kesilmiş) — yoksa False."""
+        if so.picking_ids.filtered(lambda p: p.state == 'done'):
+            return 'sevk edildiği'
+        if so.invoice_ids.filtered(lambda m: m.state == 'posted'):
+            return 'faturası kesildiği'
+        return False
+
     @api.private
     def _cancel_odoo_order(self, trendyol_order, store=None):
-        """Odoo siparişini iptal et."""
-        if store and not store.auto_cancel:
-            return
-        if not store:
-            if trendyol_order.store_id and not trendyol_order.store_id.auto_cancel:
-                return
+        """Odoo siparişini iptal et. Gerçekten iptal edildiyse True döner.
 
+        Engel ve hata trendyol_order.error_message'a yazılır; chatter notu yalnız mesaj değişince bir kez düşer.
+        """
+        # DIKKAT: iptal odoougurlar kancasıyla siparişi Nebim'den de siler; sevk edilmiş / faturası kesilmiş
+        # siparişe dokunulmaz (Odoo 19'da state 'done' kontrolü bunu yakalamaz).
+        store = store or trendyol_order.store_id
+        if store and not store.auto_cancel:
+            return False
         so = trendyol_order.sale_order_id
-        if so and so.state not in ('cancel', 'done'):
-            try:
+        if not so or so.state in ('cancel', 'done'):
+            return False
+        blocker = self._cancel_blocker(so)
+        if blocker:
+            msg = (f"{_CANCEL_MARK}: Trendyol siparişi {trendyol_order.trendyol_order_number} iptal edildi ancak "
+                   f"{so.name} {blocker} için iptal edilmedi; elle kontrol edin.")
+            if trendyol_order.error_message != msg:
+                so.message_post(body=msg)
+                trendyol_order.error_message = msg
+                _logger.warning("Trendyol — %s", msg)
+            return False
+        try:
+            with self.env.cr.savepoint():
                 so._action_cancel()
-                _logger.info("Odoo sipariş iptal edildi: %s", so.name)
-            except Exception as e:
-                _logger.warning("Sipariş iptal hatası: %s - %s", so.name, e)
+        except Exception as e:
+            _logger.warning("Trendyol — Sipariş iptal hatası: %s - %s", so.name, e)
+            trendyol_order.error_message = f"{_CANCEL_MARK}: iptal hatası ({so.name}): {e}"[:500]
+            return False
+        if _CANCEL_MARK in (trendyol_order.error_message or ''):
+            trendyol_order.error_message = False
+        _logger.info("Trendyol — Odoo sipariş iptal edildi: %s", so.name)
+        return True
 
     # ─── CRON ────────────────────────────────────────────
 
