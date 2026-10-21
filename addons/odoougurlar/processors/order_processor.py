@@ -137,22 +137,6 @@ class OrderProcessor(models.AbstractModel):
         if is_export:
             model_type = 14
 
-        # ExportFileNumber hesaplama
-        export_file_number = ''
-        if is_export:
-            try:
-                # Nebim'den son ExportFileNumber değerini alıp +1 yapan SP'yi çağırıyoruz.
-                # SP ayrıca cdExportFile tablosuna da INSERT yapıyor (Nebim bu kaydı şart koşuyor).
-                sp_params = [{'Name': 'CurrAccCode', 'Value': customer_code}]
-                next_num_res = connector.run_proc('sp_GetNextExportFileNumber_Hamurlabs', sp_params)
-                if next_num_res and isinstance(next_num_res, list) and len(next_num_res) > 0:
-                    export_file_number = str(next_num_res[0].get('NextExportFileNumber') or '')
-                    _logger.info("Nebim ExportFileNumber hesaplandı: %s (cdExportFile'a INSERT yapıldı)", export_file_number)
-            except Exception as e:
-                if chain_timeout(self.env, e):
-                    raise
-                _logger.warning("ExportFileNumber alınırken hata oluştu (sp_GetNextExportFileNumber_Hamurlabs eksik olabilir): %s", e)
-
         lines = []
         for line in sale_order.order_line:
             if not line.product_id:
@@ -213,6 +197,27 @@ class OrderProcessor(models.AbstractModel):
         
         if not addr_id:
             addr_id = 'adc3d09b-897b-4b74-a29f-b42600863ec3'  # Ultimum fallback
+
+        # ExportFileNumber hesaplama
+        # NEDEN: adres sorgusundan (okuma) SONRA: yazmadan sonra okuma zaman aşımına düşüp aşamayı geri
+        # alırsa Nebim'de alınmış numara (cdExportFile kaydı) boşa gider ve tekrar denemede yenisi alınır.
+        # EKIP-BORC: numaradan sonra Post başarısız olursa (bütçe yetmez / Nebim reddeder) numara yine boşa
+        # gider (mükerrer belge değil, yetim cdExportFile). Yükseltme: numarayı siparişe ayrı commit'le yazıp
+        # tekrar denemede yeniden kullanmak.
+        export_file_number = ''
+        if is_export:
+            try:
+                # Nebim'den son ExportFileNumber değerini alıp +1 yapan SP'yi çağırıyoruz.
+                # SP ayrıca cdExportFile tablosuna da INSERT yapıyor (Nebim bu kaydı şart koşuyor).
+                sp_params = [{'Name': 'CurrAccCode', 'Value': customer_code}]
+                next_num_res = connector.run_proc('sp_GetNextExportFileNumber_Hamurlabs', sp_params)
+                if next_num_res and isinstance(next_num_res, list) and len(next_num_res) > 0:
+                    export_file_number = str(next_num_res[0].get('NextExportFileNumber') or '')
+                    _logger.info("Nebim ExportFileNumber hesaplandı: %s (cdExportFile'a INSERT yapıldı)", export_file_number)
+            except Exception as e:
+                if chain_timeout(self.env, e):
+                    raise
+                _logger.warning("ExportFileNumber alınırken hata oluştu (sp_GetNextExportFileNumber_Hamurlabs eksik olabilir): %s", e)
 
         # ShipmentMethodCode: 1=İhracat, 2=Yurtiçi Kargo
         if is_export:

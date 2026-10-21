@@ -1004,7 +1004,9 @@ class PackingApiController(BarcodeApiBase):
             if key in synced_origins:
                 continue
             synced_origins.add(key)
-            if time.monotonic() > deadline:
+            # NEDEN: yazma kalan süre WRITE_CHAIN_TIMEOUT'tan azken başlamaz (connector._timeouts); bu
+            # siparişin zinciri boşuna okuyup "bütçe doldu" hatası yazardı. Baştan ertelenir.
+            if deadline - time.monotonic() < WRITE_CHAIN_TIMEOUT:
                 deferred.append(picking.name)
                 continue
             try:
@@ -1574,10 +1576,12 @@ class PackingApiController(BarcodeApiBase):
         # çağrı başına 300 sn x 2 deneme worker'ı dakikalarca tutuyordu. Context processor'lardan
         # connector'a kadar yayılır (bağlantı dahil yeniden deneme yok); cron yolunda bu context yok,
         # 300 sn / 2 deneme kalır. 60 sn ÇAĞRI başınadır; zincirin TOPLAMI `nebim_deadline` ile sınırlıdır
-        # (BORC B8): connector her çağrının timeout'unu kalan süreye kısaltır, süre bitince ağa çıkmaz;
+        # (BORC B8): connector OKUMA çağrısının timeout'unu kalan süreye kısaltır, süre bitince ağa çıkmaz;
         # asılı uçta ilk zaman aşımında kalan aşamalar da atlanır (aşağıda; önceden 6-7 x 60 sn worker).
-        # Yeniden denemenin kapanması oturum süresi dolduğunda o çağrının hata vermesi demektir; mükerrer
-        # belge riski yoktur, sonraki Tamamla / cron nebim_* bayraklarından devam eder.
+        # DIKKAT: YAZMA (cari / sipariş / fatura Post, numara SP'si) kısaltılmaz: kalan süre 60 sn'den azsa hiç
+        # gönderilmez. Kısaltılmış yazmada Nebim belgeyi açıp yanıtı yetiştiremezse nebim_* bayrağı yazılmaz ve
+        # tekrar denemede belge çiftlenir (K-1, mükerrer fatura). Başlamış yazma tam süreyle biter: zincir en
+        # kötü deadline + Connect süresi kadar uzar. Okuma zaman aşımı / atlanan yazma tekrar denemede güvenlidir.
         if deadline is None:
             deadline = time.monotonic() + NEBIM_COMPLETE_BUDGET
         picking = picking.with_context(
@@ -1739,7 +1743,9 @@ class PackingApiController(BarcodeApiBase):
                             update_payload = dict(result)  # Tam response'u kopyala
                             update_payload['IsPostingJournal'] = True
                             update_payload['IsCompleted'] = True
-                            update_result = connector.post_data('Post', update_payload)
+                            # NEDEN write=False: HeaderID'li güncelleme yeni belge açmaz; bütçe sonunda
+                            # atlanırsa yevmiye hiç işlenmezdi (bu adımı tekrar deneyen yol yok), kısaltılması güvenli
+                            update_result = connector.post_data('Post', update_payload, write=False)
                             _logger.info("Nebim IsPostingJournal güncellendi: HeaderID=%s", result.get('HeaderID'))
                             
                             # Güncelleme sonucu varsa result'ı güncelle

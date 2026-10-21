@@ -688,9 +688,10 @@ class CustomerProcessor(models.AbstractModel):
                                 if address_id:
                                     _logger.info("Adres ID Nebim SP ile çekildi: %s → %s", customer_code, address_id)
                 except Exception as e:
-                    if chain_timeout(self.env, e):
-                        raise
-                    _logger.warning("Cari sonrası Adres ID SP hatası: %s", e)
+                    # DIKKAT: zaman aşımı dahil YUTULUR. Cari Nebim'de açıldı; yeniden fırlatmak çağıranın
+                    # savepoint'ini geri alır, cari kodu kaybolur ve tekrar denemede mükerrer cari açılır
+                    # (Ö-1, DERSLER #14). Adres boş kalır; zincirin sonraki çağrısı bütçeye zaten takılır.
+                    _logger.warning("Cari sonrası Adres ID SP hatası (cari kodu %s korunuyor): %s", customer_code, e)
 
             # ORM üzerinde res.partner'ı güncelle
             try:
