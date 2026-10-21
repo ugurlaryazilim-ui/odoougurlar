@@ -232,7 +232,6 @@ class SocialMediaAccount(models.Model):
         yeni göstermez; en kötü sonuç bir sonraki çağrıda 401 ve write_date yaşlanınca yenilemedir.
         """
         self.ensure_one()
-        self.flush_recordset(['api_token'])
         with self.pool.cursor() as cr:
             cr.execute("SELECT api_token, write_date FROM social_media_account WHERE id = %s", (self.id,))
             row = cr.fetchone()
