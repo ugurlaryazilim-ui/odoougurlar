@@ -20,6 +20,9 @@ class CountingApiController(BarcodeApiBase):
         self._check_internal_user()
         if not shelf_barcode or not items:
             return {'error': 'Raf ve ürün listesi gerekli'}
+        limit_error = self._check_bulk_items(items)
+        if limit_error:
+            return limit_error
 
         location = self._find_location(shelf_barcode.strip())
         if not location:
@@ -35,6 +38,8 @@ class CountingApiController(BarcodeApiBase):
             'state': 'done'
         })
 
+        # 1) Kalemleri çözümle (yanıt sırası korunur)
+        counted = []  # (results indeksi, ürün, barkod, sayılan)
         for item in items:
             bc = item.get('barcode', '').strip()
             new_qty = self._parse_qty(item.get('quantity', 0), default=0, allow_zero=True)
@@ -46,48 +51,73 @@ class CountingApiController(BarcodeApiBase):
             if not product:
                 results.append({'barcode': bc, 'status': 'not_found'})
                 continue
+            counted.append((len(results), product, bc, new_qty))
+            results.append(None)
 
-            try:
-                with request.env.cr.savepoint():
-                    # Raftaki tüm quant'ların kilitli toplamı (çift quant'ta ilkine göre
-                    # fark yazılmasın; eşzamanlı işlem araya girmesin)
-                    old_qty, _reserved = self._shelf_qty(product, location)
-                    delta = new_qty - old_qty
+        # 2) Raftaki kilitli toplamlar TEK sorguda (kalem başına kilit + toplam sorgusu yerine;
+        # çift quant'ta ilkine göre fark yazılmasın, eşzamanlı işlem araya girmesin).
+        # Aynı ürün listede tekrar ederse ikinci kalem birincinin sonucunu "eski" sayar
+        # (eski sıralı davranışla aynı).
+        qty_map = self._shelf_qty_map([c[1].id for c in counted], location)
+        running = {pid: qty for pid, (qty, _reserved) in qty_map.items()}
+        plan = []     # (kalem, eski miktar)
+        entries = []  # hareketi olan kalemler
+        entry_item = []
+        for item in counted:
+            _idx, product, _bc, new_qty = item
+            old_qty = running.get(product.id, 0.0)
+            running[product.id] = new_qty
+            plan.append((item, old_qty))
+            delta = new_qty - old_qty
+            if delta > 0:
+                entries.append((product, self._inventory_location(product, location), location, delta))
+                entry_item.append(item)
+            elif delta < 0:
+                entries.append((product, location, self._inventory_location(product, location), -delta))
+                entry_item.append(item)
 
-                    # Güvenli stok güncelleme (delta farkını uygula)
-                    if delta != 0:
-                        self._safe_update_quant(product, location, delta, 'Mobil: Sayım Farkı')
+        # 3) Farklar tek turda; parti bozulursa kalem kalem (bir kalemin hatası diğerlerini düşürmez)
+        failed = {}
+        for item, (_move, error) in zip(
+                entry_item, self._mobile_stock_moves_isolated(
+                    entries, 'Mobil: Sayım Farkı', is_inventory=True)):
+            if error is not None:
+                _logger.warning('Sayım hatası [%s]: %s', item[2], error)
+                failed[item[0]] = error
 
-                    request.env['ugurlar.barcode.operation'].sudo().create({
-                        'operation_type': 'counting',
-                        'count_session_id': count_session.id,
-                        'barcode': bc,
-                        'product_id': product.id,
-                        'location_id': location.id,
-                        'quantity': new_qty,
-                        'theoretical_qty': old_qty,
-                        'notes': f'Sistem: {old_qty} -> Sayılan: {new_qty}',
-                        'state': 'done',
-                    })
-
-                    # NEDEN: ürün chatter'ı yazılmaz; eski/yeni adet operation notunda
-
-                results.append({
-                    'barcode': bc,
-                    'product_name': product.name,
-                    'old_qty': old_qty,
-                    'new_qty': new_qty,
-                    'status': 'updated',
-                    '_product_id': product.id,
-                })
-            except Exception as e:
-                _logger.warning('Sayım hatası [%s]: %s', bc, e)
-                results.append({
+        ops = []
+        for item, old_qty in plan:
+            idx, product, bc, new_qty = item
+            if idx in failed:
+                results[idx] = {
                     'barcode': bc,
                     'product_name': product.name,
                     'status': 'error',
-                    'message': self._error_text(e),
-                })
+                    'message': self._error_text(failed[idx]),
+                }
+                continue
+            # NEDEN: ürün chatter'ı yazılmaz; eski/yeni adet operation notunda
+            ops.append({
+                'operation_type': 'counting',
+                'count_session_id': count_session.id,
+                'barcode': bc,
+                'product_id': product.id,
+                'location_id': location.id,
+                'quantity': new_qty,
+                'theoretical_qty': old_qty,
+                'notes': f'Sistem: {old_qty} -> Sayılan: {new_qty}',
+                'state': 'done',
+            })
+            results[idx] = {
+                'barcode': bc,
+                'product_name': product.name,
+                'old_qty': old_qty,
+                'new_qty': new_qty,
+                'status': 'updated',
+                '_product_id': product.id,
+            }
+        if ops:
+            request.env['ugurlar.barcode.operation'].sudo().create(ops)
         # ═══ AKILLI SAYIM DÜZELTMESİ ═══
         # Sayılan ürünlerde başka konumlarda negatif bakiye varsa temizle
         counted_product_ids = []
@@ -111,53 +141,57 @@ class CountingApiController(BarcodeApiBase):
                 ('location_id', 'child_of', stock_root.id),
                 ('location_id.usage', '=', 'internal'),
             ], order='location_id, product_id, id')
-            pairs = []
-            for nq in negative_quants:
-                pair = (nq.product_id, nq.location_id)
-                if pair not in pairs:
-                    pairs.append(pair)
+            pairs = list(dict.fromkeys(
+                (nq.product_id, nq.location_id) for nq in negative_quants))
 
             reason = f'Mobil: Sayım Negatif Düzeltme ({count_session.name})'
+            # Lokasyonun kilitli toplamı (lokasyon başına tek sorgu): parçalı quant'ta (+1/-1)
+            # stok şişirilmez
+            by_location = {}
             for product, neg_location in pairs:
-                try:
-                    with request.env.cr.savepoint():
-                        # Lokasyonun kilitli toplamı: parçalı quant'ta (+1/-1) stok şişirilmez
-                        old_neg, _reserved = self._shelf_qty(product, neg_location)
-                        if old_neg >= 0:
-                            continue
-                        # Silmek yerine envanter -> lokasyon tamamlanmış hareket (izlenebilir)
-                        move = self._mobile_stock_move(
-                            product, self._inventory_location(product, neg_location),
-                            neg_location, -old_neg, reason, is_inventory=True)
-                        move_ref = move.reference or f'#{move.id}'
+                by_location.setdefault(neg_location, []).append(product.id)
+            old_negs = {}
+            for neg_location, prods in by_location.items():
+                for pid, (qty, _reserved) in self._shelf_qty_map(prods, neg_location).items():
+                    old_negs[(pid, neg_location.id)] = qty
+            todo = [(product, neg_location, old_negs.get((product.id, neg_location.id), 0.0))
+                    for product, neg_location in pairs]
+            todo = [t for t in todo if t[2] < 0]
 
-                        request.env['ugurlar.barcode.operation'].sudo().create({
-                            'operation_type': 'count_adjustment',
-                            'count_session_id': count_session.id,
-                            'barcode': product.barcode or '',
-                            'product_id': product.id,
-                            'location_id': neg_location.id,
-                            'quantity': 0,
-                            'theoretical_qty': old_neg,
-                            'notes': (f'Negatif bakiye düzeltmesi: {neg_location.complete_name} '
-                                      f'({old_neg:g} → 0), hareket {move_ref}'),
-                            'state': 'done',
-                        })
-                except Exception as e:
+            # Silmek yerine envanter -> lokasyon tamamlanmış hareket (izlenebilir); tek turda
+            outcomes = self._mobile_stock_moves_isolated(
+                [(p, self._inventory_location(p, loc), loc, -old) for p, loc, old in todo],
+                reason, is_inventory=True)
+            adj_ops = []
+            for (product, neg_location, old_neg), (move, error) in zip(todo, outcomes):
+                if error is not None:
                     _logger.warning('Sayım düzeltme hatası [%s] %s / %s: %s',
                                     count_session.name, product.display_name,
-                                    neg_location.complete_name, e)
+                                    neg_location.complete_name, error)
                     adjustment_notes.append(
                         f'HATA {product.display_name}: {neg_location.complete_name} '
-                        f'({self._error_text(e)})')
+                        f'({self._error_text(error)})')
                     continue
-
+                move_ref = move.reference or f'#{move.id}'
+                adj_ops.append({
+                    'operation_type': 'count_adjustment',
+                    'count_session_id': count_session.id,
+                    'barcode': product.barcode or '',
+                    'product_id': product.id,
+                    'location_id': neg_location.id,
+                    'quantity': 0,
+                    'theoretical_qty': old_neg,
+                    'notes': (f'Negatif bakiye düzeltmesi: {neg_location.complete_name} '
+                              f'({old_neg:g} → 0), hareket {move_ref}'),
+                    'state': 'done',
+                })
                 adjustments += 1
                 # NEDEN: ürün chatter'ı yazılmaz; iz count_adjustment operation kaydı + sayım notunda
-
                 adjustment_notes.append(
                     f'{product.display_name}: {neg_location.complete_name} '
                     f'({old_neg:g} → 0, {move_ref})')
+            if adj_ops:
+                request.env['ugurlar.barcode.operation'].sudo().create(adj_ops)
 
             if adjustment_notes:
                 count_session.sudo().write({
