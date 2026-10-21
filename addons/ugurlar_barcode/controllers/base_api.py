@@ -318,14 +318,11 @@ class BarcodeApiBase(http.Controller):
         Product = request.env['product.product'].sudo()
         product = Product.search([('barcode', '=', barcode)], limit=1)
         if not product:
-            # nebim_barcode: virgülle ayrılmış çoklu barkod alanı
-            product = Product.search([('nebim_barcode', '=', barcode)], limit=1)
-            if not product:
-                # nebim_barcode virgülle birleşik: kısmi aday listesi sınırlı, tam eşleşme Python'da
-                products = Product.search([('nebim_barcode', 'ilike', barcode)], limit=50)
-                for p in products:
-                    if barcode in (p.nebim_barcode or '').split(','):
-                        return p
+            # nebim_barcode: virgülle ayrılmış çoklu barkod alanı; tek değer de listedir.
+            # NEDEN: `=` + `ilike '%x%'` her okutmada ürün tablosunu tarıyordu; liste içi TAM
+            # eşleşme GIN ifade indeksiyle yapılır. ilike yolu kaldırıldı: sonucu zaten Python'da
+            # tam eşleşmeye süzüyordu, yani indeksli aramanın alt kümesiydi (alt dize eşleşmesi yok).
+            product = Product._search_nebim_barcodes([barcode])[:1]
         if not product:
             product = Product.search([('default_code', '=', barcode)], limit=1)
         return product
