@@ -46,10 +46,11 @@ class TestIdefixSyncWrites(TransactionCase):
         # A4 K1/Ö1: cron mağaza penceresini (7 gün) kullanır; 5 günlük yeni sevkiyat cron'da alınır.
         calls, synced = [], []
         old = (fields.Datetime.now() - timedelta(days=5)).strftime('%Y-%m-%dT%H:%M:%SZ')
+        older = (fields.Datetime.now() - timedelta(days=10)).strftime('%Y-%m-%dT%H:%M:%SZ')
 
         def fake_fetch(api_client, start_date=None, end_date=None, **kw):
             calls.append((end_date - start_date).days)
-            return [{'id': 'OLD5', 'orderDate': old}], False
+            return [{'id': 'OLD5', 'orderDate': old}, {'id': 'OLD10', 'orderDate': older}], False
 
         M = type(self.Order)
         with patch.object(M, '_fetch_orders', side_effect=fake_fetch), \
@@ -59,9 +60,9 @@ class TestIdefixSyncWrites(TransactionCase):
                 patch.object(type(self.env['idefix.refund']), '_sync_refunds_if_due'), \
                 patch.object(type(self.store), 'get_api'):
             self.Order.sync_orders_for_store(self.store)
-            self.Order.sync_orders_for_store(self.store, max_days=3)
-        self.assertEqual(calls, [7, 3])
-        self.assertEqual(synced, ['OLD5'])  # max_days=3 turunda 5 günlük yeni sevkiyat atlanır
+        self.assertEqual(calls, [7])
+        # pencere içindeki yeni sevkiyat alınır, pencereden eski YENİ sevkiyat açılmaz
+        self.assertEqual(synced, ['OLD5'])
 
     def test_cron_entry_passes_no_max_days(self):
         seen = []

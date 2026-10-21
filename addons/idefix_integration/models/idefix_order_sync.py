@@ -99,7 +99,7 @@ class IdefixOrderSync(models.Model):
         return dt.astimezone(pytz.UTC).replace(tzinfo=None)
 
     @api.model
-    def sync_orders_for_store(self, store, max_days=None):
+    def sync_orders_for_store(self, store):
         """Son N gündeki sevkiyatları çeker (yeni + güncellenen), ardından daha eski açık
         sevkiyatları shipment ID ile toplu yoklar (iptal / bölünme / kargo / teslim durumları için)."""
         # Aynı mağazada tek senkron (cron sürerken manuel senkron aynı siparişleri paralel açmasın)
@@ -111,8 +111,6 @@ class IdefixOrderSync(models.Model):
         api_client = store.get_api()
         now = fields.Datetime.now()
         day_range = max(store.order_day_range or 1, 1)
-        if max_days:
-            day_range = min(day_range, max_days)
         # Idefix API Türkiye saatinde çalışır — sorgu tarihleri Türkiye saatiyle gider
         now_turkey = self._now_turkey()
         start_date = now_turkey - timedelta(days=day_range)

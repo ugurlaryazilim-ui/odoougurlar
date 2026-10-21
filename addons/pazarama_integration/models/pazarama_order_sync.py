@@ -93,7 +93,7 @@ class PazaramaOrderSync(models.Model):
         return IST.localize(naive_dt).astimezone(pytz.UTC).replace(tzinfo=None)
 
     @api.model
-    def sync_orders_for_store(self, store, max_days=None):
+    def sync_orders_for_store(self, store):
         """Son N gündeki siparişleri çeker (yeni + güncellenen), ardından daha eski açık
         siparişleri sipariş numarasıyla tek tek yoklar (kargo / teslim / iptal durumları için)."""
         # Aynı mağazada tek senkron (cron sürerken manuel senkron aynı siparişleri paralel açmasın)
@@ -105,8 +105,6 @@ class PazaramaOrderSync(models.Model):
         api_client = store.get_api()
         now = fields.Datetime.now()
         day_range = min(max(store.order_day_range or 1, 1), PAZARAMA_MAX_WINDOW_DAYS - 1)
-        if max_days:
-            day_range = min(day_range, max_days)
         # Pazarama API Türkiye saatinde çalışır — sorgu tarihleri Türkiye saatiyle gider
         now_turkey = self._now_turkey()
         start_date = now_turkey - timedelta(days=day_range)
