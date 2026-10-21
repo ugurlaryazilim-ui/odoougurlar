@@ -232,10 +232,23 @@ class TestSmallFixesStatic(TransactionCase):
         self.assertLess(late.find('res.error'), m.start(), 'res.error dalı başarı mantığından önce olmalı')
         self.assertIn('failed_pickings', late)
         self.assertNotRegex(late[:m.start()].split('res.error', 1)[1].split('return;', 1)[0], r'completeDone\s*=\s*true')
+        # Rota Tamamla sevkiyatı doğrulamaz: toplama kapandıysa (collect_done) düğme kilitlenir,
+        # rota state'i yalnız sunucu batch_done derse 'done' olur
+        self._has(late, r'res\.collect_done', 'collect_done yanıtı düğmeyi kilitlemiyor')
+        self._has(late, r"if \(res\.batch_done\)\s*\{\s*this\.state\.batch\.state\s*=\s*'done'",
+                  "batch.state yalnız batch_done ile 'done' yapılmalı")
         # Düğme done / completeDone iken görünmez; yeni rota seçilince sıfırlanır
         self._has(src, r"state\.batch\.state !== 'done' and !state\.completeDone", 'düğme completeDone ile gizlenmiyor')
         sel = _method_body(src, r'async selectBatch\(batchId\)')
         self._has(sel, r'completeDone\s*=\s*false', 'rota seçiminde completeDone sıfırlanmıyor')
+
+    def test_rvp6_packing_active_order_units_use_target_qty(self):
+        """Aktif sipariş kutuları paketleme hedefiyle sayılır: "Eksik" işaretli satırda toplanan
+        kadar kutu çizilir (sunucu detail item'ında target_qty), yoksa talep."""
+        body = _method_body(_src('screens/packing.js'), r'get activeOrder\(\)')
+        self.assertTrue(body, 'activeOrder bulunamadı')
+        self._has(body, r'it\.target_qty\s*\?\?\s*it\.demand_qty', 'hedef (target_qty) kullanılmıyor')
+        self.assertNotRegex(body, r'Math\.round\(it\.demand_qty', 'kutu sayısı talepten hesaplanıyor')
 
     # ─── R-F6: küçük ön yüz düzeltmeleri ───────────────
     def test_rf6_sales_discount_failure_drops_pending_placeholder_rows(self):

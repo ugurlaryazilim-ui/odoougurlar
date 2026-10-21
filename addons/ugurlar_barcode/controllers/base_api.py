@@ -73,6 +73,15 @@ class BarcodeApiBase(http.Controller):
             'missing': missing,
         }
 
+    @staticmethod
+    def _route_finished(pickings):
+        """Rota kapanış kuralı (tek yer): tüm siparişler sevk / iptal edilmiş ve en az biri
+        sevk edilmiş. Toplamadan sonra satırı değişen siparişin OUT'u iptal olur ama rotanın
+        kalıcı listesinde kalır; önceki "hepsi done" kuralı bu rotayı hiç kapatmıyordu.
+        Yalnız iptallerden oluşan rotayı günlük temizlik iptal eder."""
+        states = set(pickings.mapped('state'))
+        return bool(pickings) and states <= {'done', 'cancel'} and 'done' in states
+
     def _apply_collected_quantities(self, picking, qty_field='wave_collected_qty'):
         """Sevk miktarı = toplanan (talebi aşmaz). Önceden ml.reserved_uom_qty (Odoo 17+'da yok)
         hata verip her move line'a tüm talep yazılıyordu: eksik ürün tam / iki katı sevk ediliyordu.
@@ -117,6 +126,9 @@ class BarcodeApiBase(http.Controller):
         }
         if not backorder:
             ctx['picking_ids_not_to_backorder'] = picking.ids
+        if picking.env.context.get('ugurlar_skip_invoice_hook'):
+            # Sihirbazlar request.env'den açılır: bayrak bağlamla taşınmalı
+            ctx['ugurlar_skip_invoice_hook'] = True
         result = picking.with_context(**ctx).button_validate()
 
         # Sihirbaz döndüyse otomatik işle (en fazla 3 — zincirleme sihirbazlar)
@@ -157,6 +169,8 @@ class BarcodeApiBase(http.Controller):
 
         Returns: (done: bool, error: str|None)
         """
+        # Faturayı (Nebim) çağıran paketleme tetikler: commit sonrası fatura kancası atlanır
+        picking = picking.with_context(ugurlar_skip_invoice_hook=True)
         try:
             with picking.env.cr.savepoint():
                 picking.packing_done = True

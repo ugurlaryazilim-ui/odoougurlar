@@ -90,12 +90,25 @@ class BarcodeCase(TransactionCase):
             picking.action_assign()
         return picking
 
-    def _route(self, pickings, picking_type=None):
-        """Pickings'i bir rotaya (batch) bağla; kalıcı liste de doldurulur."""
+    def _route(self, pickings, picking_type=None, keep_route_state=True):
+        """Pickings'i bir rotaya (batch) bağla; kalıcı liste de doldurulur.
+
+        Rotaya giriş move'lardaki rota durumunu (toplanan/Eksik/paketleme sayacı) sıfırlar.
+        Testler bu durumu rotalamadan ÖNCE kurar (gerçekte toplama rotaya girdikten sonra
+        olur); `keep_route_state` kurulan durumu yeni rotanın durumu olarak geri yazar.
+        Sıfırlamanın kendisini sınayan testler False verir."""
         picking_type = picking_type or self.out_type
+        moves = pickings.move_ids
+        state = {m.id: {'wave_collected_qty': m.wave_collected_qty,
+                        'wave_skipped': m.wave_skipped,
+                        'packing_scanned_qty': m.packing_scanned_qty} for m in moves}
         batch = self.env['stock.picking.batch'].create({'picking_type_id': picking_type.id})
         pickings.write({'batch_id': batch.id})
         batch.all_picking_ids = [(6, 0, pickings.ids)]
+        if keep_route_state:
+            for move in moves:
+                if move.state not in ('done', 'cancel'):
+                    move.write(state[move.id])
         return batch
 
     # ─── sorgular ──────────────────────────────────────

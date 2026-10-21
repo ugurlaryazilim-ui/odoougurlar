@@ -2,7 +2,8 @@
 import logging
 from datetime import timedelta
 
-from odoo import api, fields, models
+from odoo import _, api, fields, models
+from odoo.exceptions import UserError
 
 _logger = logging.getLogger(__name__)
 
@@ -74,6 +75,28 @@ class StockPickingBatchExt(models.Model):
                 if new_ids:
                     batch.all_picking_ids = [(4, pid) for pid in new_ids]
         return res
+
+    def _collected_unpacked_pickings(self):
+        """Bu rotada toplanmış ama paketlemede doğrulanmamış siparişler. Başka rotaya taşınmış
+        ya da biten / iptal picking sayılmaz."""
+        self.ensure_one()
+        return (self.all_picking_ids | self.picking_ids).filtered(
+            lambda p: p.state not in ('done', 'cancel')
+            and (not p.batch_id or p.batch_id == self)
+            and any((m.wave_collected_qty or 0) > 0 and m.state != 'cancel'
+                    for m in p.move_ids))
+
+    def unlink(self):
+        # Rota silinirse toplanan miktar (wave_collected_qty) sahipsiz kalır; paketleme bu
+        # siparişleri rota üzerinden bulamaz. Odoo arayüzünden silmeyi de kapsar.
+        for batch in self:
+            pickings = batch._collected_unpacked_pickings()
+            if pickings:
+                raise UserError(_(
+                    'Bu rotada toplanmış ama paketlenmemiş ürün var (%(count)s sipariş). Önce '
+                    'paketlemede tamamlayın ya da "Eksik Onayla" ile kapatın veya toplamayı '
+                    'geri alın.', count=len(pickings)))
+        return super().unlink()
 
     @api.model
     def _cron_cleanup_route_batches(self, batch_size=500, max_pages=20):

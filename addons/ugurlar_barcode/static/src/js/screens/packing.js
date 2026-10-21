@@ -460,7 +460,8 @@ export class PackingScreen extends Component {
         let total = 0;
         let scanned = 0;
         for (const it of lines) {
-            const demand = Math.max(0, Math.round(it.demand_qty || 0));
+            // Paketleme hedefi: "Eksik" işaretli satırda toplanan kadar (sunucu target_qty)
+            const demand = Math.max(0, Math.round((it.target_qty ?? it.demand_qty) || 0));
             const done = Math.min(demand, Math.round(it.scanned_qty || 0));
             total += demand;
             scanned += done;

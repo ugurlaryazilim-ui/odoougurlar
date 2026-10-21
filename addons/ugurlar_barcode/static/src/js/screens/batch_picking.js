@@ -1176,7 +1176,9 @@ export class BatchPickingScreen extends Component {
     }
 
     // Zaman aşımı sonrası gelen batch_collect_complete yanıtı: "Lütfen bekleyin" mesajı kalkar.
-    // Yalnız hatasız tam başarıda Tamamla kilitlenir (rota done); hata/kısmi başarıda yeniden deneme açık kalır.
+    // Toplama kapandıysa (collect_done) Tamamla kilitlenir; sevkiyatı paketleme doğrular, rota
+    // o zamana kadar done olmaz. Rota state'i yalnız sunucu batch_done derse 'done' yapılır.
+    // Hata yanıtında yeniden deneme açık kalır.
     _applyLateCompleteResult(res) {
         if (res.error) {
             this.state.scanMsg = res.error;
@@ -1186,9 +1188,11 @@ export class BatchPickingScreen extends Component {
         const failed = (res.failed_pickings && res.failed_pickings.length) > 0;
         this.state.scanMsg = res.message || '';
         this.state.scanOk = !failed;
-        if (res.success && res.batch_done && !failed) {
+        if (res.success && (res.collect_done || res.batch_done) && !failed) {
             this.state.completeDone = true;
-            this.state.batch.state = 'done';
+            if (res.batch_done) {
+                this.state.batch.state = 'done';
+            }
         }
     }
 

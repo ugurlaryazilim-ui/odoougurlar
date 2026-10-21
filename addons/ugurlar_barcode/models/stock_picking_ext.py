@@ -2,6 +2,7 @@
 import logging
 
 from odoo import api, fields, models
+from odoo.fields import Domain
 
 _logger = logging.getLogger(__name__)
 
@@ -35,6 +36,41 @@ class StockMoveExt(models.Model):
         help='Rota toplamada operatör "Eksik" dedi: toplanan kadar sevk edilir, '
              'kalan için bekleyen sevkiyat (backorder) açılır.',
     )
+
+    def _is_negative_demand(self):
+        return self.product_uom.compare(self.product_uom_qty, 0) < 0
+
+    def _key_assign_picking(self):
+        # Azaltma (negatif) hareketleri artışlardan ayrı gruplanır: aşağıdaki kural yalnız
+        # artışa uygulanır, grubun ilk hareketi tüm grubun sevkiyatını belirler
+        return super()._key_assign_picking() + (self._is_negative_demand(),)
+
+    def _search_picking_for_assignation_domain(self):
+        """Toplaması başlamış (rota okutması / "Eksik" işareti olan) sevkiyata yeni hareket
+        eklenmez; ayrı sevkiyat açılır. Rota Tamamla doğrulamadığı için paketlemeye kadar
+        satır eklenebiliyor; yeni hareket toplanmış picking'e girerse rotada okutulmamış
+        sayılıp paketleme tamamlamasını (eksik denetimi) kilitliyordu.
+
+        Satır azaltma (negatif hareket) yine aynı sevkiyatı bulur: oradaki hareketle
+        birleşip miktarı düşürür / iptal eder (ayrı sevkiyata giderse iade hareketine dönerdi).
+
+        Kural yalnız rotadaki picking'e uygulanır. Rotadan çıkan picking'in rota durumu artık
+        `write` içinde sıfırlanır; bu koşul sıfırlamadan önce rotadan çıkmış, işareti
+        kalmış eski kayıtları da yeni satıra açık tutar (gereksiz ayrı sevkiyat açılmaz).
+        """
+        domain = super()._search_picking_for_assignation_domain()
+        if self._is_negative_demand():
+            return domain
+        return Domain.AND([domain, ['|', ('batch_id', '=', False), ('move_ids', 'not any', [
+            '|', ('wave_collected_qty', '>', 0), ('wave_skipped', '=', True)])]])
+
+    def _action_cancel(self):
+        pickings = self.picking_id
+        res = super()._action_cancel()
+        # İptal edilen backorder / kardeş sevkiyat faturayı bekletmesin
+        pickings._ugurlar_schedule_invoice()
+        return res
+
 
 AVAILABILITY_STATUS = [
     ('available', 'Stokta Mevcut'),
@@ -92,19 +128,85 @@ class StockPickingExt(models.Model):
         Önceden yalnız batch.picking_ids yazılınca ekleniyordu, çıkarılan sipariş eski
         rotada kalıyordu: aynı sipariş iki rotada görünüp toplamlar iki kez sayılıyordu.
         Tamamlanmış sevkiyat eski rotasının geçmişinde kalır.
+
+        Açık sevkiyatın rotası değişince (çıkış, giriş, rota değişimi) rota durumu da
+        sıfırlanır (`_ugurlar_reset_route_state`): Eksik Onayla, rota silme, zamanlayıcı
+        birleştirme, Odoo arayüzü ve backorder'ın yeni rotaya girişi aynı kuraldan geçer.
         """
         if 'batch_id' not in vals:
             return super().write(vals)
         old_batches = {p.id: p.batch_id for p in self}
         res = super().write(vals)
         new_batch = self.env['stock.picking.batch'].browse(vals['batch_id'] or [])
+        changed = self.browse()
         for picking in self:
             old = old_batches.get(picking.id)
-            if old and old != new_batch and picking.state not in ('done', 'cancel'):
+            is_open = picking.state not in ('done', 'cancel')
+            if old != new_batch and is_open:
+                changed |= picking
+            if old and old != new_batch and is_open:
                 old.sudo().write({'all_picking_ids': [(3, picking.id)]})
             if new_batch and picking not in new_batch.all_picking_ids:
                 new_batch.sudo().write({'all_picking_ids': [(4, picking.id)]})
+        changed._ugurlar_reset_route_state()
         return res
+
+    def _ugurlar_reset_route_state(self):
+        """Açık move'lardaki rota durumunu (toplanan, "Eksik" işareti, paketleme sayacı)
+        sıfırlar. Bu değerler tek bir rotaya aittir; picking rotadan çıkınca ya da başka
+        rotaya girince taşınırsa yeni rotada eksik denetimi atlanır, paketleme hedefi eski
+        toplanan olur ve operatör karar vermeden eksik sevk/backorder oluşur.
+        Biten/iptal move'lar geçmiş kaydıdır, dokunulmaz. Yalnız değişen satırlar yazılır."""
+        moves = self.move_ids.filtered(lambda m: m.state not in ('done', 'cancel') and (
+            m.wave_collected_qty or m.wave_skipped or m.packing_scanned_qty))
+        if moves:
+            moves.sudo().write({'wave_collected_qty': 0, 'wave_skipped': False,
+                                'packing_scanned_qty': 0})
+
+    def _action_done(self):
+        res = super()._action_done()
+        self._ugurlar_schedule_invoice()
+        return res
+
+    def _ugurlar_schedule_invoice(self):
+        """Paketleme dışından (Odoo arayüzü, başka ekran, iptal) kapanan son giden sevkiyat
+        siparişin faturasını tetikler. Fatura sipariş başına tek ve tüm giden sevkiyatlar
+        bitince kesilir (`sale.order._ugurlar_outs_closed`); paketleme ilk sevkiyatta bekletir,
+        son sevkiyat paketleme dışından kapanırsa fatura hiç kesilmiyordu.
+
+        Commit sonrası (`postcommit`) ayrı cursor'da çalışır: Nebim çağrısı ve commit doğrulama
+        işleminin ortasına girmez, işlem geri alınırsa hiç çalışmaz. Yalnız rotadan geçmiş
+        sevkiyatı olan siparişler (bu akışın faturaladığı siparişler). Paketleme doğrulaması
+        Nebim'i kendisi çağırır, `ugurlar_skip_invoice_hook` ile buraya gelmez."""
+        if self.env.context.get('ugurlar_skip_invoice_hook'):
+            return
+        outs = self.filtered(lambda p: p.picking_type_code == 'outgoing')
+        if not outs:
+            return
+        if self.env['ir.config_parameter'].sudo().get_param(
+                'odoougurlar.nebim_sync_invoice_enabled', 'False') != 'True':
+            return
+        orders = outs.sudo().sale_id.filtered(lambda o: o.state != 'cancel' and any(
+            p.batch_id or p.batch_schedule_time for p in o._ugurlar_customer_outs()))
+        if not orders:
+            return
+        postcommit = self.env.cr.postcommit
+        pending = postcommit.data.get('ugurlar_barcode.invoice_orders')
+        if pending is None:
+            pending = postcommit.data['ugurlar_barcode.invoice_orders'] = set()
+            registry, uid = self.env.registry, self.env.uid
+
+            @postcommit.add
+            def _invoice_after_commit():
+                try:
+                    with registry.cursor() as cr:
+                        env = api.Environment(cr, uid, {})
+                        env['sale.order'].sudo().browse(
+                            sorted(pending)).exists()._ugurlar_invoice_now()
+                except Exception:
+                    # Doğrulama zaten commit edildi: hata kullanıcıya dönmesin
+                    _logger.exception("Commit sonrası fatura tetikleme hatası: %s", sorted(pending))
+        pending.update(orders.ids)
 
     def _check_availability_status(self, primary_warehouse, fallback_warehouse=None, return_warehouse=None,
                                    write=True):

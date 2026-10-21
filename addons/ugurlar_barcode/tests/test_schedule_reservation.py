@@ -349,13 +349,23 @@ class TestReservedRouteScreens(BarcodeCase):
         self.assertIn('error', res, res)
         self.assertNotEqual(picking.state, 'done')
 
-    def test_a73_collect_complete_ships_collected_amount(self):
+    def test_a73_collect_complete_leaves_shipping_to_packing(self):
+        """Rota Tamamla sevkiyatı doğrulamaz; toplanan miktarı paketleme sevk eder."""
         picking, batch = self._reserved_route(demand=2, wave=2)
         res = self.batch_ctl.batch_collect_complete(batch_id=batch.id)
         self.assertTrue(res.get('success'), res)
+        self.assertTrue(res.get('collect_done'))
+        self.assertFalse(res.get('batch_done'))
+        self.assertNotEqual(picking.state, 'done')
+        self.assertFalse(any(picking.move_ids.mapped('picked')))
+
+        for _i in range(2):
+            scan = self.pack_ctl.packing_scan(batch_id=batch.id, barcode='RR-1')
+            self.assertTrue(scan.get('success'), scan)
+        self.assertTrue(scan['picking_completed'])
         self.assertEqual(picking.state, 'done')
         self.assertEqual(self._shipped_qty(picking), 2)
-        self.assertTrue(res.get('batch_done'))
+        self.assertEqual(batch.state, 'done')
 
     def test_a73_batch_detail_uses_wave_counter(self):
         """batch_detail: done_qty / collected_qty rezervden değil wave_collected_qty'den."""
@@ -482,6 +492,7 @@ class TestReservedRouteScreens(BarcodeCase):
         self.assertTrue(res.get('not_collected'), res)
         self.assertEqual(repl.move_ids.packing_scanned_qty, 0)
         self.nebim.assert_not_called()
+        self.assertNotIn(repl, batch.all_picking_ids, 'hata dönüşünde rotaya eklenmemeli')
 
     def test_review_o1_replacement_removed_from_route_not_soft_matched(self):
         """Rotada hiç toplanamayıp çıkarılan (batch_id boş, rotadan geçmiş) replacement da aynı."""
@@ -491,6 +502,7 @@ class TestReservedRouteScreens(BarcodeCase):
         res = self.pack_ctl.packing_scan(batch_id=batch.id, barcode='RR-X')
         self.assertFalse(res.get('soft_match'), res)
         self.assertTrue(res.get('not_collected'), res)
+        self.assertNotIn(repl, batch.all_picking_ids, 'hata dönüşünde rotaya eklenmemeli')
 
     def test_review_o1_collected_routed_replacement_counts_scan(self):
         """R2 toplandı (wave 1): okutma replacement sayacına yazılır, soft match değil."""
@@ -501,6 +513,7 @@ class TestReservedRouteScreens(BarcodeCase):
         self.assertFalse(res.get('soft_match'), res)
         self.assertEqual(res.get('picking_id'), repl.id)
         self.assertEqual(repl.move_ids.packing_scanned_qty, 1)
+        self.assertIn(repl, batch.all_picking_ids, 'başarılı okutmada rotaya eklenir')
 
     def test_review_o1_unrouted_reserved_replacement_keeps_soft_match(self):
         """Koruma (eski davranış): rotaya hiç girmemiş, Odoo'nun rezerve ettiği replacement soft match."""
@@ -546,26 +559,39 @@ class TestReservedRouteScreens(BarcodeCase):
 
     # ─── RG-1 ──────────────────────────────────────────
     def test_rg1_old_style_zero_quantity_route_completes(self):
-        """Deploy öncesi açılmış rota (quantity = 0): tamamlama yine toplanan kadar sevk eder."""
+        """Deploy öncesi açılmış rota (quantity = 0): toplama kapanır, paketleme toplanan
+        kadar sevk eder."""
         picking, batch = self._reserved_route(demand=2, wave=2)
         picking.move_ids.quantity = 0
         self.assertEqual(picking.move_ids.quantity, 0)
 
         res = self.batch_ctl.batch_collect_complete(batch_id=batch.id)
         self.assertTrue(res.get('success'), res)
+        self.assertNotEqual(picking.state, 'done')
+
+        res = self.pack_ctl.packing_complete(batch_id=batch.id)
+        self.assertTrue(res.get('success'), res)
         self.assertEqual(picking.state, 'done')
         self.assertEqual(self._shipped_qty(picking), 2)
-        self.assertTrue(res.get('batch_done'))
+        self.assertEqual(batch.state, 'done')
 
     def test_rg1_partial_with_skip_creates_backorder(self):
-        """Eksik işaretleme: 3'ten 1 toplandı -> 1 sevk, 2 için bekleyen sevkiyat."""
+        """Eksik işaretleme: 3'ten 1 toplandı -> Tamamla doğrulamaz; paketlemede 1 okutma
+        siparişi tamamlar: 1 sevk, 2 için bekleyen sevkiyat."""
         picking, batch = self._reserved_route(demand=3, wave=0)
         picking.move_ids.write({'wave_collected_qty': 1, 'wave_skipped': True})
 
         res = self.batch_ctl.batch_collect_complete(batch_id=batch.id)
         self.assertTrue(res.get('success'), res)
+        self.assertNotEqual(picking.state, 'done')
+        self.assertEqual(res.get('backorder_pickings'), [])
+
+        scan = self.pack_ctl.packing_scan(batch_id=batch.id, barcode='RR-1')
+        self.assertTrue(scan.get('success'), scan)
+        self.assertTrue(scan['complete'], 'Eksik satır toplanan kadar okutulunca tamam')
+        self.assertTrue(scan['picking_completed'])
+        self.assertTrue(scan['all_matched'])
         self.assertEqual(picking.state, 'done')
         self.assertEqual(self._shipped_qty(picking), 1)
         backorder = self.env['stock.picking'].search([('backorder_id', '=', picking.id)])
         self.assertEqual(sum(backorder.move_ids.mapped('product_uom_qty')), 2)
-        self.assertEqual(res.get('backorder_pickings'), [picking.name])
