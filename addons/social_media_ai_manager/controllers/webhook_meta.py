@@ -8,7 +8,6 @@ import logging
 import requests
 
 _logger = logging.getLogger(__name__)
-_warned_no_app_secret = False
 
 class WebhookMeta(http.Controller):
 
@@ -32,7 +31,8 @@ class WebhookMeta(http.Controller):
 
                 if account and mode == 'subscribe':
                     _logger.info("Meta Webhook Verified!")
-                    return http.Response(challenge, status=200)
+                    # NEDEN: text/plain; varsayılan text/html + yansıyan challenge = reflected XSS.
+                    return http.Response(challenge or '', status=200, content_type='text/plain; charset=utf-8')
                 else:
                     return http.Response("Verification failed", status=403)
             return http.Response("Invalid request", status=400)
@@ -42,18 +42,16 @@ class WebhookMeta(http.Controller):
             raw_body = request.httprequest.get_data()
             # DIKKAT: İmza, ham gövde üzerinden doğrulanmalı (JSON parse/yeniden serileştirme baytları değiştirir).
             app_secret = request.env['ir.config_parameter'].sudo().get_param('social_media_ai.meta_app_secret')
-            if app_secret:
-                expected = 'sha256=' + hmac.new(app_secret.encode('utf-8'), raw_body, hashlib.sha256).hexdigest()
-                given = request.httprequest.headers.get('X-Hub-Signature-256', '')
-                if not hmac.compare_digest(given.encode('utf-8'), expected.encode('utf-8')):
-                    _logger.warning("Meta webhook rejected: invalid X-Hub-Signature-256")
-                    return http.Response("Invalid signature", status=403)
-            else:
-                # NEDEN: App Secret henüz tanımlı olmayan kurulumlar kırılmasın; ama uyarı bir kez loglanır.
-                global _warned_no_app_secret
-                if not _warned_no_app_secret:
-                    _warned_no_app_secret = True
-                    _logger.warning("Meta webhook signature NOT verified: 'social_media_ai.meta_app_secret' is not set")
+            # NEDEN: fail-closed (kullanıcı kararı; prod'da meta_app_secret dolu teyit edildi). Uç auth='public';
+            # secret yoksa imzasız sahte olaylar mesaj/partner kaydı oluşturabilirdi.
+            if not app_secret:
+                _logger.warning("Meta webhook rejected: 'social_media_ai.meta_app_secret' is not set")
+                return http.Response("Webhook secret not configured", status=403)
+            expected = 'sha256=' + hmac.new(app_secret.encode('utf-8'), raw_body, hashlib.sha256).hexdigest()
+            given = request.httprequest.headers.get('X-Hub-Signature-256', '')
+            if not hmac.compare_digest(given.encode('utf-8'), expected.encode('utf-8')):
+                _logger.warning("Meta webhook rejected: invalid X-Hub-Signature-256")
+                return http.Response("Invalid signature", status=403)
             try:
                 data = json.loads(raw_body.decode('utf-8'))
                 _logger.debug("Incoming Meta Webhook: %s", data)
@@ -268,12 +266,14 @@ class WebhookMeta(http.Controller):
         """ Fetch real name from Meta Graph API using PSID or ASID """
         if not account.api_token:
             return None
-        url = f"https://graph.facebook.com/v19.0/{user_id}?fields=name,first_name,last_name,profile_pic&access_token={account.api_token}"
+        url = f"https://graph.facebook.com/v19.0/{user_id}"
+        params = {'fields': 'name,first_name,last_name,profile_pic', 'access_token': account.api_token}
         try:
-            import requests
-            res = requests.get(url, timeout=5).json()
+            res = requests.get(url, params=params, timeout=5).json()
             if 'error' not in res:
                 return res
         except Exception as e:
-            _logger.error(f"Failed to fetch user profile for {user_id}: {e}")
+            # DIKKAT: requests hata mesajı tam URL'yi (access_token dahil) taşır; loga token sızmamalı.
+            msg = str(e).replace(account.api_token, '***')
+            _logger.error("Failed to fetch user profile for %s: %s: %s", user_id, type(e).__name__, msg)
         return None

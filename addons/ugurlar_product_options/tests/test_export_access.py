@@ -1,4 +1,6 @@
+import io
 import json
+import zipfile
 from unittest.mock import patch
 
 from odoo.exceptions import AccessError
@@ -48,6 +50,21 @@ class TestProductExportAccess(HttpCase):
         res = self._export('export_portal', [{'name': 'standard_price', 'type': 'monetary'}])
         self.assertEqual(res.status_code, 403)
         self.assertFalse(res.content.startswith(b'PK'))
+
+    def test_invalid_field_and_id_return_400_not_500(self):
+        res = self._export('export_internal', [{'name': 'yok_boyle_alan', 'type': 'char'}])
+        self.assertEqual(res.status_code, 400)
+        self.product = self.env['product.product'].browse(999999999)  # olmayan id
+        res = self._export('export_internal')
+        self.assertEqual(res.status_code, 400)
+
+    def test_formula_strings_are_not_written_as_formulas(self):
+        self.product.name = '=1+1'
+        res = self._export('export_internal', [{'name': 'display_name', 'type': 'char'}])
+        self.assertEqual(res.status_code, 200)
+        with zipfile.ZipFile(io.BytesIO(res.content)) as z:
+            sheet = z.read('xl/worksheets/sheet1.xml').decode()
+        self.assertNotIn('<f>', sheet)
 
     def test_access_error_on_read_returns_403_not_500(self):
         # NEDEN: sudo kalkınca kullanıcı hakkı olmayan alan AccessError verir; 500 değil 403 beklenir

@@ -699,7 +699,9 @@ class SaleOrder(models.Model):
         Duplikasyon Koruması:
         - Bağımsız cursor ile committed DB state kontrolü (rollback-proof)
         - Email-bazlı cari dedup (aynı email ile mevcut cari kodu varsa yeniden kullanır)
-        - API sonuçları bağımsız cursor ile kaydedilir (ana transaction rollback yapsa bile kalıcı)
+        - API sonuçları bağımsız cursor ile kaydedilir; bu cursor kendi commit'ini yaptığı için
+          sonuç, ana transaction sonradan rollback etse de DB'de kalır. Ancak ana transaction'ın
+          kendi yazdıkları (ör. savepoint rollback'i ile geri alınanlar) kalıcı değildir.
         """
         ICP = self.env['ir.config_parameter'].sudo()
         customer_enabled = ICP.get_param('odoougurlar.nebim_sync_customer_enabled', 'False') == 'True'

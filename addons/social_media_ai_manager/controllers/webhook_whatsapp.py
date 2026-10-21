@@ -22,7 +22,10 @@ class WebhookWhatsApp(http.Controller):
         secret = request.env['ir.config_parameter'].sudo().get_param(SECRET_PARAM)
         given = request.httprequest.headers.get(SECRET_HEADER, '')
         if not secret or not hmac.compare_digest(given.encode('utf-8'), secret.encode('utf-8')):
-            _logger.warning("WhatsApp webhook rejected: secret not configured or header mismatch")
+            _logger.warning(
+                "WhatsApp webhook rejected: secret not configured or header mismatch "
+                "(Ayarlar > Teknik > Sistem Parametreleri'nde '%s' anahtarını tanımlayın; "
+                "WAHA/Evolution aynı değeri '%s' başlığında göndermeli)", SECRET_PARAM, SECRET_HEADER)
             return request.make_json_response({'status': 'forbidden'}, status=403)
 
         try:

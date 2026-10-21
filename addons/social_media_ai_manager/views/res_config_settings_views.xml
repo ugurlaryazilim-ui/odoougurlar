@@ -68,9 +68,6 @@
                         <setting string="WhatsApp Yönlendirme Hattı" help="YouTube vb. DM özelliği olmayan kanallardan gelen müşterileri WhatsApp hattınıza yönlendirmek için numara (Örn: 905XXXXXXXXX).">
                             <field name="social_whatsapp_number"/>
                         </setting>
-                        <setting string="WhatsApp Webhook Secret" help="WAHA/Evolution webhook'unda 'X-Webhook-Secret' başlığı olarak aynı değeri gönderin. Boşsa webhook tüm istekleri reddeder.">
-                            <field name="social_whatsapp_webhook_secret" password="True"/>
-                        </setting>
                     </block>
 
                     <block title="Meta (Facebook &amp; Instagram) OAuth Configuration" name="meta_oauth_settings">
