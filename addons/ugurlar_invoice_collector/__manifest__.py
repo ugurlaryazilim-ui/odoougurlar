@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Uğurlar Nebim - Toptan Alış Fatura Arşivleyici (ZIP)',
-    'version': '19.0.1.0.0',
+    'version': '19.0.1.0.1',
     'category': 'Accounting/Localizations',
     'summary': 'Nebim Toptan Alış Faturalarını Marka ve Ürün Grubu bazında tarayıp PDF olarak ZIP indirir.',
     'description': """
