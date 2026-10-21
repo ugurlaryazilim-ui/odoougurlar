@@ -139,8 +139,16 @@ class OperationsApiController(BarcodeApiBase):
         if not items:
             return {'error': 'Ürün listesi gerekli'}
 
+        limit_error = self._check_bulk_items(items)
+        if limit_error:
+            return limit_error
+
         results = []
         success_count = 0
+        # Raflama kalemleri sırayla çözümlenir (yanıt sırası korunur), hareketler sonda tek turda
+        putaway_entries = []   # (ürün, kaynak, raf, miktar)
+        putaway_slots = []     # results içindeki yerleri
+        locations = {}         # raf barkodu -> lokasyon (kalem başına arama yok)
 
         for item in items:
             bc = (item.get('barcode') or '').strip()
@@ -170,25 +178,20 @@ class OperationsApiController(BarcodeApiBase):
                 success_count += 1
 
             elif operation == 'putaway' and shelf_barcode:
-                location = self._find_location(shelf_barcode.strip())
+                shelf_key = shelf_barcode.strip()
+                if shelf_key not in locations:
+                    locations[shelf_key] = self._find_location(shelf_key)
+                location = locations[shelf_key]
                 if not location:
                     results.append({'barcode': bc, 'status': 'error', 'message': 'Raf bulunamadı'})
                     continue
 
-                # Güvenli stok güncelleme
-                self._safe_update_quant(product, location, qty, 'Mobil: Toplu Raflama')
-
-                request.env['ugurlar.barcode.operation'].sudo().create({
-                    'operation_type': 'putaway',
-                    'barcode': bc,
-                    'product_id': product.id,
-                    'location_id': location.id,
-                    'quantity': qty,
-                    'state': 'done',
-                })
-
-                # NEDEN: ürün chatter'ı yazılmaz; iz yukarıdaki operation kaydında
-
+                # Önceden _safe_update_quant: qty <= 0 ise hareket açılmaz (envanter hedefe
+                # yalnız pozitif miktar girer); işlem kaydı yine yazılırdı
+                putaway_entries.append(
+                    (product, self._inventory_location(product, location), location, qty))
+                putaway_slots.append(len(results))
+                # NEDEN: ürün chatter'ı yazılmaz; iz operation kaydında
                 results.append({
                     'barcode': bc,
                     'product_name': product.name,
@@ -197,6 +200,18 @@ class OperationsApiController(BarcodeApiBase):
                     'message': f'{product.name} → {location.complete_name}',
                 })
                 success_count += 1
+
+        if putaway_entries:
+            self._mobile_stock_moves(
+                [e for e in putaway_entries if e[3] > 0], 'Mobil: Toplu Raflama', is_inventory=True)
+            request.env['ugurlar.barcode.operation'].sudo().create([{
+                'operation_type': 'putaway',
+                'barcode': results[slot]['barcode'],
+                'product_id': product.id,
+                'location_id': location.id,
+                'quantity': qty,
+                'state': 'done',
+            } for slot, (product, _src, location, qty) in zip(putaway_slots, putaway_entries)])
 
         return {
             'results': results,
