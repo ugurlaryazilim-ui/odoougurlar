@@ -34,6 +34,12 @@ Sanal POS / Ödeme Linki
         'views/res_config_settings_views.xml',
         'views/menus.xml',
     ],
+    'assets': {
+        'web.assets_backend': [
+            'sanal_pos/static/src/xml/scan_char_field.xml',
+            'sanal_pos/static/src/js/scan_char_field.js',
+        ],
+    },
     'application': True,
     'installable': True,
 }
