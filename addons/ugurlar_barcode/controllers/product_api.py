@@ -3,6 +3,7 @@ import logging
 
 from odoo import http
 from odoo.http import request
+from odoo.addons.odoougurlar.services.nebim_connector import INTERACTIVE_TIMEOUT
 
 from .base_api import BarcodeApiBase
 
@@ -247,7 +248,9 @@ class ProductApiController(BarcodeApiBase):
         try:
             proc_params = [{'Name': 'Barcode', 'Value': barcode}]
             sp_name = request.env['ir.config_parameter'].sudo().get_param('odoougurlar.nebim_sp_product_matrix', 'sp_Odoougurlar_GetProductMatrix')
-            results = NebimConnector.run_proc(sp_name, params=proc_params)
+            # NEDEN: mağaza ekranı etkileşimli; Nebim asılırsa worker uzun süre tutulmasın
+            results = NebimConnector.run_proc(
+                sp_name, params=proc_params, timeout=INTERACTIVE_TIMEOUT, retries=0)
             
             # Eğer SP Exception verdiyse veya bağlanamadıysa
             if isinstance(results, dict) and results.get('ExceptionMessage'):

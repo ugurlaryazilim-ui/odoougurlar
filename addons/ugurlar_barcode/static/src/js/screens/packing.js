@@ -1194,6 +1194,8 @@ export class PackingScreen extends Component {
                 await new Promise(r => setTimeout(r, 3000));
                 const retry = await BarcodeService.call('/ugurlar_barcode/api/packing_label_data', {
                     picking_id: pickingId,
+                    // Nebim senkronu birinci çağrıda tetiklendi; ikincisi yalnız okur (Nebim iki kez çağrılmaz)
+                    trigger_sync: false,
                 });
                 if (!retry.error && retry.nebim_invoice_no) {
                     data = retry;

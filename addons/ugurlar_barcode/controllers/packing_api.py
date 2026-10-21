@@ -4,6 +4,7 @@ import logging
 import os
 import subprocess
 import tempfile
+import time
 from urllib.parse import quote
 
 import re
@@ -13,10 +14,14 @@ from markupsafe import Markup, escape
 from odoo import fields, http
 from odoo.http import request
 from odoo.service.model import PG_CONCURRENCY_EXCEPTIONS_TO_RETRY
+from odoo.addons.odoougurlar.services.nebim_connector import WRITE_CHAIN_TIMEOUT
 
 from .base_api import BarcodeApiBase
 
 _logger = logging.getLogger(__name__)
+
+# packing_complete'te Nebim zincirine ayrılan toplam süre (sn); aşılınca kalan siparişler ertelenir
+NEBIM_COMPLETE_BUDGET = 120
 
 
 # ── PDF etiket HTML'i: pazaryeri / şablon değerleri kaçışsız yazılırsa wkhtmltopdf
@@ -972,11 +977,19 @@ class PackingApiController(BarcodeApiBase):
         # Nebim sipariş başına bir kez, tüm doğrulamalardan sonra: fatura kapısı
         # (`_trigger_nebim_sync`) kardeşlerin son durumunu görür
         synced_origins = set()
+        deferred = []
+        # NEDEN: sipariş başına zincir 60 sn'ye varabilir; Nebim yavaşken N sipariş istemci /
+        # proxy zaman aşımını aşar. Süre dolunca kalanlar atlanır: picking'ler zaten done, nebim_*
+        # bayrakları yazılmadığı için tekrar "Tamamla" ya da cron aynı yerden devam eder.
+        deadline = time.monotonic() + NEBIM_COMPLETE_BUDGET
         for picking in shipped:
             key = picking.origin or picking.id
             if key in synced_origins:
                 continue
             synced_origins.add(key)
+            if time.monotonic() > deadline:
+                deferred.append(picking.name)
+                continue
             try:
                 self._trigger_nebim_sync(picking)
             except PG_CONCURRENCY_EXCEPTIONS_TO_RETRY:
@@ -984,6 +997,10 @@ class PackingApiController(BarcodeApiBase):
             except Exception as e:
                 _logger.exception("Sipariş Senkronizasyon Hatası %s:", picking.name)
                 errors.append(f"{picking.name}: {self._error_text(e)}")
+        if deferred:
+            errors.append(
+                f"Nebim aktarımı süre sınırı nedeniyle ertelendi ({', '.join(deferred)}): "
+                "Tamamla'ya tekrar basın.")
 
         # Rota kapanışı (tek kural). Filtresiz liste: iptal siparişin picking'i yukarıda
         # iptal edildi; iptal edilemeyen açık picking varken rota kapanmaz
@@ -1530,7 +1547,11 @@ class PackingApiController(BarcodeApiBase):
         Hata olsa bile picking validation'ı ve UI çalışmaya devam eder.
         """
         from odoo import fields
-        
+
+        # NEDEN: zincir (cari / sipariş / fatura) bir HTTP isteği içinde koşar; Nebim asılırsa
+        # çağrı başına 300 sn worker'ı dakikalarca tutuyordu. Context processor'lardan connector'a
+        # kadar yayılır; cron yolu (bu context yok) 300 sn kalır.
+        picking = picking.with_context(nebim_timeout=WRITE_CHAIN_TIMEOUT)
         sale_order = picking.sale_id
         if not sale_order and picking.origin:
             sale_order = picking.env['sale.order'].sudo().search([('name', '=', picking.origin)], limit=1)

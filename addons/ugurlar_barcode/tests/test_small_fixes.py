@@ -435,7 +435,7 @@ class TestDiscountNebimErrorF(BarcodeCase):
     @contextmanager
     def _proc(self, *, result=None, exc=None):
         """Nebim connector `run_proc` taklidi: sonuç döner ya da istisna fırlatır."""
-        def fake(conn, proc_name, params=None):
+        def fake(conn, proc_name, params=None, **kw):
             if exc is not None:
                 raise exc
             return result

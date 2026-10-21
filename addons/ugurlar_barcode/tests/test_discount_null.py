@@ -23,7 +23,7 @@ class TestDiscountNullFields(BarcodeCase):
 
     def _calc(self, row):
         cls = type(self.env['odoougurlar.nebim.connector'])
-        with patch.object(cls, 'run_proc', lambda conn, proc_name, params=None: [row]):
+        with patch.object(cls, 'run_proc', lambda conn, proc_name, params=None, **kw: [row]):
             return self.ctl.calculate_discounts(basket=[{'barcode': 'NULL-BC-1', 'quantity': 1}])
 
     def test_none_numeric_fields_become_zero(self):
