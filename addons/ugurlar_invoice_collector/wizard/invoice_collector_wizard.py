@@ -489,6 +489,18 @@ class UgurlarInvoiceCollectorWizard(models.Model):
         if not selected_lines:
             raise UserError('Lütfen ZIP arşivine eklenecek en az bir fatura seçiniz.')
 
+        # NEDEN: arka plan cron'u aynı işi aynı anda indiriyorsa çift Doğan/Nebim çağrısı ve yazma çakışması
+        # olmasın; ekranı yenileyip (JS bir sonraki adımı yine tetikler) bu turu cron'a bırak.
+        if not self._try_lock_job():
+            _logger.info("Fatura işi %d arka planda işleniyor; etkileşimli adım atlandı.", self.id)
+            return {
+                'type': 'ir.actions.act_window',
+                'res_model': self._name,
+                'res_id': self.id,
+                'view_mode': 'form',
+                'target': 'new',
+            }
+
         start_time = time.time()
         max_duration = 25.0
         batch_sz = self.batch_size if self.batch_size > 0 else 15
@@ -547,6 +559,16 @@ class UgurlarInvoiceCollectorWizard(models.Model):
             'target': 'new',
         }
 
+    def _try_lock_job(self):
+        """İş satırını işlem sonuna dek kilitle; başka işlem (cron ya da etkileşimli adım) tutuyorsa False.
+
+        DIKKAT: SKIP LOCKED bilerek; NOWAIT hata verir, bekleme ise iki tarafı da 25 sn tutar.
+        """
+        self.ensure_one()
+        self.env.cr.execute(
+            "SELECT id FROM ugurlar_invoice_collector WHERE id = %s FOR UPDATE SKIP LOCKED", (self.id,))
+        return bool(self.env.cr.fetchone())
+
     def action_start_background_download(self):
         """Faturaları indirmeyi arka plan Cron görevine devreder ve kullanıcıya bildirim gösterir."""
         self.ensure_one()
@@ -573,8 +595,11 @@ class UgurlarInvoiceCollectorWizard(models.Model):
         Arka plan Cron İşleyicisi: 'downloading' durumundaki fatura arşivleme işlerini tarar,
         arka planda indirir, ZIP & Birleştirilmiş PDF oluşturur ve kullanıcıya bildirim gönderir.
         """
-        jobs = self.search([('state', '=', 'downloading')], limit=5)
+        jobs = self.search([('state', '=', 'downloading')], limit=5, order='id')
+        retrigger = False
         for job in jobs:
+            if not job._try_lock_job():
+                continue   # etkileşimli adım işliyor (JS otomatik tıklama); çift indirme olmasın
             _logger.info("Cron: Arka plan fatura arşivleme işi işleniyor (Job ID: %d)...", job.id)
             try:
                 start_time = time.time()
@@ -587,6 +612,9 @@ class UgurlarInvoiceCollectorWizard(models.Model):
                     job._process_batch_lines(batch)
                 
                 remaining = job.line_ids.filtered(lambda l: l.selected and l.download_status == 'pending')
+                # NEDEN: 25 sn'lik dilim bitince bir sonraki dakikayı beklemek yerine cron kendini tetikler
+                # (aralık 5 dk'ya çıkarılabildi); ilerleme yoksa sonsuz döngü olmaz: yalnız işlenen iş için.
+                retrigger = retrigger or bool(remaining)
                 if not remaining:
                     selected = job.line_ids.filtered(lambda l: l.selected)
                     success_lines = selected.filtered(lambda l: l.download_status == 'success' and l.pdf_file)
@@ -650,8 +678,14 @@ class UgurlarInvoiceCollectorWizard(models.Model):
                             )
                         except Exception as me:
                             _logger.debug("Partner message_post hatası: %s", str(me))
+                self.env['ir.cron']._commit_progress()   # iş başına commit: kilit ve işlem kısa kalır
             except Exception as e:
                 _logger.error("Cron hatası (Job ID %d): %s", job.id, str(e))
+        if retrigger:
+            cron = self.env.ref('ugurlar_invoice_collector.cron_process_invoice_collector_jobs',
+                                raise_if_not_found=False)
+            if cron:
+                cron._trigger()
 
     def _finalize_zip(self, selected_lines):
         """Tüm indirilen PDF'leri tek bir ZIP arşivinde ve ayrıca birleştirilmiş tek bir PDF dosyasında toplar."""
