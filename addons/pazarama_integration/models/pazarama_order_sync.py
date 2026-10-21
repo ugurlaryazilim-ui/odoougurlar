@@ -22,6 +22,7 @@ _PAGE_SIZE = 100
 _MAX_PAGES = 100
 _STALE_CHECK_AFTER = timedelta(hours=6)    # açık siparişler en geç bu aralıkla tek tek yoklanır
 _STALE_CHECK_LIMIT = 20                    # her turda yoklanacak en fazla sipariş
+_AUTO_WINDOW_DAYS = 3                       # cron taraması en fazla bu kadar geriye bakar; elle senkron mağaza ayarını kullanır
 _STALE_LOOKBACK = timedelta(days=180)      # sipariş no ile sorgu en fazla 6 ay geriye gider
 _ACCEPT_RETRY_AFTER = timedelta(minutes=30)
 _CANCEL_MARK = 'Otomatik iptal edilmedi'      # error_message öneki; iptal taraması işaretli kaydı atlar
@@ -59,7 +60,9 @@ class PazaramaOrderSync(models.Model):
         stores = self.env['pazarama.store'].search([('active', '=', True), ('auto_sync', '=', True)])
         for store in stores:
             try:
-                self.sync_orders_for_store(store)
+                # NEDEN: 14 günlük pencere her 5 dk'da değişmeyen siparişleri yeniden işletiyordu;
+                # 3 günden eskiler _refresh_stale_orders ile (6 saatte bir) yoklanır.
+                self.sync_orders_for_store(store, max_days=_AUTO_WINDOW_DAYS)
             except Exception as e:
                 _logger.exception("Pazarama %s senkronizasyon hatası: %s", store.name, e)
                 store._write_sync_state(error=str(e))
@@ -90,7 +93,7 @@ class PazaramaOrderSync(models.Model):
         return IST.localize(naive_dt).astimezone(pytz.UTC).replace(tzinfo=None)
 
     @api.model
-    def sync_orders_for_store(self, store):
+    def sync_orders_for_store(self, store, max_days=None):
         """Son N gündeki siparişleri çeker (yeni + güncellenen), ardından daha eski açık
         siparişleri sipariş numarasıyla tek tek yoklar (kargo / teslim / iptal durumları için)."""
         # Aynı mağazada tek senkron (cron sürerken manuel senkron aynı siparişleri paralel açmasın)
@@ -102,6 +105,8 @@ class PazaramaOrderSync(models.Model):
         api_client = store.get_api()
         now = fields.Datetime.now()
         day_range = min(max(store.order_day_range or 1, 1), PAZARAMA_MAX_WINDOW_DAYS - 1)
+        if max_days:
+            day_range = min(day_range, max_days)
         # Pazarama API Türkiye saatinde çalışır — sorgu tarihleri Türkiye saatiyle gider
         now_turkey = self._now_turkey()
         start_date = now_turkey - timedelta(days=day_range)
@@ -233,7 +238,10 @@ class PazaramaOrderSync(models.Model):
         if changed or action == 'created' or not rec.sale_order_id:
             rec._reconcile_sale_order(store)
         rec._auto_accept(store, api_client)
-        rec.last_checked = fields.Datetime.now()
+        # NEDEN: bkz. Idefix — last_checked yalnız bayatlama ölçütü; değişmeyen kayda her turda yazılmaz.
+        now = fields.Datetime.now()
+        if changed or action or not rec.last_checked or rec.last_checked < now - _STALE_CHECK_AFTER:
+            rec.last_checked = now
         if action:
             return action
         return 'updated' if changed else 'unchanged'

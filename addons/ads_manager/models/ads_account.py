@@ -9,6 +9,21 @@ from odoo.exceptions import UserError, ValidationError
 
 _logger = logging.getLogger(__name__)
 
+
+def _write_changed(rec, vals):
+    """Yalnız değişen alanları yazar; yazıldıysa True. Dış API senkronu her turda aynı değerleri
+    UPDATE edip write_date/mail izini şişirmesin (TODO-22)."""
+    diff = {}
+    for name, value in vals.items():
+        field = rec._fields[name]
+        # NEDEN: iki tarafı da önbellek biçimine çevir; Float yuvarlama ve boş değer farkları sahte "değişti" üretmesin.
+        if field.convert_to_cache(rec[name], rec) != field.convert_to_cache(value, rec):
+            diff[name] = value
+    if diff:
+        rec.write(diff)
+    return bool(diff)
+
+
 class AdsAccount(models.Model):
     _name = 'ads.account'
     _description = 'Advertising Account'
@@ -397,8 +412,8 @@ class AdsAccount(models.Model):
             
             existing = existing_campaigns.get(camp_pid)
             if existing:
-                existing.write(vals)
-                updated += 1
+                if _write_changed(existing, vals):
+                    updated += 1
             else:
                 vals.update({
                     'account_id': self.id,
@@ -439,8 +454,8 @@ class AdsAccount(models.Model):
             
             existing = existing_campaigns.get(camp_pid)
             if existing:
-                existing.write(vals)
-                updated += 1
+                if _write_changed(existing, vals):
+                    updated += 1
             else:
                 vals.update({
                     'account_id': self.id,
@@ -494,8 +509,8 @@ class AdsAccount(models.Model):
             
             existing = existing_adsets.get(adset_pid)
             if existing:
-                existing.write(vals)
-                updated += 1
+                if _write_changed(existing, vals):
+                    updated += 1
             else:
                 vals.update({
                     'campaign_id': campaign.id,
@@ -549,8 +564,8 @@ class AdsAccount(models.Model):
             
             existing = existing_adsets.get(adset_pid)
             if existing:
-                existing.write(vals)
-                updated += 1
+                if _write_changed(existing, vals):
+                    updated += 1
             else:
                 vals.update({
                     'campaign_id': campaign.id,
@@ -601,8 +616,8 @@ class AdsAccount(models.Model):
             
             existing = existing_ads.get(ad_pid)
             if existing:
-                existing.write(vals)
-                updated += 1
+                if _write_changed(existing, vals):
+                    updated += 1
             else:
                 vals.update({
                     'adset_id': adset.id,
@@ -656,8 +671,8 @@ class AdsAccount(models.Model):
             
             existing = existing_ads.get(ad_pid)
             if existing:
-                existing.write(vals)
-                updated += 1
+                if _write_changed(existing, vals):
+                    updated += 1
             else:
                 vals.update({
                     'adset_id': adset.id,
@@ -734,8 +749,8 @@ class AdsAccount(models.Model):
             
             existing = existing_metrics.get((campaign.id, metric_date))
             if existing:
-                existing.write(vals)
-                updated += 1
+                if _write_changed(existing, vals):
+                    updated += 1
             else:
                 vals.update({
                     'account_id': self.id,
@@ -808,8 +823,8 @@ class AdsAccount(models.Model):
             
             existing = existing_metrics.get((campaign.id, metric_date))
             if existing:
-                existing.write(vals)
-                updated += 1
+                if _write_changed(existing, vals):
+                    updated += 1
             else:
                 vals.update({
                     'account_id': self.id,

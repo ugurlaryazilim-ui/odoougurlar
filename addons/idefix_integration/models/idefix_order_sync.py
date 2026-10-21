@@ -23,6 +23,7 @@ _STALE_CHECK_LIMIT = 200                    # her turda yoklanacak en fazla sevk
 _STALE_BATCH = 50                           # 'ids' parametresiyle tek istekte sorgulanan sevkiyat
 _STALE_RECENT = timedelta(days=30)          # bundan yeni açık sevkiyatlar her 30 dk yoklanır
 _STALE_OLD_CHECK_AFTER = timedelta(hours=6)  # daha eski açık sevkiyatlar 6 saatte bir yoklanır
+_AUTO_WINDOW_DAYS = 3                       # cron taraması en fazla bu kadar geriye bakar; elle senkron mağaza ayarını kullanır
 _STALE_LOOKBACK = timedelta(days=120)       # bundan eski açık sevkiyatlar otomatik yoklanmaz
 # Bundan eski siparişler otomatik iptal edilmez — Idefix'te statüsü yakın zamanda değişmediyse
 # (geç gelen iptal: haftalarca "Sevke Hazır" bekleyip sonradan iptal edilen sipariş yine düşer)
@@ -62,7 +63,9 @@ class IdefixOrderSync(models.Model):
         stores = self.env['idefix.store'].search([('active', '=', True), ('auto_sync', '=', True)])
         for store in stores:
             try:
-                self.sync_orders_for_store(store)
+                # NEDEN: eski geniş pencere her 5 dk'da yüzlerce değişmeyen sevkiyatı yeniden işletiyordu;
+                # 3 günden eskiler _refresh_stale_orders ile shipment ID üzerinden yoklanır.
+                self.sync_orders_for_store(store, max_days=_AUTO_WINDOW_DAYS)
             except Exception as e:
                 self.env.invalidate_all(flush=False)
                 _logger.exception("Idefix %s senkronizasyon hatası: %s", store.name, e)
@@ -96,7 +99,7 @@ class IdefixOrderSync(models.Model):
         return dt.astimezone(pytz.UTC).replace(tzinfo=None)
 
     @api.model
-    def sync_orders_for_store(self, store):
+    def sync_orders_for_store(self, store, max_days=None):
         """Son N gündeki sevkiyatları çeker (yeni + güncellenen), ardından daha eski açık
         sevkiyatları shipment ID ile toplu yoklar (iptal / bölünme / kargo / teslim durumları için)."""
         # Aynı mağazada tek senkron (cron sürerken manuel senkron aynı siparişleri paralel açmasın)
@@ -108,6 +111,8 @@ class IdefixOrderSync(models.Model):
         api_client = store.get_api()
         now = fields.Datetime.now()
         day_range = max(store.order_day_range or 1, 1)
+        if max_days:
+            day_range = min(day_range, max_days)
         # Idefix API Türkiye saatinde çalışır — sorgu tarihleri Türkiye saatiyle gider
         now_turkey = self._now_turkey()
         start_date = now_turkey - timedelta(days=day_range)
@@ -244,7 +249,11 @@ class IdefixOrderSync(models.Model):
         rec._auto_picking(store, api_client)
         if changed or action == 'created':
             rec._upsert_settlement()
-        rec.last_checked = fields.Datetime.now()
+        # NEDEN: last_checked yalnız _refresh_stale_orders'ın 'bayat' ölçütü; değişmeyen kayda her turda
+        # yazmak yerine ancak bayatlama eşiği dolunca (veya ilk kez / değişimde) yazılır.
+        now = fields.Datetime.now()
+        if changed or action or not rec.last_checked or rec.last_checked < now - _STALE_CHECK_AFTER:
+            rec.last_checked = now
         if action:
             return action
         return 'updated' if changed else 'unchanged'
