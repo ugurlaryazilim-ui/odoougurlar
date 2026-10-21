@@ -1,8 +1,14 @@
 # -*- coding: utf-8 -*-
 from odoo import models, fields, exceptions, api
 import logging
+import time
 
 _logger = logging.getLogger(__name__)
+
+# NEDEN: token son kullanma zamanını saklayacak yeni stored alan yasak; (db, hesap) -> (token, bitiş)
+# süreç belleğinde tutulur. Başka süreç/yeniden bağlanma token'ı değiştirirse eşleşmez ve yenileme yapılır.
+_YOUTUBE_TOKEN_EXPIRY = {}
+_TOKEN_MARGIN = 300  # sn: süre dolmadan önce yenile
 
 class SocialMediaAccount(models.Model):
     _name = 'social.media.account'
@@ -222,6 +228,11 @@ class SocialMediaAccount(models.Model):
         if self.platform != 'youtube' or not self.youtube_refresh_token:
             return False
 
+        cache_key = (self.env.cr.dbname, self.id)
+        cached = _YOUTUBE_TOKEN_EXPIRY.get(cache_key)
+        if cached and cached[0] == self.api_token and cached[1] > time.monotonic():
+            return True  # token hâlâ geçerli: Google'a gitme, DB'ye yazma
+
         client_id = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.youtube_client_id')
         client_secret = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.youtube_client_secret')
 
@@ -240,8 +251,15 @@ class SocialMediaAccount(models.Model):
         try:
             resp = requests.post(token_url, data=data, timeout=15).json()
             if 'access_token' in resp:
-                with self.env.cr.savepoint():
-                    self.api_token = resp['access_token']
+                if self.api_token != resp['access_token']:
+                    with self.env.cr.savepoint():
+                        self.api_token = resp['access_token']
+                try:
+                    ttl = float(resp.get('expires_in') or 0) - _TOKEN_MARGIN
+                except (TypeError, ValueError):
+                    ttl = 0
+                if ttl > 0:
+                    _YOUTUBE_TOKEN_EXPIRY[cache_key] = (resp['access_token'], time.monotonic() + ttl)
                 return True
             _logger.warning("YouTube token refresh rejected for account %s: %s", self.id, resp.get('error'))
         except Exception:
