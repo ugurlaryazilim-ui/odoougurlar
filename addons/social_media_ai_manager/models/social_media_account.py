@@ -1,5 +1,8 @@
 # -*- coding: utf-8 -*-
 from odoo import models, fields, exceptions, api
+import logging
+
+_logger = logging.getLogger(__name__)
 
 class SocialMediaAccount(models.Model):
     _name = 'social.media.account'
@@ -199,14 +202,17 @@ class SocialMediaAccount(models.Model):
         }
 
         try:
-            resp = requests.post(token_url, data=data, headers={'Content-Type': 'application/x-www-form-urlencoded'}).json()
+            resp = requests.post(token_url, data=data, headers={'Content-Type': 'application/x-www-form-urlencoded'}, timeout=15).json()
             if 'access_token' in resp:
-                self.api_token = resp['access_token']
-                if resp.get('refresh_token'):
-                    self.tiktok_refresh_token = resp['refresh_token']
+                # NEDEN: yazma hatası çağıranın transaction'ını abort etmesin
+                with self.env.cr.savepoint():
+                    self.api_token = resp['access_token']
+                    if resp.get('refresh_token'):
+                        self.tiktok_refresh_token = resp['refresh_token']
                 return True
+            _logger.warning("TikTok token refresh rejected for account %s: %s", self.id, resp.get('error'))
         except Exception:
-            pass
+            _logger.warning("TikTok token refresh failed for account %s", self.id, exc_info=True)
 
         return False
 
@@ -232,13 +238,15 @@ class SocialMediaAccount(models.Model):
         }
         
         try:
-            resp = requests.post(token_url, data=data).json()
+            resp = requests.post(token_url, data=data, timeout=15).json()
             if 'access_token' in resp:
-                self.api_token = resp['access_token']
+                with self.env.cr.savepoint():
+                    self.api_token = resp['access_token']
                 return True
+            _logger.warning("YouTube token refresh rejected for account %s: %s", self.id, resp.get('error'))
         except Exception:
-            pass
-            
+            _logger.warning("YouTube token refresh failed for account %s", self.id, exc_info=True)
+
         return False
 
     @api.model
@@ -332,54 +340,6 @@ class SocialMediaAccount(models.Model):
         except Exception as e:
             import logging
             logging.getLogger(__name__).error(f"YouTube Sync Error: {e}")
-
-    def _trigger_youtube_ai_response(self, conversation, user_message, account, comment_id, video_id):
-        ai_provider = self.env['social.media.ai.provider'].sudo()
-        
-        system_context = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.system_prompt', 'Sen profesyonel bir müşteri temsilcisisin. Sorulara kısa ve nazik cevaplar ver.')
-        system_context += f"\n\nKullanıcı YouTube üzerinden yorum yazıyor. ÖNEMLİ KURAL: Mesajlarında KESİNLİKLE '**' veya '*' gibi markdown kalınlaştırma işaretleri KULLANMA. Bunun yerine maddeleri ayırmak için şık emojiler (👗, 💳, 📦, 🛍️ vb.) ve temiz satır boşlukları kullanarak çok profesyonel ve zarif bir görünüm sağla."
-        
-        # Check if the video is linked to a post in Odoo to get products
-        linked_post = False
-        if video_id:
-            post_line = self.env['social.media.post.line'].search([('platform_post_id', '=', video_id)], limit=1)
-            if post_line:
-                linked_post = post_line.post_id
-
-        whatsapp_number = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.whatsapp_number', '').strip()
-        wa_link = f"https://wa.me/{whatsapp_number}?text=Merhaba+YouTube'dan+geliyorum" if whatsapp_number else ""
-
-        if linked_post and hasattr(linked_post, 'product_tmpl_ids') and linked_post.product_tmpl_ids:
-            system_context += "\n\nKULLANICININ YORUM YAPTIĞI VİDEODAKİ ÜRÜNLER:"
-            system_context += "\n(LÜTFEN DİKKAT: Yorumlar herkese açık olduğu için FİYAT BİLGİSİ VERME. Sadece stok durumunu ve ürün özelliklerini belirt. Ardından detaylı bilgi ve sipariş için WhatsApp hattına yönlendir.)\n"
-            
-            for p in linked_post.product_tmpl_ids:
-                stock = p.qty_available if hasattr(p, 'qty_available') else 10
-                stock_text = f"{stock} Adet (Tükenmek üzere, aciliyet bildir!)" if 0 < stock < 5 else f"{stock} Adet" if stock > 0 else "Stokta Yok"
-                
-                system_context += f"\n\n- Ürün: {p.name}"
-                system_context += f"\n  Stok Durumu: {stock_text}"
-                
-        if wa_link:
-            system_context += f"\n\nMesajının sonuna MUTLAKA şu WhatsApp sipariş ve detaylı bilgi linkini ekle: {wa_link}"
-
-        reply_text = ai_provider.generate_response(user_message, system_context)
-        
-        if reply_text and not str(reply_text).startswith("[ERROR]"):
-            if "[DEVRET]" in reply_text.upper():
-                reply_text = reply_text.replace("[DEVRET]", "").replace("[devret]", "").strip()
-                conversation.sudo().write({'state': 'open'})
-                if not reply_text:
-                    reply_text = f"Detaylı bilgi için müşteri temsilcimize WhatsApp üzerinden ulaşabilirsiniz: {wa_link}"
-
-            self.env['social.media.message'].create({
-                'conversation_id': conversation.id,
-                'message_type': 'outgoing',
-                'content': reply_text,
-                'is_read': True
-            })
-            
-            self._send_youtube_comment_reply(comment_id, reply_text, account)
 
     def _send_youtube_comment_reply(self, comment_id, reply_text, account):
         import requests
