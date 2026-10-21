@@ -1,9 +1,10 @@
-from odoo import models, fields, api
+from odoo import models, fields, api, _
+from odoo.exceptions import AccessError
 
 
 class AiStudioSetLine(models.Model):
     """Takım çekimindeki her bir ürün parçası.
-    
+
     Örnek: Pantolon + Ceket takımında 2 set_line olur:
       - Ana Parça (primary): Pantolon
       - Takım Parçası (companion): Ceket
@@ -52,3 +53,22 @@ class AiStudioSetLine(models.Model):
         'set_line_id',
         string='Fotoğraflar',
     )
+
+    # DIKKAT: 'saving'/'done' oturumda set satırı değişirse kuyruk onaylanandan farklı ürüne yazar (A4 O1)
+    _APPROVED_LOCKED_FIELDS = frozenset(('session_id', 'product_id', 'role'))
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        session_model = self.env['ai.studio.session']
+        if not session_model._is_approval_authority():
+            sessions = session_model.browse([v['session_id'] for v in vals_list if v.get('session_id')])
+            if sessions.filtered(lambda s: s.state in ('saving', 'done')):
+                raise AccessError(_('Onaylanan oturuma yalnız onaycı veya yönetici takım parçası ekleyebilir.'))
+        return super().create(vals_list)
+
+    def write(self, vals):
+        session_model = self.env['ai.studio.session']
+        if (self._APPROVED_LOCKED_FIELDS & set(vals)) and not session_model._is_approval_authority() \
+                and self.session_id.filtered(lambda s: s.state in ('saving', 'done')):
+            raise AccessError(_('Onaylanan oturumun takım parçasını yalnız onaycı veya yönetici değiştirebilir.'))
+        return super().write(vals)
