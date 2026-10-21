@@ -15,3 +15,4 @@ from . import test_route_validate_at_packing
 from . import test_discount_null
 from . import test_nebim_timeouts
 from . import test_find_product_index
+from . import test_no_scan_chatter

@@ -1,6 +1,5 @@
 """Raf İşlemleri API — shelf_search, shelf_control, putaway, remove_from_shelf."""
 import logging
-from markupsafe import Markup
 
 from odoo import http
 from odoo.http import request
@@ -141,14 +140,16 @@ class ShelfApiController(BarcodeApiBase):
             })
 
         try:
-            request.env['ugurlar.barcode.operation'].sudo().create({
-                'operation_type': 'shelf_control',
-                'barcode': barcode,
-                'location_id': location.id,
-                'state': 'done',
-            })
+            with request.env.cr.savepoint():
+                request.env['ugurlar.barcode.operation'].sudo().create({
+                    'operation_type': 'shelf_control',
+                    'barcode': barcode,
+                    'location_id': location.id,
+                    'state': 'done',
+                })
         except Exception:
-            pass
+            _logger.warning('Raf kontrol operasyon logu yazılamadı (barkod=%s)',
+                            barcode, exc_info=True)
 
         return {
             'location': {
@@ -241,14 +242,7 @@ class ShelfApiController(BarcodeApiBase):
             'state': 'done',
         })
 
-        # Ürün chatter log
-        user = request.env.user
-        msg = Markup(
-            '<b>📦 Raflama:</b> <em>%s</em> tarafından '
-            '<b>%d</b> adet '
-            '<b>%s</b> rafına yerleştirildi.'
-        ) % (user.name, int(quantity), dest_location.complete_name)
-        self._log_chatter(product, msg)
+        # NEDEN: ürün chatter'ı yazılmaz (sınırsız büyür); iz yukarıdaki operation kaydında
 
         return {
             'success': True,
@@ -306,15 +300,6 @@ class ShelfApiController(BarcodeApiBase):
             'state': 'done',
         })
 
-        # Ürün chatter log
-        user = request.env.user
-        msg = Markup(
-            '<b>📤 Raftan Kaldırma:</b> <em>%s</em> tarafından '
-            '<b>%d</b> adet '
-            '<b>%s</b> rafından kaldırıldı.'
-        ) % (user.name, int(quantity), location.complete_name)
-        self._log_chatter(product, msg)
-
         return {
             'success': True,
             'message': f'{product.name} raftan kaldırıldı ({quantity} adet)',
@@ -360,32 +345,23 @@ class ShelfApiController(BarcodeApiBase):
         if not success:
             return {'error': error}
 
-        # İşlem kaydı
-        request.env['ugurlar.barcode.operation'].sudo().create({
-            'operation_type': 'shelf_transfer',
-            'barcode': product_barcode,
-            'product_id': product.id,
-            'location_id': target_loc.id,
-            'quantity': quantity,
-            'state': 'done',
-        })
-
-        # Ürün chatter log
-        user = request.env.user
+        # İşlem kaydı (ürün chatter'ı yazılmaz; kaynak raf ve neden operation notunda tutulur)
         reason_map = {
             'reorganize': 'Reorganizasyon', 'demand': 'Talep Değişimi',
             'damage': 'Hasar', 'return': 'İade',
             'season': 'Sezon Değişimi', 'other': 'Diğer',
         }
         reason_txt = reason_map.get(reason, '')
-        msg = Markup(
-            '<b>🔄 Raf Taşıma:</b> <em>%s</em> tarafından '
-            '<b>%d</b> adet '
-            '<b>%s</b> &rarr; <b>%s</b> taşındı.'
-        ) % (user.name, int(quantity), source_loc.complete_name, target_loc.complete_name)
-        if reason_txt:
-            msg += Markup(' <i>(Neden: %s)</i>') % reason_txt
-        self._log_chatter(product, msg)
+        request.env['ugurlar.barcode.operation'].sudo().create({
+            'operation_type': 'shelf_transfer',
+            'barcode': product_barcode,
+            'product_id': product.id,
+            'location_id': target_loc.id,
+            'quantity': quantity,
+            'notes': (f'Raf taşıma: {source_loc.complete_name} -> {target_loc.complete_name}'
+                      + (f' (Neden: {reason_txt})' if reason_txt else '')),
+            'state': 'done',
+        })
 
         return {
             'success': True,
@@ -432,7 +408,6 @@ class ShelfApiController(BarcodeApiBase):
         if not source_quants:
             return {'error': 'Kaynak rafta urun yok'}
 
-        user = request.env.user
         reason_map = {
             'reorganize': 'Reorganizasyon', 'demand': 'Talep Degisimi',
             'damage': 'Hasar', 'return': 'Iade',
@@ -479,19 +454,10 @@ class ShelfApiController(BarcodeApiBase):
                 'product_id': product.id,
                 'location_id': target_loc.id,
                 'quantity': qty,
-                'notes': f'Tum raf tasima: {source_loc.complete_name} -> {target_loc.complete_name}',
+                'notes': (f'Tum raf tasima: {source_loc.complete_name} -> {target_loc.complete_name}'
+                          + (f' (Neden: {reason_txt})' if reason_txt else '')),
                 'state': 'done',
             })
-
-            # Varyant chatter log
-            msg = Markup(
-                '<b>&#x1F69A; Tüm Raf Taşıma:</b> <em>%s</em> tarafından '
-                '<b>%d</b> adet '
-                '<b>%s</b> &rarr; <b>%s</b> taşındı.'
-            ) % (user.name, int(qty), source_loc.complete_name, target_loc.complete_name)
-            if reason_txt:
-                msg += Markup(' <i>(Neden: %s)</i>') % reason_txt
-            self._log_chatter(product, msg)
 
             moved_count += 1
             total_quantity += qty
@@ -534,7 +500,6 @@ class ShelfApiController(BarcodeApiBase):
         if not quants:
             return {'error': 'Rafta urun yok'}
 
-        user = request.env.user
         cleared_count = 0
         total_quantity = 0
         skipped = []
@@ -566,14 +531,6 @@ class ShelfApiController(BarcodeApiBase):
                 'notes': f'Toplu raf silme: {location.complete_name}',
                 'state': 'done',
             })
-
-            # Varyant chatter log
-            msg = Markup(
-                '<b>&#x1F5D1; Toplu Raf Silme:</b> <em>%s</em> tarafından '
-                '<b>%d</b> adet '
-                '<b>%s</b> rafından kaldırıldı.'
-            ) % (user.name, int(qty), location.complete_name)
-            self._log_chatter(product, msg)
 
             cleared_count += 1
             total_quantity += qty
