@@ -444,9 +444,11 @@ class HepsiburadaOrderSync(models.AbstractModel):
                     f"{reason}: Hepsiburada siparişi değişti ancak 'İptalleri Otomatik İptal Et' kapalı; "
                     f"Odoo siparişi {old.name} elle güncellenmeli."})
                 return
-            if old.picking_ids.filtered(lambda p: p.state == 'done'):
+            # NEDEN: yalnız picking bakılırsa posted faturalı SO iptal edilip Nebim'den de silinirdi
+            blocker = self._cancel_blocker(old)
+            if blocker:
                 hb_order.write({'warning_message':
-                    f"{reason}: {old.name} sevk edildiği için otomatik güncellenmedi; elle kontrol edin."})
+                    f"{reason}: {old.name} {blocker} için otomatik güncellenmedi; elle kontrol edin."})
                 return
             old._action_cancel()
 
