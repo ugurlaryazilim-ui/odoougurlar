@@ -6,6 +6,7 @@ from types import SimpleNamespace
 from unittest.mock import patch
 
 from odoo import fields
+from odoo.exceptions import AccessError
 from odoo.sql_db import db_connect
 from odoo.tests import TransactionCase, new_test_user, tagged
 
@@ -68,13 +69,13 @@ class TestCompleteSessionQueued(TransactionCase):
 
     def test_claim_prefers_saving_job_even_without_api_key(self):
         session = self._review_session()
-        session.state = 'saving'
+        session.write({'state': 'saving', 'reviewer_id': self.reviewer.id})
         self.assertEqual(self.Session._queue_claim_job(1, 'w1'), ('save', session.id, False))
         self.assertIsNone(self.Session._queue_claim_job(2, 'w2'), 'kiralı oturum ikinci slota verilmemeli')
 
     def test_save_job_writes_product_and_finishes_session(self):
         session = self._review_session()
-        session.state = 'saving'
+        session.write({'state': 'saving', 'reviewer_id': self.reviewer.id})
         self.Session._run_save_job(session.id)
         self.assertEqual(session.state, 'done')
         self.assertTrue(session.date_done)
@@ -82,12 +83,57 @@ class TestCompleteSessionQueued(TransactionCase):
 
     def test_save_job_failure_returns_session_to_review_with_message(self):
         session = self._review_session()
-        session.state = 'saving'
+        session.write({'state': 'saving', 'reviewer_id': self.reviewer.id})
         with patch.object(type(self.Session), '_save_to_product', side_effect=ValueError('disk dolu')):
             self.Session._run_save_job(session.id)
         self.assertEqual(session.state, 'review', "başarısız kayıt 'saving'de takılı kalıp kuyruğu döndürmemeli")
         self.assertIn('disk dolu', session.message_ids[0].body)
         self.assertFalse(self.Session.search_count(self.Session._queue_saving_domain()))
+
+    # --- J9: 'saving' yalnız onay yolundan ---
+    def test_operator_cannot_write_saving(self):
+        operator = new_test_user(self.env, login='ais_operator_j9',
+                                 groups='ugurlar_ai_studio.group_ai_studio_operator')
+        session = self._review_session()
+        session.user_id = operator
+        op_session = session.with_user(operator)
+        # NEDEN: operatör kaydı okuyup yazabiliyor olmalı; yoksa kayıt kuralının AccessError'ı denetimi maskeler
+        self.assertEqual(op_session.read(['state'])[0]['state'], 'review')
+        with self.assertRaises(AccessError):
+            op_session.write({'state': 'saving'})
+        with self.assertRaises(AccessError):
+            self.Session.with_user(operator).create({'product_id': self.product.id, 'state': 'saving'})
+        self.assertEqual(session.state, 'review')
+
+    def test_reviewer_complete_session_then_queue_saves(self):
+        session = self._review_session()
+        env = self.env(user=self.reviewer)
+        with patch(CTRL + '.request', SimpleNamespace(env=env)):
+            self.assertTrue(AiStudioController().complete_session(session.id)['success'])
+        self.assertEqual(session.state, 'saving')
+        self.assertEqual(self.Session._queue_claim_job(1, 'w1'), ('save', session.id, False))
+        self.Session._run_save_job(session.id)
+        self.assertEqual(session.state, 'done')
+        self.assertTrue(self.product.product_tmpl_id.image_1920)
+
+    def test_save_job_rejects_unapproved_forced_saving(self):
+        session = self._review_session()
+        session.sudo().write({'state': 'saving'})   # onay yolundan geçmemiş (reviewer_id yok)
+        with patch.object(type(self.Session), '_save_to_product') as save:
+            self.Session._run_save_job(session.id)
+        save.assert_not_called()
+        self.assertEqual(session.state, 'review')
+        self.assertFalse(self.product.product_tmpl_id.image_1920)
+
+    def test_save_job_rejects_non_reviewer_reviewer_id(self):
+        operator = new_test_user(self.env, login='ais_operator_j9b',
+                                 groups='ugurlar_ai_studio.group_ai_studio_operator')
+        session = self._review_session()
+        session.sudo().write({'state': 'saving', 'reviewer_id': operator.id})
+        with patch.object(type(self.Session), '_save_to_product') as save:
+            self.Session._run_save_job(session.id)
+        save.assert_not_called()
+        self.assertEqual(session.state, 'review')
 
 
 @tagged('post_install', '-at_install', 'ugurlar_ai_studio')
