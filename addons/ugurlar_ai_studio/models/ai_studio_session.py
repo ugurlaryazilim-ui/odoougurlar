@@ -61,14 +61,6 @@ def _try_acquire_lease(cr, session_id, owner):
     return bool(cr.fetchone())
 
 
-def _acquire_session_lease(pool, session_id, owner):
-    """Oturum kirasını atomik olarak al. Başka canlı bir thread tutuyorsa False."""
-    with pool.cursor() as lcr:
-        ok = _try_acquire_lease(lcr, session_id, owner)
-        lcr.commit()
-    return ok
-
-
 def _renew_session_lease(cr, session_id, owner):
     """Kirayı thread'in kendi cursor'ı ile uzat (commit çağıranın sorumluluğunda)."""
     cr.execute(

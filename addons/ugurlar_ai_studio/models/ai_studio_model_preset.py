@@ -539,10 +539,9 @@ class AiStudioModelPreset(models.Model):
     def _run_mannequin_job(self, preset_id):
         """Kuyruk işi: presetin güncel tarifiyle mankeni üret (kendi cursor'larını açar)."""
         preset = self.browse(preset_id)
-        icp = self.env['ir.config_parameter'].sudo()
-        provider_type = icp.get_param('ugurlar_ai_studio.default_provider', 'fashn')
-        api_key = icp.get_param('ugurlar_ai_studio.fashn_api_key' if provider_type == 'fashn'
-                                else 'ugurlar_ai_studio.fal_api_key')
+        provider_type = self.env['ir.config_parameter'].sudo().get_param(
+            'ugurlar_ai_studio.default_provider', 'fashn')
+        api_key = self.env['ai.studio.session']._get_active_api_key()
         self._generate_mannequin_thread(preset.id, preset.mannequin_prompt, api_key, preset.gender,
                                         preset.body_type, preset.background_type, provider_type,
                                         self.env.uid)

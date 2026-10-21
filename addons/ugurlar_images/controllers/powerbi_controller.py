@@ -386,4 +386,3 @@ class PowerBIController(http.Controller):
                 'Access-Control-Allow-Origin': '*',
             },
         )
-
