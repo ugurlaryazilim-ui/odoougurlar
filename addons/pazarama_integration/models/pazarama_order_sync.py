@@ -421,8 +421,10 @@ class PazaramaOrderSync(models.Model):
                 self.error_message = msg
                 old.message_post(body=msg)
             return
-        if old.picking_ids.filtered(lambda p: p.state == 'done'):
-            msg = f"{reason}: {old.name} sevk edildiği için otomatik güncellenmedi; elle kontrol edin."
+        # NEDEN: yalnız picking bakılırsa posted faturalı SO iptal edilip Nebim'den de silinirdi
+        blocker = self._cancel_blocker(old)
+        if blocker:
+            msg = f"{reason}: {old.name} {blocker} için otomatik güncellenmedi; elle kontrol edin."
             if self.error_message != msg:
                 self.error_message = msg
                 old.message_post(body=msg)

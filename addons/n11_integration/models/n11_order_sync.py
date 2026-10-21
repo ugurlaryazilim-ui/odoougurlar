@@ -488,8 +488,10 @@ class N11OrderSync(models.Model):
             self.error_message = (f"{reason}: n11 siparişi değişti ancak 'İptalleri Otomatik İptal Et' kapalı; "
                                   f"Odoo siparişi {old.name} elle güncellenmeli.")
             return
-        if old.picking_ids.filtered(lambda p: p.state == 'done'):
-            self.error_message = f"{reason}: {old.name} sevk edildiği için otomatik güncellenmedi; elle kontrol edin."
+        # NEDEN: yalnız picking bakılırsa posted faturalı SO iptal edilip Nebim'den de silinirdi
+        blocker = self._cancel_blocker(old)
+        if blocker:
+            self.error_message = f"{reason}: {old.name} {blocker} için otomatik güncellenmedi; elle kontrol edin."
             return
         new = self._create_odoo_sale_order(store, partners=(old.partner_id, old.partner_invoice_id,
                                                               old.partner_shipping_id))
