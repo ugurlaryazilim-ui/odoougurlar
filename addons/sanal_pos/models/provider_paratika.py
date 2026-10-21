@@ -174,11 +174,16 @@ class SanalPosProviderParatika(models.AbstractModel):
         return url.strip().rstrip('/')
 
     def _link_url(self, payment, token):
-        """Ödeme sayfası adresi (biçim P-2 ile teyit edilecek; gösterim ayarla kapalı, KK-17)."""
+        """Ödeme sayfası adresi (gösterim ayarla açılır, KK-17).
+
+        Biçim canlıda Paratika'nın kendi SMS'inden teyit edildi (2026-10-21):
+        ``https://vpos.paratika.com.tr/payment/<sessionToken>?lang=tr``. Dokümandaki
+        ``/merchant/payment/<token>`` örneği bu linkte "beklenmedik hata" veriyor.
+        """
         parts = urlsplit(self._api_url(payment))
         if not (parts.scheme and parts.netloc and token):
             return None
-        return '%s://%s/merchant/payment/%s' % (parts.scheme, parts.netloc, token)
+        return '%s://%s/payment/%s?lang=tr' % (parts.scheme, parts.netloc, token)
 
     def _return_url(self):
         base = (self._param('web.base.url') or '').strip().rstrip('/')

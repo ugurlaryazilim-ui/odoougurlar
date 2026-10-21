@@ -70,9 +70,11 @@ class TestScreens(SanalPosCase):
                      'link_cancelled', 'error', 'review', 'mine'):
             self.assertIn('name="%s"' % name, arch, 'hazır filtre eksik: %s' % name)
 
-    def test_kk33_varsayilan_filtre_acik_ve_acik_filtresi_sent_unknown(self):
+    def test_kk33_varsayilan_filtre_yok_ve_acik_filtresi_sent_unknown(self):
+        # Kullanıcı kararı (2026-10-21): liste filtresiz açılır
         action = self.env.ref('sanal_pos.action_sanal_pos_payment')
-        self.assertEqual(ast.literal_eval(action.context).get('search_default_open'), 1)
+        context = ast.literal_eval(action.context or '{}')
+        self.assertFalse([k for k in context if k.startswith('search_default_')])
         sent = self.make_payment()
         unknown = self.make_payment(invoice_no='UNK1', state='unknown')
         paid = self.make_paid(self.make_payment(invoice_no='PAID1'))
