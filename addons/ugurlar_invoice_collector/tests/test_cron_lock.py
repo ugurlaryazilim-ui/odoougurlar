@@ -53,6 +53,35 @@ class TestInvoiceCollectorCronLock(TransactionCase):
         self.assertEqual(len(self.processed), 1)
         self.assertEqual(self.env['ir.cron.trigger'].search_count([('cron_id', '=', cron.id)]), triggers + 1)
 
+    def test_cron_failure_rolls_back_partial_writes_and_marks_error(self):
+        # A4 Ö-4: işte yarım kalan yazım (satır durumu) hata sonrası geri alınır; iş 'error' olur
+        def half_then_fail(job, lines):
+            lines[:1].write({'download_status': 'success'})
+            raise RuntimeError('boom')
+
+        with patch.object(self.Job.__class__, '_process_batch_lines', half_then_fail):
+            self.Job._cron_process_download_jobs()
+        self.assertEqual(self.job.state, 'error')
+        self.assertEqual(set(self.job.line_ids.mapped('download_status')), {'pending'})
+
+    def test_cron_failure_of_one_job_does_not_stop_next_job(self):
+        other = self.Job.create({'state': 'downloading', 'batch_size': 1,
+                                 'line_ids': [(0, 0, {'document_number': 'B1'})]})
+        calls = []
+
+        def fail_first(job, lines):
+            calls.append(job.id)
+            if job == self.job:
+                raise RuntimeError('boom')
+            lines.write({'download_status': 'success', 'pdf_file': False})
+
+        with patch.object(self.Job.__class__, '_process_batch_lines', fail_first), \
+                patch.object(self.Job.__class__, '_finalize_zip', return_value=None):
+            self.Job._cron_process_download_jobs()
+        self.assertEqual(self.job.state, 'error')
+        self.assertIn(other.id, calls)
+        self.assertEqual(other.line_ids.download_status, 'success')
+
     def test_cron_does_not_retrigger_when_nothing_remains(self):
         cron = self.env.ref('ugurlar_invoice_collector.cron_process_invoice_collector_jobs')
         triggers = self.env['ir.cron.trigger'].search_count([('cron_id', '=', cron.id)])
