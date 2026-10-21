@@ -41,11 +41,9 @@ class ResConfigSettings(models.TransientModel):
     social_tiktok_client_secret = fields.Char(string="TikTok Client Secret", config_parameter='social_media_ai.tiktok_client_secret')
 
     # WhatsApp Redirection
-    social_whatsapp_webhook_secret = fields.Char(
-        string="WhatsApp Webhook Secret",
-        config_parameter='social_media_ai.whatsapp_webhook_secret',
-        help="WAHA/Evolution webhook isteğinde 'X-Webhook-Secret' başlığı olarak gönderilmelidir. Boşsa webhook tüm istekleri reddeder."
-    )
+    # DIKKAT: WhatsApp webhook secret'ı BURAYA alan olarak eklenmez: res.config.settings alanı gerçek kolondur,
+    # deploy ile modül upgrade arasında Ayarlar sayfası kaydı bozulur. Değer doğrudan Sistem Parametreleri'nde
+    # 'social_media_ai.whatsapp_webhook_secret' anahtarından okunur (controllers/webhook_whatsapp.py).
     social_whatsapp_number = fields.Char(
         string="WhatsApp Yönlendirme Numarası", 
         config_parameter='social_media_ai.whatsapp_number',

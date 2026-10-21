@@ -84,10 +84,19 @@ class TestMetaWebhookSignature(HttpCase):
         self.assertEqual(self._post(good).status_code, 200)
         self.assertEqual(self._count(), 1)
 
-    def test_no_secret_keeps_legacy_behavior(self):
+    def test_no_secret_rejects(self):
+        # NEDEN: fail-closed; App Secret tanımsızken imzasız/boş imzalı POST işlenmemeli
         self.env['ir.config_parameter'].set_param('social_media_ai.meta_app_secret', '')
-        self.assertEqual(self._post().status_code, 200)
-        self.assertEqual(self._count(), 1)
+        self.assertEqual(self._post().status_code, 403)
+        self.assertEqual(self._post('sha256=' + '0' * 64).status_code, 403)
+        self.assertEqual(self._count(), 0)
+
+    def test_challenge_is_text_plain(self):
+        self.account.webhook_secret = 'verify-tok'
+        res = self.url_open(self.URL + '?hub.mode=subscribe&hub.verify_token=verify-tok&hub.challenge=%3Cb%3E123')
+        self.assertEqual(res.status_code, 200)
+        self.assertTrue(res.headers['Content-Type'].startswith('text/plain'))
+        self.assertEqual(res.text, '<b>123')
 
 
 @tagged('post_install', '-at_install', 'social_media_ai_manager')

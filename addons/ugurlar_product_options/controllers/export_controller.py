@@ -3,7 +3,7 @@ import json
 import logging
 
 from odoo import http
-from odoo.exceptions import AccessError
+from odoo.exceptions import AccessError, MissingError
 from odoo.http import request, content_disposition
 
 _logger = logging.getLogger(__name__)
@@ -29,7 +29,16 @@ class ProductExportController(http.Controller):
             return request.make_response(
                 'Forbidden', headers=[('Content-Type', 'text/plain')], status=403,
             )
-        data = json.loads(kwargs.get('data', '{}'))
+        def _bad_request(msg):
+            return request.make_response(msg, headers=[('Content-Type', 'text/plain')], status=400)
+
+        # NEDEN: istemci girdisi; bozuk JSON/şema/alan/id 500 yerine 400 dönmeli
+        try:
+            data = json.loads(kwargs.get('data', '{}'))
+        except ValueError:
+            return _bad_request('Invalid data')
+        if not isinstance(data, dict):
+            return _bad_request('Invalid data')
         res_model = data.get('res_model', 'product.product')
         if res_model not in ('product.product', 'product.template'):
             res_model = 'product.product'
@@ -38,27 +47,36 @@ class ProductExportController(http.Controller):
         field_defs = data.get('fields', [])
 
         if not ids:
-            return request.make_response(
-                'No IDs provided',
-                headers=[('Content-Type', 'text/plain')],
-                status=400,
-            )
+            return _bad_request('No IDs provided')
+        if (not isinstance(ids, list) or not all(isinstance(i, int) and not isinstance(i, bool) for i in ids)
+                or not isinstance(field_defs, list)
+                or not all(isinstance(f, dict) and isinstance(f.get('name'), str) for f in field_defs)):
+            return _bad_request('Invalid ids or fields')
 
         # Ürünleri oku
         field_names = [f['name'] for f in field_defs]
         # NEDEN: sudo yok — kullanıcının kendi alan/kayıt hakları geçerli; yetkisiz alan 403 döner
         try:
-            products = request.env[res_model].browse(ids).read(field_names)
+            records = request.env[res_model].browse(ids)
+            # NEDEN: read() olmayan id'yi sessizce atlar (200 + eksik/boş dosya); açıkça 400 verilir
+            if len(records.exists()) != len(set(ids)):
+                return _bad_request('Invalid field or id')
+            products = records.read(field_names)
         except AccessError:
             return request.make_response(
                 'Forbidden', headers=[('Content-Type', 'text/plain')], status=403,
             )
+        except (ValueError, MissingError):
+            # geçersiz alan adı (ValueError) veya olmayan kayıt id'si (MissingError)
+            return _bad_request('Invalid field or id')
 
         # XLSX oluştur
         output = io.BytesIO()
 
         if xlsxwriter:
-            workbook = xlsxwriter.Workbook(output, {'in_memory': True})
+            # DIKKAT: strings_to_formulas=False — "=..." ile başlayan ürün adı/etiket Excel'de formül
+            # olarak çalışmasın (formül enjeksiyonu). Kaldırmayın.
+            workbook = xlsxwriter.Workbook(output, {'in_memory': True, 'strings_to_formulas': False})
             sheet = workbook.add_worksheet('Ürünler')
 
             # Stiller — wrap_text KAPALI
@@ -171,6 +189,8 @@ class ProductExportController(http.Controller):
                     elif value is False:
                         value = ''
                     cell = ws.cell(row=row_idx, column=col_idx, value=value)
+                    if isinstance(value, str):
+                        cell.data_type = 's'  # NEDEN: "=" ile başlayan metin formül sayılmasın
                     cell.alignment = no_wrap
 
             ws.freeze_panes = 'A2'
