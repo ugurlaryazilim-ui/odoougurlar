@@ -12,6 +12,7 @@ from odoo.exceptions import AccessError, UserError
 from odoo.tests import TransactionCase, new_test_user, tagged
 
 from ..controllers.ai_studio_controller import AiStudioController
+from ..models import ai_studio_session as session_mod
 
 CTRL = 'odoo.addons.ugurlar_ai_studio.controllers.ai_studio_controller'
 SESSION_MOD = 'odoo.addons.ugurlar_ai_studio.models.ai_studio_session'
@@ -213,8 +214,9 @@ class TestApprovalGate(TransactionCase):
     def test_attachment_write_cannot_swap_locked_image(self):
         # ir.attachment model write override'ını çağırmaz; erişimi res_model/res_id kaydının write kuralı belirler
         locked = self._session(state='saving', reviewer_id=self.reviewer.id)
-        open_session = self._session()
-        open_session.generation_ids.write({'is_approved': False})   # J10: onaylı üretim review'da da kilitli
+        # J10: review de kilitli (Y4) ve onaylı üretim her durumda kilitli → kontrol taslak + onaysız
+        open_session = self._session(state='draft')
+        open_session.generation_ids.write({'is_approved': False})
         for session in (locked, open_session):
             session.generation_ids.write({'generated_image': self._image((10, 200, 10))})
         Att = self.env['ir.attachment']
@@ -237,14 +239,15 @@ class TestApprovalGate(TransactionCase):
 
     def test_operator_cannot_unlink_or_add_candidates_when_locked(self):
         locked = self._session(state='done', reviewer_id=self.reviewer.id)
-        open_session = self._session()
+        open_session = self._session(state='draft')
         Cand = self.env['ai.studio.generation.candidate']
         img = self._image((1, 2, 3))
         cand = Cand.create({'generation_id': locked.generation_ids.id, 'image': img})
-        # kontrol: açık oturumda operatör aday ekleyebilir (ACL create açık)
-        Cand.with_user(self.operator).create({'generation_id': open_session.generation_ids.id, 'image': img})
-        with self.assertRaises(AccessError):
-            Cand.with_user(self.operator).create({'generation_id': locked.generation_ids.id, 'image': img})
+        # J10 D-J10-1: adayları yalnız kuyruk/onaycı üretir; operatör açık oturumda da ekleyemez (ACL create=0)
+        for gen in (open_session.generation_ids, locked.generation_ids):
+            with self.assertRaises(AccessError):
+                Cand.with_user(self.operator).create({'generation_id': gen.id, 'image': img})
+        self.assertTrue(cand.with_user(self.operator).read(['sequence']))   # okuma açık
         with self.assertRaises(AccessError):
             cand.with_user(self.operator).unlink()
         with self.assertRaises(AccessError):
@@ -323,16 +326,18 @@ class TestApprovalGate(TransactionCase):
                 op_approved.write(vals)
         with self.assertRaises(AccessError):
             op_approved.unlink()
-        # kontrol: onaysız üretimin diğer alanları operatöre açık
-        op_pending.write({'error_message': 'not'})
-        self.assertFalse(pending.is_approved or pending.is_excluded)
+        # J10 Y4: review'da onaysız üretim de kapalı (onaycının ekranı bayatlamasın)
+        with self.assertRaises(AccessError):
+            op_pending.write({'error_message': 'not'})
+        self.assertFalse(pending.is_approved or pending.is_excluded or pending.error_message)
         self.assertTrue(approved.is_approved and approved.is_primary)
         # onaycı serbest
         pending.with_user(self.reviewer).write({'is_approved': True})
         self.assertTrue(pending.is_approved)
 
     def test_operator_cannot_create_approved_generation(self):
-        session = self._session()
+        # taslak: review artık bütünüyle kapalı (Y4); burada yalnız onay alanı yolları sınanır
+        session = self._session(state='draft')
         OpGen = self.Gen.with_user(self.operator)
         attacks = {
             'vals': lambda: OpGen.create({'session_id': session.id, 'photo_type': 'back', 'is_approved': True}),
@@ -362,6 +367,60 @@ class TestApprovalGate(TransactionCase):
             att.with_user(self.operator).write({'datas': self._image((200, 10, 10))})
         with self.assertRaises(AccessError):
             att.with_user(self.operator).unlink()
+
+    def test_operator_review_locks_unapproved_content(self):
+        # J10 Y4 (TOCTOU): onaycı ekranı açıkken operatör ONAYSIZ üretimi değiştirirse onaycı görmediği
+        # görseli onaylardı (approve yalnız id alır). review'da üretim/aday/ek operatöre tümüyle kapalı.
+        session, _approved, pending = self._review_pair()
+        draft = self._session(state='draft')
+        draft.generation_ids.write({'is_approved': False, 'is_primary': False})
+        line = self.env['ai.studio.set.line'].create({'session_id': session.id, 'product_id': self.product.id})
+        Att, Cand = self.env['ir.attachment'], self.env['ai.studio.generation.candidate']
+        att = Att.search([('res_model', '=', pending._name), ('res_id', '=', pending.id),
+                          ('res_field', '=', 'generated_image')])
+        self.assertTrue(att)
+        op_pending, blue = pending.with_user(self.operator), self._image((10, 10, 220))
+        attacks = {
+            'görsel': lambda: op_pending.write({'generated_image': blue}),
+            'mod': lambda: op_pending.write({'generation_mode': 'set_combo'}),
+            'set satırı': lambda: op_pending.write({'set_line_id': line.id}),
+            'sil': lambda: op_pending.unlink(),
+            'ek datas': lambda: att.with_user(self.operator).write({'datas': blue}),
+            'ek sil': lambda: att.with_user(self.operator).unlink(),
+            'yeni ek': lambda: Att.with_user(self.operator).create(
+                {'name': 'x', 'datas': blue, 'res_model': pending._name, 'res_id': pending.id}),
+            'yeni üretim': lambda: self.Gen.with_user(self.operator).create(
+                {'session_id': session.id, 'photo_type': 'side', 'state': 'done', 'generated_image': blue}),
+            'o2m (1,id)': lambda: session.with_user(self.operator).write(
+                {'generation_ids': [(1, pending.id, {'generated_image': blue})]}),
+            'taslaktan taşı': lambda: draft.generation_ids.with_user(self.operator).write({'session_id': session.id}),
+            'aday': lambda: Cand.with_user(self.operator).create({'generation_id': pending.id, 'image': blue}),
+        }
+        for label, attack in attacks.items():
+            with self.subTest(label), self.assertRaises(AccessError):
+                attack()
+        # Türkçe, nedeni söyleyen mesaj (kural asıl koruma; bu yalnız açıklama)
+        with self.assertRaises(AccessError) as cm:
+            op_pending.write({'generated_image': blue})
+        self.assertIn('incelemede', str(cm.exception))
+        pixel = Image.open(io.BytesIO(base64.b64decode(pending.generated_image))).convert('RGB').getpixel((2, 2))
+        self.assertGreater(pixel[0], 150)   # onaycının gördüğü KIRMIZI yerinde
+        self.assertEqual(pending.session_id, session)
+        # kontrol: oturum alanı serbest (onayı KK2 düşürür), taslaktaki onaysız üretim serbest
+        session.with_user(self.operator).write({'extra_prompt': 'kolu düzelt'})
+        draft.generation_ids.with_user(self.operator).write({'generated_image': blue})
+
+    def test_operator_edits_again_after_reviewer_releases(self):
+        # onaycı oturumu review'dan çıkarınca (iptal → taslak) operatör yeniden düzenleyebilir
+        session, approved, pending = self._review_pair()
+        rev = session.with_user(self.reviewer)
+        rev.action_cancel()
+        rev.action_reset_draft()
+        self.assertEqual(session.state, 'draft')
+        pending.with_user(self.operator).write({'generated_image': self._image((10, 10, 220)), 'error_message': 'x'})
+        self.Gen.with_user(self.operator).create({'session_id': session.id, 'photo_type': 'side'})
+        with self.assertRaises(AccessError):   # onaylı üretim yine yalnız onaycıda
+            approved.with_user(self.operator).write({'generated_image': False})
 
     def test_operator_session_change_drops_approval(self):
         session, approved, _pending = self._review_pair()
@@ -482,6 +541,30 @@ class TestApprovalGate(TransactionCase):
         trigger.assert_called_once()
         release.assert_called_once()
         self.assertEqual(session.state, 'saving')
+
+    def test_save_job_conflict_gives_up_after_limit(self):
+        # J10 Ö-3: kalıcı çakışmada sonsuz yeniden deneme yok; sınırda review'a döner ve onaycıya bildirilir
+        session = self._session(state='saving', reviewer_id=self.reviewer.id)
+        limit = session_mod.SAVE_CONFLICT_RETRY_LIMIT
+        conflict = pg_errors.SerializationFailure('could not serialize access due to concurrent update')
+        # NEDEN instance yaması: test cursor'ının commit/rollback'i örnek özniteliği (sınıf yaması örtmez)
+        with patch.object(type(self.Session), '_run_save_job', side_effect=conflict), \
+                patch.object(self.env.cr, 'rollback'), patch.object(self.env.cr, 'commit') as commit, \
+                patch.object(type(self.Session), '_trigger_ai_queue') as trigger, \
+                patch(SESSION_MOD + '._release_session_lease') as release:
+            for _i in range(limit - 1):
+                self.Session._queue_run_job(('save', session.id, False), 'owner-j10')
+            self.assertEqual(session.state, 'saving')
+            self.assertEqual(trigger.call_count, limit - 1)
+            self.Session._queue_run_job(('save', session.id, False), 'owner-j10')
+        commit.assert_called_once()   # geri dönüş kalıcı
+        self.assertEqual(trigger.call_count, limit - 1)   # sınırda yeniden tetikleme yok
+        self.assertEqual(release.call_count, limit)
+        self.assertEqual(session.state, 'review')
+        msg = session.message_ids[0]
+        self.assertIn('çakış', msg.body)
+        self.assertIn(self.reviewer.partner_id, msg.partner_ids)
+        self.assertNotIn(session.id, session_mod._SAVE_CONFLICTS)
 
     def test_notify_save_problem_never_raises(self):
         session = self._session(reviewer_id=self.reviewer.id)

@@ -133,10 +133,12 @@
     <record id="rule_generation_operator_edit" model="ir.rule">
         <field name="name">AI Stüdyo Üretim: Operatör açık oturumda düzenler</field>
         <field name="model_id" ref="model_ai_studio_generation"/>
-        <!-- NEDEN (J10/Y3): onaylı üretim 'review'da da operatöre kapalı; yoksa onaycı onayladıktan sonra
-             görsel (alan veya ek) değiştirilip "Tamamla" ile ürüne gider. Kural create SONRASI da denetler:
-             default_is_approved / copy / o2m ile onaylı üretim oluşturulamaz. Onaysızı onaylamak modelde. -->
-        <field name="domain_force">[('session_id.user_id', '=', user.id), ('session_id.state', 'not in', ('saving', 'done')), ('is_approved', '=', False)]</field>
+        <!-- NEDEN (J10 Y3/Y4): 'review'da üretim (onaylı ya da değil) operatöre kapalı. Onaycı ekranı açıkken
+             onaysız üretimin görseli/eki değişirse approve yalnız id ile çalıştığından onaycının görmediği
+             görsel ürüne giderdi (TOCTOU). Yeniden üretim/revizyon onaycı ve kuyruk yolundan gelir.
+             is_approved=False: onaylı üretim taslağa dönen oturumda da kilitli; kural create SONRASI da
+             denetlediği için default_is_approved / copy / o2m ile onaylı üretim oluşturulamaz. -->
+        <field name="domain_force">[('session_id.user_id', '=', user.id), ('session_id.state', 'not in', ('review', 'saving', 'done')), ('is_approved', '=', False)]</field>
         <field name="groups" eval="[(4, ref('group_ai_studio_operator'))]"/>
         <field name="perm_read" eval="False"/>
     </record>
@@ -164,7 +166,8 @@
     <record id="rule_candidate_operator_edit" model="ir.rule">
         <field name="name">AI Aday: Operatör açık oturumda düzenler</field>
         <field name="model_id" ref="model_ai_studio_generation_candidate"/>
-        <field name="domain_force">[('generation_id.session_id.user_id', '=', user.id), ('generation_id.session_id.state', 'not in', ('saving', 'done'))]</field>
+        <!-- J10 Y4: üretimle aynı kilit; ayrıca ACL'de operatör aday create=0 (D-J10-1), bu kural derinlik savunması -->
+        <field name="domain_force">[('generation_id.session_id.user_id', '=', user.id), ('generation_id.session_id.state', 'not in', ('review', 'saving', 'done'))]</field>
         <field name="groups" eval="[(4, ref('group_ai_studio_operator'))]"/>
         <field name="perm_read" eval="False"/>
     </record>
@@ -205,7 +208,7 @@
         <field name="groups" eval="[(4, ref('base.group_erp_manager'))]"/>
         <field name="perm_read" eval="False"/>
     </record>
-    <!-- DIKKAT: rule_session_operator / rule_generation_operator noupdate="1" blokta; mevcut veritabanında
+    <!-- DIKKAT: rule_session_operator / rule_generation_operator / rule_photo_operator noupdate="1" blokta; mevcut veritabanında
          -u XML'deki perm_* değişikliğini uygulamaz ve açık kalan perm_write kilidi OR ile deler.
          Bu çağrı her kurulum/güncellemede onları salt okumaya çeker (idempotent). -->
     <function model="ir.rule" name="write">

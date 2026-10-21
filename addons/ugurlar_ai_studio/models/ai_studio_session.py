@@ -275,6 +275,14 @@ def _is_db_conflict(exc):
     return False
 
 
+# J10 Ö-3: ürüne kaydetme işinin ardışık DB çakışması sayacı {session_id: sayı}.
+# NEDEN bellek içi: yeni stored alan istenmedi (deploy riski); sayaç süreç başınadır, yani üst sınır
+# en fazla SINIR x cron süreci olur ve yeniden başlatmada sıfırlanır. Sonsuz döngüyü kesmek için bu yeterli.
+# EKIP-BORC: kesin sayaç gerekirse oturuma save_conflict_count alanı eklenmeli.
+SAVE_CONFLICT_RETRY_LIMIT = 5
+_SAVE_CONFLICTS = {}
+
+
 def _get_seedream_image_size(env):
     """Ayarlardaki Seedream çıktı boyutunu fal image_size dict'i olarak döndür."""
     from ..services.fal_provider import FalProvider
@@ -2414,14 +2422,19 @@ class AiStudioSession(models.Model):
                 self._run_save_job(res_id)
                 # NEDEN: commit burada (testte cr.commit yasak olduğundan _run_save_job içinde değil)
                 self.env.cr.commit()
+                _SAVE_CONFLICTS.pop(res_id, None)
             except Exception as err:
                 # DIKKAT: geri alınmazsa yarım yazım (ve bozulmuş transaction) cron cursor'ında kalır
                 self.env.cr.rollback()
-                if _is_db_conflict(err):
-                    _logger.info('AI kuyruğu: ürüne kaydetme DB çakışması, yeniden denenecek (session=%s)', res_id)
+                if not _is_db_conflict(err):
+                    _logger.exception('AI kuyruğu: ürüne kaydetme beklenmeyen hata (session=%s)', res_id)
+                elif _SAVE_CONFLICTS.get(res_id, 0) + 1 < SAVE_CONFLICT_RETRY_LIMIT:
+                    _SAVE_CONFLICTS[res_id] = _SAVE_CONFLICTS.get(res_id, 0) + 1
+                    _logger.info('AI kuyruğu: ürüne kaydetme DB çakışması (%s. kez), yeniden denenecek (session=%s)',
+                                 _SAVE_CONFLICTS[res_id], res_id)
                     self._trigger_ai_queue()
                 else:
-                    _logger.exception('AI kuyruğu: ürüne kaydetme beklenmeyen hata (session=%s)', res_id)
+                    self._give_up_save_after_conflicts(res_id)
             finally:
                 _release_session_lease(self.pool, res_id, owner)
             return
@@ -2441,6 +2454,31 @@ class AiStudioSession(models.Model):
         finally:
             clear_usage_recorder()
             _release_session_lease(self.pool, res_id, owner)
+
+    @api.model
+    def _give_up_save_after_conflicts(self, session_id):
+        """Ardışık çakışma sınırında oturumu onaycıya geri ver (J10 Ö-3).
+
+        NEDEN: her deneme ağır resize/product.image işini baştan yapar; kalıcı çakışmada sessiz sonsuz döngü olurdu.
+        """
+        _SAVE_CONFLICTS.pop(session_id, None)
+        _logger.warning('AI kuyruğu: ürüne kaydetme %d kez DB çakışmasına takıldı, incelemeye döndü (session=%s)',
+                        SAVE_CONFLICT_RETRY_LIMIT, session_id)
+        try:
+            session = self.browse(session_id)
+            if session.state == 'saving':
+                session.write({'state': 'review'})
+                session._notify_save_problem(
+                    _('Ürüne kaydetme %d kez eşzamanlı bir yazımla çakıştı; oturum incelemeye döndü. '
+                      'Bir süre sonra tekrar "Tamamla" deneyin.') % SAVE_CONFLICT_RETRY_LIMIT)
+            self.env.cr.commit()
+        except Exception:
+            # DIKKAT: geri dönüş de çakıştıysa oturum 'saving'de kalır; sonraki çakışmada hemen yeniden denensin
+            self.env.cr.rollback()
+            _SAVE_CONFLICTS[session_id] = SAVE_CONFLICT_RETRY_LIMIT - 1
+            _logger.warning('AI kuyruğu: çakışma sonrası incelemeye döndürülemedi (session=%s)', session_id,
+                            exc_info=True)
+            self._trigger_ai_queue()
 
     @api.model
     def _run_save_job(self, session_id):

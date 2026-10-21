@@ -694,8 +694,10 @@ class AiStudioController(http.Controller):
             # NEDEN (J10 KK3): onaycının ekranda onayladığı küme sunucudakiyle aynı olmalı. Operatörün
             # onaydan sonraki hedef değişikliği onayları düşürür (KK2); ekran bayatsa kaydetme yapılmaz.
             # EKIP-BORC: içerik damgası (onay anında ek checksum'ı saklayan stored alan) bilinçli eklenmedi
-            # (yeni kolon deploy riski); bütünlük kural+onay düşürmeye dayanır. Yükseltme: generation'a
-            # approval_checksum, complete_session/_run_save_job yeniden hesaplayıp karşılaştırır.
+            # (yeni kolon deploy riski); bütünlük kural+onay düşürmeye dayanır: review'da üretim/aday operatöre
+            # kapalı (J10 Y4), id kümesi karşılaştırılır, içerik karşılaştırılmaz. Kapsamayan: iki onaycının
+            # aynı oturumda içerik/hedef değiştirmesi. Yükseltme: generation'a approval_checksum (görsel ek
+            # checksum'ı + ürün/kardeş/tür hedefi), complete_session/_run_save_job yeniden hesaplayıp karşılaştırır.
             if approved_items is not None:
                 client_ids = {int(item.get('id') or 0) for item in approved_items}
                 server_ids = set(session.generation_ids.filtered(
