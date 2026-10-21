@@ -1,5 +1,8 @@
 import base64
+import gc
 import io
+import os
+import tracemalloc
 import zipfile
 from unittest.mock import patch
 
@@ -151,6 +154,36 @@ class TestBulkImageWizard(TransactionCase):
             self._import(wiz)
         self.assertFalse(self.plain_a.image_variant_1920)
         self.assertEqual(self._log().skipped_count, 2)
+
+    def _peak_growth(self, n, png):
+        """n barkodluk ZIP'i içe aktarırken tracemalloc tepe büyümesini (bayt) döndürür."""
+        products = self.env['product.product'].create(
+            [{'name': f'Bellek {n}-{i}', 'barcode': f'MEM{n}-{i}'} for i in range(n)])
+        wiz = self._wizard({f'MEM{n}-{i}_1.png': png for i in range(n)})
+        self.env.flush_all()
+        gc.collect()
+        tracemalloc.start()
+        try:
+            base = tracemalloc.get_traced_memory()[0]
+            self._import(wiz)
+            peak = tracemalloc.get_traced_memory()[1]
+        finally:
+            tracemalloc.stop()
+        self.assertTrue(all(products.mapped('image_variant_1920')))
+        return peak - base
+
+    def test_bellek_barkod_sayisindan_bagimsiz(self):
+        # NEDEN: ORM önbelleği barkod başına birikirse (görsel + 1024/512/256/128 yeniden
+        # boyutları) tepe bellek barkod sayısıyla doğrusal büyür ve prod'da limit_memory_soft'a çarpar.
+        # Gürültü görsel: sıkışmaz ve 1100px → 1024 yeniden boyutu gerçekten üretilir.
+        buf = io.BytesIO()
+        Image.frombytes('RGB', (1100, 1100), os.urandom(1100 * 1100 * 3)).save(buf, 'PNG')
+        png = buf.getvalue()
+        small = self._peak_growth(5, png)
+        large = self._peak_growth(20, png)
+        # 15 fazladan barkod birikseydi fark >= 15 * len(png); bağımsızsa ~0. Eşik: 3 görsel boyutu.
+        self.assertLess(large - small, 3 * len(png),
+                        f'tepe bellek barkoda bağlı büyüyor: N=5 {small}, N=20 {large}, görsel {len(png)}')
 
     def test_gecersiz_zip(self):
         wiz = self.env['ugurlar.bulk.image.wizard'].create({
