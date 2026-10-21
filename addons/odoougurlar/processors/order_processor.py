@@ -1,6 +1,8 @@
 import logging
 from odoo import models, fields
 
+from odoo.addons.odoougurlar.services.nebim_connector import chain_timeout
+
 _logger = logging.getLogger(__name__)
 
 class OrderProcessor(models.AbstractModel):
@@ -108,6 +110,8 @@ class OrderProcessor(models.AbstractModel):
                             })
                             return True
             except Exception as e:
+                if chain_timeout(self.env, e):
+                    raise
                 # Kontrol yapılamadan göndermek mükerrer sipariş riski: gönderme, hata ver
                 _logger.warning("Nebim sipariş canlı kontrol SP çalıştırılamadı, gönderilmedi: %s", e)
                 raise Exception(f"Nebim'de mükerrer kontrolü yapılamadı, sipariş gönderilmedi: {e}")
@@ -145,6 +149,8 @@ class OrderProcessor(models.AbstractModel):
                     export_file_number = str(next_num_res[0].get('NextExportFileNumber') or '')
                     _logger.info("Nebim ExportFileNumber hesaplandı: %s (cdExportFile'a INSERT yapıldı)", export_file_number)
             except Exception as e:
+                if chain_timeout(self.env, e):
+                    raise
                 _logger.warning("ExportFileNumber alınırken hata oluştu (sp_GetNextExportFileNumber_Hamurlabs eksik olabilir): %s", e)
 
         lines = []
@@ -201,6 +207,8 @@ class OrderProcessor(models.AbstractModel):
                                 except Exception:
                                     _logger.warning("nebim_address_id yazılamadı (%s)", sale_order.name, exc_info=True)
                 except Exception as e:
+                    if chain_timeout(self.env, e):
+                        raise
                     _logger.warning("Adres ID SP sorgusu hatası: %s", e)
         
         if not addr_id:
@@ -317,6 +325,8 @@ class OrderProcessor(models.AbstractModel):
             return True
             
         except Exception as e:
+            if chain_timeout(self.env, e):
+                raise
             _logger.error("Sipariş gönderim hatası: %s", e)
             sale_order.write({'nebim_order_response': str(e)})
             raise Exception(f"Nebim Sipariş Aktarım Hatası: {str(e)}")
