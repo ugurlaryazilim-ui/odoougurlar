@@ -64,14 +64,15 @@ class CustomerProcessor(models.AbstractModel):
             committed_addr = ''
             # Address ID'yi de oku
             try:
-                self.env.cr.execute(
-                    "SELECT nebim_address_id FROM res_partner WHERE id = %s",
-                    [partner.id]
-                )
-                addr_row = self.env.cr.fetchone()
-                committed_addr = (addr_row[0] if addr_row else '') or ''
+                with self.env.cr.savepoint():
+                    self.env.cr.execute(
+                        "SELECT nebim_address_id FROM res_partner WHERE id = %s",
+                        [partner.id]
+                    )
+                    addr_row = self.env.cr.fetchone()
+                    committed_addr = (addr_row[0] if addr_row else '') or ''
             except Exception:
-                pass
+                _logger.warning("Adres ID okunamadı (partner=%s)", partner.id, exc_info=True)
 
             # ─── NEBİM CANLI DOĞRULAMA ───
             # Partner'da kayıtlı kod Nebim'de gerçekten var mı?
@@ -598,11 +599,12 @@ class CustomerProcessor(models.AbstractModel):
             # İstek payload'unu sale_order'a kaydet (debug için)
             if sale_order:
                 try:
-                    sale_order.sudo().write({
-                        'nebim_customer_request': request_json,
-                    })
+                    with self.env.cr.savepoint():
+                        sale_order.sudo().write({
+                            'nebim_customer_request': request_json,
+                        })
                 except Exception:
-                    pass
+                    _logger.warning("nebim_customer_request yazılamadı (%s)", sale_order.name, exc_info=True)
 
             result = connector.post_data('Post', payload)
             _logger.info("Cari bilgisi işlendi (Nebim): %s - Sonuc: OK", partner.name)
@@ -610,11 +612,12 @@ class CustomerProcessor(models.AbstractModel):
             # Yanıt JSON'unu sale_order'a kaydet (debug için)
             if sale_order:
                 try:
-                    sale_order.sudo().write({
-                        'nebim_customer_response': _json.dumps(result, ensure_ascii=False, default=str) if result else '',
-                    })
+                    with self.env.cr.savepoint():
+                        sale_order.sudo().write({
+                            'nebim_customer_response': _json.dumps(result, ensure_ascii=False, default=str) if result else '',
+                        })
                 except Exception:
-                    pass
+                    _logger.warning("nebim_customer_response yazılamadı (%s)", sale_order.name, exc_info=True)
             
             # Nebim'den hata dönerse (200 OK gelse bile HTTP içinde json hatası olabilir)
             if isinstance(result, dict) and 'ExceptionMessage' in result:
