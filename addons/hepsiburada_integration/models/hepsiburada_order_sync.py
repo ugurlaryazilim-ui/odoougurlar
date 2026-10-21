@@ -23,6 +23,10 @@ _HB_DATE_FMT = '%Y-%m-%d %H:%M'
 # İptal taraması: engellenen/başarısız iptal warning_message'a bu önekle yazılır ve süre dolana dek atlanır
 _CANCEL_MARK = 'Otomatik iptal edilmedi'
 _CANCEL_RETRY_AFTER = timedelta(hours=24)
+# Ağır taramalar (iptal + geçmiş statü: ≥12 HTTP isteği) mağaza başına en fazla bu sıklıkta
+_HEAVY_INTERVAL = timedelta(minutes=15)
+# Odoo'da oluşamayan siparişin detayı bu süreden önce yeniden çekilmez
+_MISSING_RETRY = timedelta(minutes=30)
 
 # (endpoint, Odoo'ya yazılacak statü, yanıttaki tarih alanı)
 _HISTORY_ENDPOINTS = (
@@ -76,21 +80,49 @@ class HepsiburadaOrderSync(models.AbstractModel):
         """Eski kayıtlarda store_id boş olabilir → merchant_id ile de eşleş."""
         return ['|', ('store_id', '=', store.id), ('merchant_id', '=', store.merchant_id)]
 
-    @api.model
-    def _sync_store_orders(self, store):
-        store = store.sudo()
-        sync_log = self.env['hepsiburada.sync.log'].sudo().create({
+    @api.private
+    def _new_log(self, store, started):
+        return self.env['hepsiburada.sync.log'].sudo().create({
             'store_id': store.id,
             'sync_type': 'order',
-            'name': f"Sipariş Senkronizasyonu - {fields.Datetime.now()}",
+            'start_date': started,
+            'name': f"Sipariş Senkronizasyonu - {started}",
         })
 
+    @api.private
+    def _max_ids(self):
+        """Sipariş / kalem tablolarının en büyük id'si: iki an arasında yeni kayıt açıldı mı anlamak için."""
+        return tuple(self.env[m].search([], order='id desc', limit=1).id or 0
+                     for m in ('hepsiburada.order', 'hepsiburada.order.line'))
+
+    @api.private
+    def _heavy_due(self, store):
+        """İptal + geçmiş statü taraması için süre doldu mu? Doluysa damgayı hemen yeniler."""
+        ICP = self.env['ir.config_parameter'].sudo()
+        key = f'hepsiburada_integration.heavy_sync.{store.id}'
+        now = fields.Datetime.now()
+        last = ICP.get_param(key)
+        if last and now - fields.Datetime.to_datetime(last) < _HEAVY_INTERVAL:
+            return False
+        # NEDEN: tarama hata verse bile 15 dk sonra denensin; her dakika HB'ye ≥12 istekle yüklenmesin
+        ICP.set_param(key, fields.Datetime.to_string(now))
+        return True
+
+    @api.model
+    def _sync_store_orders(self, store, force=False):
+        """force=True (elle senkron): ağır taramalar süre beklemez, log her zaman açılır.
+
+        Her dakika yalnız açık paketler + bozulan paketler çekilir (yeni sipariş gecikmesi artmasın);
+        iptal ve geçmiş statü taraması (~12 istek) mağaza başına en fazla 15 dakikada bir çalışır.
+        """
+        store = store.sudo()
+        started = fields.Datetime.now()
         clean_merchant, clean_user, clean_pass = store._get_clean_credentials()
 
         if not clean_merchant or not clean_user or not clean_pass:
             error_msg = "Mağaza API ayarları (Merchant ID, User, Password) eksik. Lütfen kontrol edin."
             _logger.error(error_msg)
-            sync_log.mark_error(error_msg)
+            self._new_log(store, started).mark_error(error_msg)
             return
 
         # Connection pooling — tek session ile tüm istekler
@@ -100,23 +132,26 @@ class HepsiburadaOrderSync(models.AbstractModel):
         success_count = 0
         error_count = 0
         log_msgs = []
+        ids_before = self._max_ids()
+        heavy = force or self._heavy_due(store)
 
         # 1. İptaller ÖNCE (kalem bazlı): kısmi iptalde kalan ürünlerle sipariş yeniden kurulur
         cancel_count = 0
-        try:
-            with self.env.cr.savepoint():
-                cancel_count = self._sync_cancellations(store, session, clean_merchant)
-        except Exception as e:
-            self.env.invalidate_all(flush=False)
-            log_msgs.append(f"İptal senkronizasyonu hatası: {e}")
-            _logger.exception("HB iptal senkronizasyonu hatası [%s]: %s", store.name, e)
+        if heavy:
+            try:
+                with self.env.cr.savepoint():
+                    cancel_count = self._sync_cancellations(store, session, clean_merchant)
+            except Exception as e:
+                self.env.invalidate_all(flush=False)
+                log_msgs.append(f"İptal senkronizasyonu hatası: {e}")
+                _logger.exception("HB iptal senkronizasyonu hatası [%s]: %s", store.name, e)
 
         # 2. Gönderime hazır paketler — önce tüm sayfalar toplanır, sonra tek seferde işlenir
         #    (aynı siparişin paketleri farklı sayfalara düşse de birlikte gruplanır)
         packages, fetch_error = self._fetch_open_packages(store, session, clean_merchant)
         if fetch_error:
             _logger.error("HB paket listesi alınamadı [%s]: %s", store.name, fetch_error)
-            sync_log.mark_error(fetch_error)
+            self._new_log(store, started).mark_error(fetch_error)
             return
 
         processed, scsc, errc, msgs = self._process_orders(packages, store)
@@ -126,11 +161,13 @@ class HepsiburadaOrderSync(models.AbstractModel):
         log_msgs.extend(msgs)
 
         # 3. Geçmiş sipariş statüleri (Kargoda, Teslim Edildi, Teslim Edilemedi)
-        hist_processed, hist_succ, hist_err, hist_msgs = self._fetch_historical_statuses(store, session, clean_merchant)
-        total_fetched += hist_processed
-        success_count += hist_succ
-        error_count += hist_err
-        log_msgs.extend(hist_msgs)
+        if heavy:
+            hist_processed, hist_succ, hist_err, hist_msgs = self._fetch_historical_statuses(
+                store, session, clean_merchant)
+            total_fetched += hist_processed
+            success_count += hist_succ
+            error_count += hist_err
+            log_msgs.extend(hist_msgs)
 
         # 4. Bozulan (unpack) paketler — yalnızca bilgi amaçlı statü
         try:
@@ -157,17 +194,19 @@ class HepsiburadaOrderSync(models.AbstractModel):
             _logger.warning("HB mağaza last_sync güncelleme atlandı: %s", _e)
         if cancel_count:
             log_msgs.append(f"{cancel_count} siparişte iptal işlendi.")
-        details_txt = "\n".join(log_msgs) if log_msgs else "Tüm kayıtlar sorunsuz aktarıldı."
-        try:
-            with self.env.cr.savepoint():
-                sync_log.mark_done(
-                    processed=total_fetched,
-                    created=success_count,
-                    failed=error_count,
-                    details=details_txt
-                )
-        except Exception as _e:
-            _logger.warning("HB sync log güncelleme atlandı: %s", _e)
+        # NEDEN: dakikalık cron boş turlarda log doldurmasın (günde 1440 satır/mağaza); iş = yeni sipariş/kalem, iptal, hata
+        if force or error_count or cancel_count or log_msgs or self._max_ids() != ids_before:
+            details_txt = "\n".join(log_msgs) if log_msgs else "Tüm kayıtlar sorunsuz aktarıldı."
+            try:
+                with self.env.cr.savepoint():
+                    self._new_log(store, started).mark_done(
+                        processed=total_fetched,
+                        created=success_count,
+                        failed=error_count,
+                        details=details_txt
+                    )
+            except Exception as _e:
+                _logger.warning("HB sync log oluşturma atlandı: %s", _e)
         log_level = logging.INFO if (error_count or cancel_count) else logging.DEBUG
         _logger.log(log_level, "[%s] HB sipariş senk. tamamlandı. Toplam: %s, hata: %s, iptal: %s",
                     store.name, total_fetched, error_count, cancel_count)
@@ -270,7 +309,7 @@ class HepsiburadaOrderSync(models.AbstractModel):
         success_count = 0
         error_count = 0
         log_msgs = []
-        missing_orders = []
+        entries = []  # (sipariş no, paket no, yeni statü, sipariş tarihi pencereden eski mi)
 
         for endpoint, new_status, date_key in _HISTORY_ENDPOINTS:
             url = f"https://{domain}/packages/merchantid/{merchant_id}/{endpoint}"
@@ -292,31 +331,62 @@ class HepsiburadaOrderSync(models.AbstractModel):
                 order_nos = item.get('OrderNumbers') or [
                     item.get('OrderNumber') or item.get('orderNumber')]
                 pkg_no = str(item.get('PackageNumber') or item.get('packageNumber') or '')
-                for order_no in filter(None, order_nos):
-                    order_no = str(order_no)
-                    hb_existing = HbOrder.search(
-                        [('hb_order_number', '=', order_no)] + self._store_domain(store))
-                    # Çok paketli sipariş: yalnızca bu paketin kaydı (eşleşmezse hepsi)
-                    if pkg_no and len(hb_existing) > 1:
-                        hb_existing = hb_existing.filtered(lambda o: o.package_number == pkg_no) or hb_existing
-                    if hb_existing and all(o.sale_order_id or not any(l.remaining_qty for l in o.line_ids)
-                                           for o in hb_existing):
-                        hb_existing.filtered(
-                            lambda o: o.status != new_status and o.status not in HB_CANCEL_STATUSES
-                        ).write({'status': new_status})
-                        continue
-                    if order_no not in missing_orders:
-                        missing_orders.append(order_no)
+                # Sipariş tarihi pencereden eskiyse _process_orders zaten atlar → detayı boşuna çekme
+                order_dt = self._parse_hb_datetime(self._order_date_str(item))
+                too_old = bool(order_dt and order_dt < cutoff_date)
+                entries.append((order_nos, pkg_no, new_status, too_old))
 
-        # Eksik siparişlerin tam JSON'larını çek
+        # NEDEN: kalem başına search (N+1) yerine tek `in` sorgusu
+        all_nos = {str(n) for nos, *_rest in entries for n in nos if n}
+        by_number = {}
+        if all_nos:
+            for o in HbOrder.search([('hb_order_number', 'in', list(all_nos))] + self._store_domain(store)):
+                by_number[o.hb_order_number] = by_number.get(o.hb_order_number, HbOrder) | o
+
+        missing_orders = []
+        for order_nos, pkg_no, new_status, too_old in entries:
+            for order_no in filter(None, order_nos):
+                order_no = str(order_no)
+                hb_existing = by_number.get(order_no, HbOrder)
+                # Çok paketli sipariş: yalnızca bu paketin kaydı (eşleşmezse hepsi)
+                if pkg_no and len(hb_existing) > 1:
+                    hb_existing = hb_existing.filtered(lambda o: o.package_number == pkg_no) or hb_existing
+                if hb_existing and all(o.sale_order_id or not any(l.remaining_qty for l in o.line_ids)
+                                       for o in hb_existing):
+                    hb_existing.filtered(
+                        lambda o: o.status != new_status and o.status not in HB_CANCEL_STATUSES
+                    ).write({'status': new_status})
+                    continue
+                if not too_old and order_no not in missing_orders:
+                    missing_orders.append(order_no)
+
+        # Eksik siparişlerin tam JSON'larını çek — her sipariş için en fazla 30 dakikada bir
+        ICP = self.env['ir.config_parameter'].sudo()
+        retry_key = f'hepsiburada_integration.detail_retry.{store.id}'
+        retry = json.loads(ICP.get_param(retry_key) or '{}')  # {sipariş no: bu zamandan önce çekme}
+        now = fields.Datetime.now()
+        now_s = fields.Datetime.to_string(now)
+        attempted = False
         for m_order in missing_orders:
+            if retry.get(m_order, '') > now_s:
+                continue
+            attempted = True
+            wait = _MISSING_RETRY
             full_json = self._fetch_full_order_detail(m_order, store, session, merchant_id)
             if full_json:
-                p, s, e_c, m = self._process_orders([full_json], store)
-                processed_count += p
-                success_count += s
-                error_count += e_c
-                log_msgs.extend(m)
+                order_dt = self._parse_hb_datetime(self._order_date_str(full_json))
+                if order_dt and order_dt < cutoff_date:
+                    # Pencereden eski sipariş hiç açılmayacak; geçmiş listesinde kaldığı sürece bir daha çekme
+                    wait = timedelta(days=day_limit)
+                else:
+                    p, s, e_c, m = self._process_orders([full_json], store)
+                    processed_count += p
+                    success_count += s
+                    error_count += e_c
+                    log_msgs.extend(m)
+            retry[m_order] = fields.Datetime.to_string(now + wait)
+        if attempted:
+            ICP.set_param(retry_key, json.dumps({k: v for k, v in retry.items() if v > now_s}))
 
         return processed_count, success_count, error_count, log_msgs
 
@@ -382,17 +452,19 @@ class HepsiburadaOrderSync(models.AbstractModel):
 
         HbOrder = self.env['hepsiburada.order']
         count = 0
-        for order_no, cancels in by_order.items():
-            # Odoo'ya hiç düşmemiş siparişte kayıt yoktur. Çok paketli siparişte her paket ayrı
-            # kayıttır; iptal kalemi hangi kayıttaysa orada düşülür.
-            for hb_order in HbOrder.search([('hb_order_number', '=', order_no)] + self._store_domain(store)):
-                try:
-                    with self.env.cr.savepoint():
-                        if self._apply_cancellations(hb_order, cancels, store):
-                            count += 1
-                except Exception as e:
-                    self.env.invalidate_all(flush=False)
-                    _logger.exception("HB iptal işlenemedi (%s): %s", order_no, e)
+        # Odoo'ya hiç düşmemiş siparişte kayıt yoktur. Çok paketli siparişte her paket ayrı
+        # kayıttır; iptal kalemi hangi kayıttaysa orada düşülür. (Tek `in` sorgusu: sipariş başına search yok)
+        found = HbOrder.search(
+            [('hb_order_number', 'in', list(by_order))] + self._store_domain(store)) if by_order else HbOrder
+        for hb_order in found:
+            order_no = hb_order.hb_order_number
+            try:
+                with self.env.cr.savepoint():
+                    if self._apply_cancellations(hb_order, by_order[order_no], store):
+                        count += 1
+            except Exception as e:
+                self.env.invalidate_all(flush=False)
+                _logger.exception("HB iptal işlenemedi (%s): %s", order_no, e)
         return count
 
     @api.private

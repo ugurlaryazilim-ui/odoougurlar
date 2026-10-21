@@ -1,4 +1,9 @@
-from odoo import models, fields
+import logging
+
+from odoo import models, fields, api
+
+_logger = logging.getLogger(__name__)
+
 
 class HepsiburadaSyncLog(models.Model):
     _name = 'hepsiburada.sync.log'
@@ -6,7 +11,7 @@ class HepsiburadaSyncLog(models.Model):
     _order = 'create_date desc'
 
     name = fields.Char(string='İşlem No', required=True, copy=False, readonly=True, default='Yeni')
-    store_id = fields.Many2one('hepsiburada.store', string='Mağaza', required=True, ondelete='cascade')
+    store_id = fields.Many2one('hepsiburada.store', string='Mağaza', required=True, ondelete='cascade', index=True)
     sync_type = fields.Selection([
         ('order', 'Sipariş Senkronizasyonu'),
         ('price', 'Fiyat Senkronizasyonu'),
@@ -47,3 +52,14 @@ class HepsiburadaSyncLog(models.Model):
             'end_date': fields.Datetime.now(),
             'error_details': error_msg
         })
+
+    @api.autovacuum
+    def _gc_old_logs(self):
+        """30 günden eski logları sil (dakikalık cron çok log üretir)."""
+        cutoff = fields.Datetime.subtract(fields.Datetime.now(), days=30)
+        # NEDEN: ORM unlink yerine tek DELETE; biriken yüz binlerce satırı ORM'de silmek autovacuum'u kilitler.
+        # Bu tabloya bağlı bir kayıt/FK yok (store One2many'nin ters yüzü), güvenli.
+        self.env.cr.execute("DELETE FROM hepsiburada_sync_log WHERE create_date < %s", (cutoff,))
+        self.invalidate_model()
+        if self.env.cr.rowcount:
+            _logger.info("HB sync log temizliği: %d kayıt silindi", self.env.cr.rowcount)
