@@ -779,6 +779,9 @@ class AiStudioSession(models.Model):
     _inherit = ['mail.thread', 'mail.activity.mixin']
     _order = 'create_date desc'
     _rec_name = 'name'
+    # NEDEN: chatter varsayılanı 'write' erişimi ister; onay kilidi kuralı operatörün 'saving'/'done' oturuma
+    # yazmasını kapatınca kendi oturumuna not yazması da kapanırdı. Not ürüne yazılan içeriği etkilemez.
+    _mail_post_access = 'read'
 
     name = fields.Char(
         string='Oturum No',
@@ -4089,45 +4092,21 @@ class AiStudioSession(models.Model):
         if self.filtered(lambda r: r.state == 'saving' or r.reviewer_id):
             raise AccessError(_('Oturumu ürüne kaydetmeye ve onayıcı atamaya yalnız onaycı veya yönetici yetkilidir.'))
 
-    # Onaydan sonra (kuyruk 'saving' → 'done') değişirse onaylanandan farklı içerik ürüne yazılır (A4 O1).
-    # NEDEN: kara liste değil TÜM alanlar kilitli, yalnız bu kısa izin listesi açık (durum geçişi ve
-    # kilit/kira/zaman damgası kayıtları; hiçbiri ürüne yazılan içeriği etkilemez). Yeni alan varsayılan kilitli.
-    _APPROVED_WRITE_ALLOW = frozenset((
-        'state', 'user_id', 'message_main_attachment_id', 'review_locked_by', 'review_lock_time',
-        'review_lock_token', 'ai_lease_until', 'ai_lease_owner', 'retry_count', 'date_photos_ready',
-        'date_processing_start', 'date_review_start', 'date_done',
-    ))
-
+    # Onaydan sonra ('saving'/'done') içerik değişmesin (A4 O1/Y2/O2): kilit kayıt kuralında
+    # (security/ai_studio_security.xml, *_operator_edit) — create/o2m/context default/ek yollarının hepsinde
+    # geçerli olduğu için model override'ı DEĞİL. Kuralın göremediği tek yol aşağıda.
     @api.model
-    def _check_approved_lock_on(self, locked_sessions, vals, allow=frozenset(), label=''):
-        """Onaycı olmayan, 'saving'/'done' oturumu (mevcut VEYA hedef) etkileyen yazımı reddeder.
+    def _check_target_session_unlocked(self, vals, label):
+        """Açık oturumdaki satırı session_id ile 'saving'/'done' oturuma TAŞIMA engeli.
 
-        DIKKAT: hedef oturum da denetlenir; yoksa operatör kendi açık oturumundaki satırı session_id ile
-        onaylanmış oturuma taşıyıp kuyruğa yazdırır.
+        NEDEN: kayıt kuralı yazım ÖNCESİ kaydı denetler (o an açık oturumda) → taşımayı yakalamaz.
         """
-        if self._is_approval_authority() or not (set(vals) - allow):
-            return
-        sessions = locked_sessions
-        if vals.get('session_id'):
-            sessions |= self.browse(vals['session_id'])
-        if sessions.filtered(lambda s: s.state in ('saving', 'done')):
-            raise AccessError(_('Onaylanan oturumun içeriği (%s) yalnız onaycı veya yönetici tarafından '
-                                'değiştirilebilir.') % (label or _('oturum')))
-
-    @api.model
-    def _check_approved_lock_create(self, vals_list, label=''):
-        if self._is_approval_authority():
-            return
-        sessions = self.browse([v['session_id'] for v in vals_list if v.get('session_id')])
-        if sessions.filtered(lambda s: s.state in ('saving', 'done')):
+        target = self.browse(vals.get('session_id') or [])
+        if target.state in ('saving', 'done') and not self._is_approval_authority():
             raise AccessError(_('Onaylanan oturuma (%s) yalnız onaycı veya yönetici ekleme yapabilir.') % label)
-
-    def _check_approved_lock(self, vals):
-        self._check_approved_lock_on(self, vals, self._APPROVED_WRITE_ALLOW)
 
     def write(self, vals):
         self._check_saving_transition(vals)
-        self._check_approved_lock(vals)
         res = super(AiStudioSession, self).write(vals)
         if 'state' in vals:
             for record in self:
