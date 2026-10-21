@@ -96,7 +96,7 @@ class NebimService(models.AbstractModel):
             connector = self.env['odoougurlar.nebim.connector']
             sp_inventory = connector._get_sp_name('inventory')
 
-            _logger.info("Stok SP çağrılıyor: %s Day=%s", sp_inventory, day_value)
+            _logger.debug("Stok SP çağrılıyor: %s Day=%s", sp_inventory, day_value)
             stock_data = connector.run_proc(
                 sp_inventory,
                 [{'Name': 'Day', 'Value': day_value}]
@@ -104,14 +104,16 @@ class NebimService(models.AbstractModel):
 
             if not stock_data:
                 self._finish_log(log, 'done', note=f'Nebim\'den stok verisi gelmedi (Day={day_value}).')
-                _logger.info("Stok SP boş döndü (Day=%s) - değişiklik yok.", day_value)
+                _logger.debug("Stok SP boş döndü (Day=%s) - değişiklik yok.", day_value)
                 return
 
             items_list = stock_data if isinstance(stock_data, list) else [stock_data]
-            _logger.info("Nebim'den %d stok satırı çekildi (Day=%s)", len(items_list), day_value)
+            _logger.debug("Nebim'den %d stok satırı çekildi (Day=%s)", len(items_list), day_value)
 
             processor = self.env['odoougurlar.stock.processor']
-            stats = processor.process_stock_prices(items_list)
+            # Parmak izi anahtarı mod başına: Day=1 ve Day=36500 sonuçları birbirinin yerine geçmez.
+            stats = processor.process_stock_prices(
+                items_list, fingerprint_key='stock_sp_%s' % mode)
 
             # Log'a kaydet — not_found + failed = records_failed
             log_stats = {
@@ -124,7 +126,9 @@ class NebimService(models.AbstractModel):
                 f"Stok Güncelleme Detay (Day={day_value}):\n"
                 f"  İşlenen: {stats.get('processed', 0)}\n"
                 f"  Güncellenen: {stats.get('updated', 0)}\n"
-                f"  Atlandı (stok aynı): {stats.get('skipped', 0)}\n"
+                f"  Atlandı (depo hariç): {stats.get('skipped_warehouse', 0)}\n"
+                f"  Atlandı (stok aynı): {stats.get('skipped_same', 0)}"
+                f"{' (SP sonucu önceki çalışmayla aynı)' if stats.get('fingerprint_hit') else ''}\n"
                 f"  Bulunamadı: {stats.get('not_found', 0)}\n"
                 f"  Hata: {stats.get('failed', 0)}"
             )
@@ -132,10 +136,14 @@ class NebimService(models.AbstractModel):
             if not_found_samples:
                 note += f"\n\n  Bulunamayan Ürün Örnekleri:\n  " + "\n  ".join(not_found_samples)
             self._finish_log(log, 'done', stats=log_stats, note=note)
-            _logger.info(
-                "Stok güncelleme tamamlandı: %d işlendi, %d güncellendi, %d atlandı, %d bulunamadı, %d hata",
-                stats.get('processed', 0), stats.get('updated', 0),
-                stats.get('skipped', 0), stats.get('not_found', 0), stats.get('failed', 0)
+            # (işlemci zaten özet loglar; burada yalnız iş yapıldıysa INFO)
+            _logger.log(
+                logging.INFO if log_stats['updated'] or log_stats['failed'] else logging.DEBUG,
+                "Stok güncelleme tamamlandı (%s): %d işlendi, %d güncellendi, %d depo + %d aynı atlandı, "
+                "%d bulunamadı, %d hata",
+                mode, stats.get('processed', 0), stats.get('updated', 0),
+                stats.get('skipped_warehouse', 0), stats.get('skipped_same', 0),
+                stats.get('not_found', 0), stats.get('failed', 0)
             )
         except Exception as e:
             self._finish_log(log, 'error', error=str(e))
@@ -256,12 +264,19 @@ class NebimService(models.AbstractModel):
                         target[value] = cost
 
             barcodes = list(set(by_b1) | set(by_b2))
+            # NEDEN: tek OR'lu sorgu hiçbir indeksi kullanamayıp tabloyu tarıyordu; üç dal ayrı
+            # indeksleri kullanır (barcode, default_code, nebim_barcode GIN ifade indeksi), UNION tekilleştirir.
+            # DIKKAT: üçüncü dalın ifadesi product.py `_nebim_barcode_list_idx` ile birebir aynı olmalı.
             self.env.cr.execute("""
                 SELECT id, barcode, default_code, nebim_barcode FROM product_product
-                WHERE active AND (barcode = ANY(%s::text[])
-                                  OR default_code = ANY(%s::text[])
-                                  OR string_to_array(nebim_barcode, ',') && %s::text[])
-            """, [barcodes, list(by_sku), barcodes])
+                WHERE active AND barcode = ANY(%(bc)s::text[])
+                UNION
+                SELECT id, barcode, default_code, nebim_barcode FROM product_product
+                WHERE active AND default_code = ANY(%(sku)s::text[])
+                UNION
+                SELECT id, barcode, default_code, nebim_barcode FROM product_product
+                WHERE active AND string_to_array(replace(nebim_barcode, ' ', ''), ',') && %(bc)s::text[]
+            """, {'bc': barcodes, 'sku': list(by_sku)})
             cost_by_product = {}
             for pid, barcode, code, nebim_barcode in self.env.cr.fetchall():
                 # Odoo barkodu Nebim'dekinden farklı olabilir: virgülle birleşik Nebim barkodları da denenir

@@ -1,4 +1,7 @@
+import hashlib
+import json
 import logging
+import time
 
 from odoo import models, fields, api
 
@@ -13,6 +16,14 @@ SKIP_STOCK_SYNC_WAREHOUSES = {'002'}  # X Depo (İnternet Mağaza Depo)
 # Bu satır sayısına kadar cache yalnız Nebim'den gelen ürünler için yüklenir (dakikalık
 # artımlı sync genelde birkaç bin satır). Üstünde (ilk kurulum) tüm ürünler yüklenir.
 RESTRICTED_CACHE_MAX_ROWS = 20000
+
+# Aynı SP sonucu (parmak izi) için işlemin en çok kaç saniye atlanacağı; sonra yine Nebim değerine eşitlenir.
+FINGERPRINT_MAX_AGE = 600
+
+# (db adı, anahtar) → (sha1, zaman). NEDEN: ir.config_parameter yazımı tüm worker'larda registry
+# önbelleğini temizler (sık değişen Nebim verisinde dakikalık fırtına); süreç içi bellek yeter,
+# cron başka worker'a düşerse yalnız bir kez fazladan işlenir. Stored alan/tablo yok.
+_FINGERPRINTS = {}
 
 # ─── Module-Level Cache ───────────────────────────────────────────────
 _STOCK_CACHE = {
@@ -66,9 +77,9 @@ class StockProcessor(models.AbstractModel):
                 if code:
                     item_codes.add(code)
             barcodes, skus, item_codes = list(barcodes), list(skus), list(item_codes)
-            _logger.info("Stok cache yükleniyor (yalnız gelen %d satırın ürünleri)...", len(stock_data))
+            _logger.debug("Stok cache yükleniyor (yalnız gelen %d satırın ürünleri)...", len(stock_data))
         else:
-            _logger.info("Stok cache yükleniyor...")
+            _logger.debug("Stok cache yükleniyor...")
 
         # 1. Barcode → product_id  (iki adımlı: barcode öncelikli)
         _STOCK_CACHE['barcode_map'] = {}
@@ -89,9 +100,10 @@ class StockProcessor(models.AbstractModel):
 
         # Adım 2: nebim_barcode — sadece barcode map'te yoksa ekle (üzerine yazmaz)
         if restricted:
+            # DIKKAT: ifade product.py `_nebim_barcode_list_idx` ile birebir aynı kalmalı (GIN indeksi).
             self.env.cr.execute("""
                 SELECT id, nebim_barcode FROM product_product
-                WHERE active = true AND nebim_barcode IS NOT NULL AND nebim_barcode != ''
+                WHERE active = true
                   AND string_to_array(REPLACE(nebim_barcode, ' ', ''), ',') && %s::text[]
             """, [barcodes])
         else:
@@ -149,6 +161,24 @@ class StockProcessor(models.AbstractModel):
             _STOCK_CACHE['template_map'][nebim_code].append(pid)
 
         # 4. Warehouse → location_id
+        self._load_warehouse_cache()
+
+        # Kısmi cache "yüklü" sayılmaz (başka bir çağrı tüm ürünleri bekleyebilir)
+        _STOCK_CACHE['loaded'] = not restricted
+
+        _logger.debug(
+            "Stok cache yüklendi: %d barcode, %d sku, %d variant, %d template, %d warehouse, default_loc=%s",
+            len(_STOCK_CACHE['barcode_map']),
+            len(_STOCK_CACHE['sku_map']),
+            len(_STOCK_CACHE['variant_map']),
+            len(_STOCK_CACHE['template_map']),
+            len(_STOCK_CACHE['warehouse_map']),
+            _STOCK_CACHE['default_location_id'],
+        )
+
+    @api.private
+    def _load_warehouse_cache(self):
+        """Depo → lokasyon eşlemesi, atlanacak lokasyonlar ve varsayılan lokasyon (birkaç satır, ucuz)."""
         _STOCK_CACHE['warehouse_map'] = {}
         _STOCK_CACHE['skip_location_ids'] = set()
         for wh in self.env['stock.warehouse'].sudo().search([]):
@@ -159,39 +189,82 @@ class StockProcessor(models.AbstractModel):
             # Hariç tutulan depoları kaydet
             if wh.code in SKIP_STOCK_SYNC_WAREHOUSES:
                 _STOCK_CACHE['skip_location_ids'].add(wh.lot_stock_id.id)
-                _logger.info(
+                _logger.debug(
                     "  Stok sync ATLANACAK depo: %s (kod: %s, loc_id: %d)",
                     wh.name, wh.code, wh.lot_stock_id.id,
                 )
-
-        # Varsayılan depo
         default_wh = self.env['stock.warehouse'].sudo().search([], limit=1)
         _STOCK_CACHE['default_location_id'] = default_wh.lot_stock_id.id if default_wh else None
 
-        # Kısmi cache "yüklü" sayılmaz (başka bir çağrı tüm ürünleri bekleyebilir)
-        _STOCK_CACHE['loaded'] = not restricted
-
-        _logger.info(
-            "Stok cache yüklendi: %d barcode, %d sku, %d variant, %d template, %d warehouse, default_loc=%s",
-            len(_STOCK_CACHE['barcode_map']),
-            len(_STOCK_CACHE['sku_map']),
-            len(_STOCK_CACHE['variant_map']),
-            len(_STOCK_CACHE['template_map']),
-            len(_STOCK_CACHE['warehouse_map']),
-            _STOCK_CACHE['default_location_id'],
-        )
+    @api.private
+    def _row_location_id(self, item):
+        """Satırın yazılacağı lokasyon (bilinmeyen depo kodu → varsayılan depo); yoksa None."""
+        wh_code = (item.get('WarehouseCode') or '').strip()
+        return _STOCK_CACHE['warehouse_map'].get(wh_code) or _STOCK_CACHE.get('default_location_id')
 
     # =================================================================
     #  Ana İşlem
     # =================================================================
-    def process_stock_prices(self, stock_data):
+    @api.private
+    def _finalize_stats(self, stats):
+        """`skipped` toplamını yazar ve özeti loglar (iş yapılmadıysa DEBUG: dakikalık cron gürültüsü)."""
+        stats['skipped'] = stats['skipped_warehouse'] + stats['skipped_same']
+        worked = stats['updated'] or stats['not_found'] or stats['failed']
+        _logger.log(
+            logging.INFO if worked else logging.DEBUG,
+            "Stok güncelleme tamamlandı: %d işlendi, %d güncellendi, %d depo nedeniyle atlandı, "
+            "%d aynı miktar nedeniyle atlandı, %d bulunamadı, %d hata",
+            stats['processed'], stats['updated'], stats['skipped_warehouse'],
+            stats['skipped_same'], stats['not_found'], stats['failed'],
+        )
+        return stats
+
+    @api.private
+    def _stock_fingerprint(self, rows):
+        """Satırların sırasızdan bağımsız sha1 parmak izi."""
+        lines = sorted(json.dumps(row, sort_keys=True, default=str) for row in rows)
+        return hashlib.sha1('\n'.join(lines).encode()).hexdigest()
+
+    def process_stock_prices(self, stock_data, fingerprint_key=None):
         """
         Nebim stok verisini toplu işler.
         Cache üzerinden varyant eşleme — ~0 sorgu/satır.
+
+        fingerprint_key verilirse: atlanan depolar ayıklandıktan sonra kalan satırların parmak izi
+        süreç içi bellekteki önceki çalışmayla aynıysa (ve FINGERPRINT_MAX_AGE dolmadıysa) işlem yapılmaz.
         """
+        stats = {
+            'processed': len(stock_data), 'updated': 0, 'skipped': 0,
+            'skipped_warehouse': 0, 'skipped_same': 0,
+            'not_found': 0, 'failed': 0, 'not_found_samples': [],
+        }
+
+        # NEDEN: 002 (İnternet Depo) satırları ürün/quant cache'i yüklenmeden ÖNCE ayıklanır; eskiden
+        # her dakika binlerce 002 satırı için cache + quant sorguları çalışıp hepsi atlanıyordu.
+        # Lokasyon kararı satır döngüsündekiyle aynı (`_row_location_id`).
+        self._load_warehouse_cache()
+        skip_locations = _STOCK_CACHE['skip_location_ids']
+        rows = [item for item in stock_data if self._row_location_id(item) not in skip_locations]
+        stats['skipped_warehouse'] = len(stock_data) - len(rows)
+        if not rows:
+            return self._finalize_stats(stats)
+
+        digest = None
+        if fingerprint_key:
+            digest = self._stock_fingerprint(rows)
+            prev_digest, prev_time = _FINGERPRINTS.get((self.env.cr.dbname, fingerprint_key), (None, 0))
+            # DIKKAT: süre sınırı bilinçli. Eskiden her dakika Nebim değerine yazıldığı için Odoo
+            # tarafındaki sapma (teslimat düşümü, elle düzeltme) ≤1 dk'da kendiliğinden düzeliyordu;
+            # parmak izi tek başına bunu Nebim verisi değişene kadar durdururdu.
+            if prev_digest == digest and time.time() - prev_time < FINGERPRINT_MAX_AGE:
+                stats['skipped_same'] = len(rows)
+                stats['fingerprint_hit'] = True
+                return self._finalize_stats(stats)
+
+        stock_data = rows
         self._init_stock_cache(force=True, stock_data=stock_data)  # Her sync'te taze cache
 
-        stats = {'processed': 0, 'updated': 0, 'skipped': 0, 'not_found': 0, 'failed': 0}
+        write_errors = 0
 
         # Mevcut quant'ları toplu yükle
         quant_map = {}  # (product_id, location_id) → (quant_id, current_qty)
@@ -240,15 +313,14 @@ class StockProcessor(models.AbstractModel):
                 shelf_product_map.setdefault((prod_id, ploc_id), []).append(
                     (qid, cloc_id, float(cqty or 0)))
 
-        _logger.info("Quant cache yüklendi: %d quant, %d location, %d raflanmış ürün",
+        _logger.debug("Quant cache yüklendi: %d quant, %d location, %d raflanmış ürün",
                       len(quant_map), len(location_ids), len(shelf_product_map))
 
         batch_updates = []  # (quant_id, new_qty)
         batch_creates = []  # (product_id, location_id, qty)
-        not_found_samples = []
+        not_found_samples = stats['not_found_samples']
 
         for item in stock_data:
-            stats['processed'] += 1
             try:
                 # Varyantı bul — cache ile (0 sorgu)
                 product_id = self._find_product_id(item)
@@ -269,17 +341,10 @@ class StockProcessor(models.AbstractModel):
                 qty = float(raw_qty)
 
                 # Lokasyon bul
-                wh_code = (item.get('WarehouseCode') or '').strip()
-                location_id = _STOCK_CACHE['warehouse_map'].get(wh_code)
-                if not location_id:
-                    location_id = _STOCK_CACHE.get('default_location_id')
+                # (Hariç tutulan depolar, ör. X Depo raflanmış stok, yukarıda daha baştan ayıklandı.)
+                location_id = self._row_location_id(item)
                 if not location_id:
                     stats['failed'] += 1
-                    continue
-
-                # Hariç tutulan depoları atla (ör: X Depo - raflanmış stok)
-                if location_id in _STOCK_CACHE.get('skip_location_ids', set()):
-                    stats['skipped'] += 1
                     continue
 
                 # Quant kontrol
@@ -291,7 +356,7 @@ class StockProcessor(models.AbstractModel):
                     root_qty = root_cached[1] if root_cached else 0.0
                     total_qty = root_qty + sum(q[2] for q in shelf_quants)
                     if abs(total_qty - qty) <= 0.001:
-                        stats['skipped'] += 1
+                        stats['skipped_same'] += 1
                         continue
                     if len(shelf_quants) > 1:
                         # DIKKAT: farkı hangi rafa yazacağımız belirsiz; rafları ezmemek için yazma.
@@ -300,7 +365,7 @@ class StockProcessor(models.AbstractModel):
                             "depo toplamı=%s; yazma yapılmadı",
                             product_id, len(shelf_quants), qty, total_qty,
                         )
-                        stats['skipped'] += 1
+                        stats['skipped_same'] += 1
                         continue
                     child_qid, _child_loc, child_qty = shelf_quants[0]
                     # Fark tek rafa yazılır; kök quant'a dokunulmaz (kök 0 ise hedef = Nebim miktarı)
@@ -310,7 +375,7 @@ class StockProcessor(models.AbstractModel):
                             "Stok: ürün %d için raf miktarı negatif olurdu (Nebim=%s, kök=%s, raf=%s); "
                             "yazma yapılmadı", product_id, qty, root_qty, child_qty,
                         )
-                        stats['skipped'] += 1
+                        stats['skipped_same'] += 1
                         continue
                     batch_updates.append((child_qid, new_child_qty))
                     stats['updated'] += 1
@@ -326,13 +391,13 @@ class StockProcessor(models.AbstractModel):
                         batch_updates.append((qid, qty))
                         stats['updated'] += 1
                     else:
-                        stats['skipped'] += 1
+                        stats['skipped_same'] += 1
                 else:
                     if abs(qty) > 0.001:
                         batch_creates.append((product_id, location_id, qty))
                         stats['updated'] += 1
                     else:
-                        stats['skipped'] += 1
+                        stats['skipped_same'] += 1
 
             except Exception as e:
                 stats['failed'] += 1
@@ -350,6 +415,7 @@ class StockProcessor(models.AbstractModel):
                         quant = StockQuant.browse(qid)
                         quant.write({'quantity': qty})
                     except Exception as e:
+                        write_errors += 1
                         _logger.warning("Quant güncelleme hatası id=%d: %s", qid, str(e))
                 # BİLİNÇLİ TERCİH: Büyük stok batch'lerinde (10K+ satır) bellek taşmasını
                 # engellemek için chunk sonrası commit yapılır. Partial update riski kabul edilir.
@@ -367,6 +433,7 @@ class StockProcessor(models.AbstractModel):
                             'quantity': qty,
                         })
                     except Exception as e:
+                        write_errors += 1
                         _logger.warning("Quant oluşturma hatası prod=%d loc=%d: %s", prod_id, loc_id, str(e))
                 # BİLİNÇLİ TERCİH: Bkz. yukarıdaki açıklama.
                 self.env.cr.commit()
@@ -377,15 +444,11 @@ class StockProcessor(models.AbstractModel):
                 stats['not_found'], ', '.join(not_found_samples)
             )
 
-        stats['not_found_samples'] = not_found_samples
-
-        _logger.info(
-            "Stok güncelleme tamamlandı: %d işlendi, %d güncellendi, "
-            "%d atlandı, %d bulunamadı, %d hata",
-            stats['processed'], stats['updated'], stats['skipped'],
-            stats['not_found'], stats['failed']
-        )
-        return stats
+        # Hatasız tamamlanan çalışmanın parmak izi kaydedilir; hatalıysa bir sonraki dakika yeniden denenir.
+        # (not_found hata sayılmaz: Odoo'da olmayan ürünler kalıcı olabilir; yeni ürün süre sınırıyla yakalanır.)
+        if digest and not stats['failed'] and not write_errors:
+            _FINGERPRINTS[(self.env.cr.dbname, fingerprint_key)] = (digest, time.time())
+        return self._finalize_stats(stats)
 
     @api.private
     def _find_product_id(self, item):

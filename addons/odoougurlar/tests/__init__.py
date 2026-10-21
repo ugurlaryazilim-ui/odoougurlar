@@ -7,3 +7,4 @@ from . import test_invoice_datetime
 from . import test_sale_line_barcode
 from . import test_savepoint_swallow
 from . import test_stock_processor
+from . import test_nebim_barcode_index
