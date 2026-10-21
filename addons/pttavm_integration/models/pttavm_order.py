@@ -121,7 +121,7 @@ class PttavmOrderLine(models.Model):
     _name = 'pttavm.order.line'
     _description = 'Pttavm Sipariş Satırı'
 
-    order_id = fields.Many2one('pttavm.order', string='Pttavm Siparişi', ondelete='cascade')
+    order_id = fields.Many2one('pttavm.order', string='Pttavm Siparişi', ondelete='cascade', index=True)
     item_id = fields.Char(string='Item ID', index=True)
 
     product_id = fields.Char(string='Pttavm Product ID')

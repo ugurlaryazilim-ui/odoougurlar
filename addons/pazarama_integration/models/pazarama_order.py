@@ -110,7 +110,7 @@ class PazaramaOrderLine(models.Model):
     _name = 'pazarama.order.line'
     _description = 'Pazarama Sipariş Satırı'
 
-    order_id = fields.Many2one('pazarama.order', string='Pazarama Siparişi', ondelete='cascade')
+    order_id = fields.Many2one('pazarama.order', string='Pazarama Siparişi', ondelete='cascade', index=True)
     item_id = fields.Char(string='Item ID', index=True)
 
     product_id = fields.Char(string='Pazarama Product ID')

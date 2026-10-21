@@ -169,7 +169,7 @@ class SmsSystemMessage(models.Model):
     error = fields.Text(string='Hata')
     retry_count = fields.Integer(string='Deneme', default=0)
     delivery_report = fields.Text(string='İletim Raporu')
-    sent_at = fields.Datetime(string='Gönderim Zamanı')
+    sent_at = fields.Datetime(string='Gönderim Zamanı', index=True)
     res_model = fields.Char(string='Kaynak Model', index=True)
     res_id = fields.Integer(string='Kaynak Kayıt', index=True)
     template_id = fields.Many2one('sms.system.template', string='Şablon', ondelete='set null')

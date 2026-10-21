@@ -91,7 +91,7 @@ class TrendyolSettlement(models.Model):
     # ─── Temel ───────────────────────────────────────────
     trendyol_id = fields.Char(string='Trendyol ID', index=True, readonly=True)
     store_id = fields.Many2one('trendyol.store', string='Mağaza', index=True, readonly=True)
-    order_id = fields.Many2one('trendyol.order', string='Trendyol Sipariş', readonly=True)
+    order_id = fields.Many2one('trendyol.order', string='Trendyol Sipariş', readonly=True, index=True)
     # NEDEN: relink / kargo faturası / İşlem Kontrol görünümü yaş penceresiyle bu alana göre süzer
     transaction_date = fields.Datetime(string='İşlem Tarihi', readonly=True, index=True)
     transaction_type = fields.Selection(SETTLEMENT_TYPES, string='İşlem Türü', readonly=True)
@@ -144,7 +144,7 @@ class TrendyolSettlement(models.Model):
         string='Komisyon Fatura No', readonly=True, index='btree_not_null',
         help="Satışın komisyonunun kesildiği Trendyol komisyon faturası (DCF...). Fatura dönem sonunda "
              "kesildiği için satıştan sonra dolar; senkron ve gece taraması günceller.")
-    payment_order_id = fields.Char(string='Ödeme No', readonly=True)
+    payment_order_id = fields.Char(string='Ödeme No', readonly=True, index='btree_not_null')
     payment_date = fields.Datetime(string='Ödeme Tarihi', readonly=True)
     payment_period = fields.Integer(string='Vade (Gün)', readonly=True)
 

@@ -940,7 +940,7 @@ class TrendyolOrderLine(models.Model):
     _name = 'trendyol.order.line'
     _description = 'Trendyol Sipariş Kalemi'
 
-    order_id = fields.Many2one('trendyol.order', string='Sipariş', ondelete='cascade')
+    order_id = fields.Many2one('trendyol.order', string='Sipariş', ondelete='cascade', index=True)
     trendyol_line_id = fields.Char(string='Line ID')
     barcode = fields.Char(string='Barkod')
     merchant_sku = fields.Char(string='Merchant SKU')

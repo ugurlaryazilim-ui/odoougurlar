@@ -46,6 +46,13 @@ class AccountMove(models.Model):
         help='Nebim tarafında oluşan fatura numarası (UGE/UGI serisi)',
     )
 
+    # NEDEN: fatura cron'u/dashboard sayacı yalnız "gönderilmemiş, onaylı satış faturası" kümesini okur;
+    # bu küme küçük, tablo büyük. Kısmi indeks yalnız bekleyenleri tutar (gönderildikçe küçülür).
+    # DIKKAT: Odoo 19 ('nebim_sent','=',False) alanını "nebim_sent IS NOT TRUE" diye üretir; koşul
+    # birebir aynı yazılmalı, yoksa planlayıcı kısmi indeksi kullanamaz.
+    _nebim_pending_idx = models.Index(
+        "(id) WHERE nebim_sent IS NOT TRUE AND move_type = 'out_invoice' AND state = 'posted'")
+
     def _nebim_try_lock(self):
         """Faturayı Nebim gönderimi için kilitler; başka işlem gönderiyorsa veya gönderilmişse False.
 

@@ -47,7 +47,7 @@ class FloOrderLine(models.Model):
     _name = 'flo.order.line'
     _description = 'Flo Sipariş Satırı'
 
-    order_id = fields.Many2one('flo.order', string='Flo Siparişi', ondelete='cascade')
+    order_id = fields.Many2one('flo.order', string='Flo Siparişi', ondelete='cascade', index=True)
     item_id = fields.Char(string='Item ID', index=True)
     
     product_id = fields.Char(string='Flo Product ID')

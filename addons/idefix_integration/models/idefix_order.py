@@ -128,7 +128,7 @@ class IdefixOrderLine(models.Model):
     _description = 'Idefix Sipariş Satırı'
     _rec_name = 'product_name'
 
-    order_id = fields.Many2one('idefix.order', string='Idefix Siparişi', ondelete='cascade')
+    order_id = fields.Many2one('idefix.order', string='Idefix Siparişi', ondelete='cascade', index=True)
     item_id = fields.Char(string='Item ID', index=True)
 
     product_id = fields.Char(string='Idefix Product ID')

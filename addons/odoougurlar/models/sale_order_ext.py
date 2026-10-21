@@ -8,6 +8,10 @@ _logger = logging.getLogger(__name__)
 class SaleOrder(models.Model):
     _inherit = 'sale.order'
 
+    # NEDEN: pazaryeri siparişlerinin mükerrer kontrolü client_order_ref ile aranır (amazon/hepsiburada
+    # sync, Nebim belge no); çekirdek alan indekssiz. Sadece indeks özniteliği eklenir, diğerleri korunur.
+    client_order_ref = fields.Char(index='btree_not_null')
+
     # copy=False: kopyalanan sipariş "gönderildi" sayılıp hiç gönderilmiyor, kopyası iptal edilince
     # aynı referansla ORİJİNAL Nebim siparişi siliniyordu
     nebim_customer_sent = fields.Boolean(string='Nebim Cari Açıldı', default=False, readonly=True, copy=False)

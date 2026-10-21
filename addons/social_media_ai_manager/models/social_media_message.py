@@ -8,7 +8,7 @@ class SocialMediaMessage(models.Model):
     _description = 'Social Media Message / Comment'
     _order = 'date asc'
 
-    conversation_id = fields.Many2one('social.media.conversation', string="Conversation", required=True, ondelete='cascade')
+    conversation_id = fields.Many2one('social.media.conversation', string="Conversation", required=True, ondelete='cascade', index=True)
     platform_message_id = fields.Char(string="Platform Message ID", help="Unique ID from WhatsApp/Meta")
     post_link = fields.Char(string="Post URL", help="Direct link to the post if this is a comment")
     post_id = fields.Many2one('social.media.post', string="Linked Post", help="The social media post this message belongs to")
