@@ -29,6 +29,10 @@
                             class="btn btn-sm btn-light" groups="sales_team.group_sale_salesman"/>
                 </div>
             </xpath>
+            <!-- Sipariş satırlarında barkod sütunu, ürünün sağında -->
+            <xpath expr="//field[@name='order_line']/list/field[@name='product_template_id']" position="after">
+                <field name="product_barcode" optional="show" widget="CopyClipboardChar"/>
+            </xpath>
             <xpath expr="//notebook" position="inside">
                 <page string="Nebim Entegrasyonu" name="nebim_integration">
                     <group>

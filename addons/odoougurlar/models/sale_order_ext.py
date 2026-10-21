@@ -1072,5 +1072,7 @@ class SaleOrderLine(models.Model):
     _inherit = 'sale.order.line'
 
     nebim_order_line_id = fields.Char(string='Nebim OrderLineID', readonly=True, copy=False)
+    # Sipariş satırlarındaki barkod sütunu (saklanmaz; ürün barkodu değişince anında güncel)
+    product_barcode = fields.Char(related='product_id.barcode', string='Barkod')
 
 
