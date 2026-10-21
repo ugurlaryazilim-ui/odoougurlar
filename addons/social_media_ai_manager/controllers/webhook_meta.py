@@ -1,11 +1,14 @@
 # -*- coding: utf-8 -*-
 from odoo import http
 from odoo.http import request
+import hashlib
+import hmac
 import json
 import logging
 import requests
 
 _logger = logging.getLogger(__name__)
+_warned_no_app_secret = False
 
 class WebhookMeta(http.Controller):
 
@@ -36,9 +39,24 @@ class WebhookMeta(http.Controller):
 
         # 2. Event Payload (POST)
         if request.httprequest.method == 'POST':
+            raw_body = request.httprequest.get_data()
+            # DIKKAT: İmza, ham gövde üzerinden doğrulanmalı (JSON parse/yeniden serileştirme baytları değiştirir).
+            app_secret = request.env['ir.config_parameter'].sudo().get_param('social_media_ai.meta_app_secret')
+            if app_secret:
+                expected = 'sha256=' + hmac.new(app_secret.encode('utf-8'), raw_body, hashlib.sha256).hexdigest()
+                given = request.httprequest.headers.get('X-Hub-Signature-256', '')
+                if not hmac.compare_digest(given.encode('utf-8'), expected.encode('utf-8')):
+                    _logger.warning("Meta webhook rejected: invalid X-Hub-Signature-256")
+                    return http.Response("Invalid signature", status=403)
+            else:
+                # NEDEN: App Secret henüz tanımlı olmayan kurulumlar kırılmasın; ama uyarı bir kez loglanır.
+                global _warned_no_app_secret
+                if not _warned_no_app_secret:
+                    _warned_no_app_secret = True
+                    _logger.warning("Meta webhook signature NOT verified: 'social_media_ai.meta_app_secret' is not set")
             try:
-                data = json.loads(request.httprequest.data.decode('utf-8'))
-                _logger.info(f"Incoming Meta Webhook: {json.dumps(data, indent=2)}")
+                data = json.loads(raw_body.decode('utf-8'))
+                _logger.debug("Incoming Meta Webhook: %s", data)
                 
                 # Check if it's an Instagram or Facebook page event
                 if data.get('object') in ['instagram', 'page']:

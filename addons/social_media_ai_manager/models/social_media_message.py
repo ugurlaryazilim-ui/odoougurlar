@@ -132,7 +132,9 @@ class SocialMediaMessage(models.Model):
                 'qty_available': stock,
                 'chat_text': chat_text
             })
-            
+
+        return results
+
     @api.model
     def _cron_process_ai_queue(self, limit=50):
         import logging
