@@ -188,6 +188,9 @@ def _start_usage_recording(env, session, generation=None):
 # üretim için ÖNCEKİ isteğin sonucunu "kurtarır".
 CLEAR_FAL_REQUEST = {'fal_request_id': False, 'fal_app': False, 'submitted_at': False}
 
+# Kuyruğun hangi ürün(ler)e yazacağını belirler; yetkisiz değişim onayları düşürür (J10 KK2).
+APPROVAL_TARGET_FIELDS = frozenset({'product_id', 'apply_to_siblings', 'session_type'})
+
 
 def _is_client_timeout(exc):
     """fal SDK istemci zaman aşımı mı? (iş fal tarafında sürmeye ve ücretlenmeye devam eder)"""
@@ -2411,8 +2414,14 @@ class AiStudioSession(models.Model):
                 self._run_save_job(res_id)
                 # NEDEN: commit burada (testte cr.commit yasak olduğundan _run_save_job içinde değil)
                 self.env.cr.commit()
-            except Exception:
-                _logger.exception('AI kuyruğu: ürüne kaydetme beklenmeyen hata (session=%s)', res_id)
+            except Exception as err:
+                # DIKKAT: geri alınmazsa yarım yazım (ve bozulmuş transaction) cron cursor'ında kalır
+                self.env.cr.rollback()
+                if _is_db_conflict(err):
+                    _logger.info('AI kuyruğu: ürüne kaydetme DB çakışması, yeniden denenecek (session=%s)', res_id)
+                    self._trigger_ai_queue()
+                else:
+                    _logger.exception('AI kuyruğu: ürüne kaydetme beklenmeyen hata (session=%s)', res_id)
             finally:
                 _release_session_lease(self.pool, res_id, owner)
             return
@@ -2476,6 +2485,11 @@ class AiStudioSession(models.Model):
                 session.message_post(body=_('%d onaylı görsel ürüne başarıyla kaydedildi.') % len(approved))
             _logger.info('Ürüne kaydetme: %s (%s) tamamlandı, %d görsel.', session.name, session.id, len(approved))
         except Exception as err:
+            if _is_db_conflict(err):
+                # NEDEN (D2): eşzamanlı yazım (ör. inceleme kilidi bırakma) oturum satırıyla çakıştı; aynı
+                # snapshot'ta 'review' yazmak da çakışır. Oturum 'saving'de kalır, _queue_run_job geri alıp
+                # kuyruğu yeniden tetikler (kaydetme idempotent).
+                raise
             _logger.exception('Ürüne kaydetme hatası (session=%s)', session_id)
             session.write({'state': 'review'})
             # NEDEN (D1): beklenmeyen hatanın ham metni (SQL, dosya yolu) chatter'a yazılmaz; ayrıntı log'da.
@@ -2491,12 +2505,14 @@ class AiStudioSession(models.Model):
         """
         self.ensure_one()
         partner = self.reviewer_id.sudo().partner_id
-        try:
-            with self.env.cr.savepoint():
-                self.message_post(body=text, partner_ids=partner.ids, subtype_xmlid='mail.mt_comment')
-        except Exception:
-            _logger.warning('Kaydetme bildirimi gönderilemedi (session=%s)', self.id, exc_info=True)
-            self.message_post(body=text)
+        # NEDEN (D2): yedek not da savepoint içinde; ilk deneme transaction'ı bozduysa ikinci hata akışı kırmaz.
+        for kwargs in ({'partner_ids': partner.ids, 'subtype_xmlid': 'mail.mt_comment'}, {}):
+            try:
+                with self.env.cr.savepoint():
+                    self.message_post(body=text, **kwargs)
+                return
+            except Exception:
+                _logger.warning('Kaydetme bildirimi gönderilemedi (session=%s)', self.id, exc_info=True)
 
     @api.model
     def _queue_mark_job_failed(self, kind, session_id, gen_id, err, uid):
@@ -4084,6 +4100,37 @@ class AiStudioSession(models.Model):
             raise AccessError(_('Oturumu ürüne kaydetmeye yalnız onaycı veya yönetici alabilir.'))
         if 'reviewer_id' in vals:
             raise AccessError(_('Onayıcı alanını yalnız onaycı veya yönetici değiştirebilir.'))
+        # NEDEN (J10 KK4): 'done' onaycının kararıdır (D1-kalan: operatör review→done yazabiliyordu).
+        # 'review'dan çıkış da kapalı: review→draft→içerik değiştir→review döngüsü onayı atlatırdı.
+        if 'state' in vals and (vals['state'] == 'done'
+                                or self.filtered(lambda s: s.state == 'review' and s.state != vals['state'])):
+            raise AccessError(_('İncelemedeki oturumun durumunu yalnız onaycı veya yönetici değiştirebilir.'))
+
+    def _drop_approvals_on_change(self, vals):
+        """Yetkisiz kullanıcı ürüne yazılacak hedefi değiştirince oturumun onaylarını düşür (J10 KK2).
+
+        Döndürür: onayı düşürülecek oturumlar (super().write SONRASI _drop_approvals ile).
+        NEDEN: product_id / apply_to_siblings / session_type kuyruğun HANGİ ürünlere yazacağını belirler;
+        onaycı başka bir hedefi onaylamıştı.
+        """
+        if self._is_approval_authority():
+            return self.browse()
+        changed = self.browse()
+        for field_name in APPROVAL_TARGET_FIELDS & set(vals):
+            field = self._fields[field_name]
+            changed |= self.filtered(
+                lambda s: field.convert_to_write(s[field_name], s) != (vals[field_name] or False))
+        return changed
+
+    def _drop_approvals(self, reason):
+        gens = self.sudo().generation_ids
+        approved = gens.filtered('is_approved')
+        if not approved:
+            return
+        gens.filtered(lambda g: g.is_approved or g.is_primary).write({'is_approved': False, 'is_primary': False})
+        for session in approved.session_id:
+            session.message_post(body=_('Onaydan sonra %s değişti; onaylar kaldırıldı, yeniden inceleme gerekir.')
+                                 % reason)
 
     def _check_approval_gate_created(self):
         """create sonrası denetim: default_* bağlamıyla gelen 'saving' / reviewer_id da yakalanır."""
@@ -4107,7 +4154,10 @@ class AiStudioSession(models.Model):
 
     def write(self, vals):
         self._check_saving_transition(vals)
+        drop = self._drop_approvals_on_change(vals)
         res = super(AiStudioSession, self).write(vals)
+        if drop:
+            drop._drop_approvals(_('ürün / kardeş / oturum türü'))
         if 'state' in vals:
             for record in self:
                 if record.state in ('review', 'failed'):

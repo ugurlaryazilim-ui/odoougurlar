@@ -2,12 +2,19 @@
 kaydetme sorunlarında onaycıya bildirim (Ö-2) ve ham hata metni yok (D1)."""
 import base64
 import io
+from types import SimpleNamespace
 from unittest.mock import patch
 
 from PIL import Image
+from psycopg2 import errors as pg_errors
 
 from odoo.exceptions import AccessError, UserError
 from odoo.tests import TransactionCase, new_test_user, tagged
+
+from ..controllers.ai_studio_controller import AiStudioController
+
+CTRL = 'odoo.addons.ugurlar_ai_studio.controllers.ai_studio_controller'
+SESSION_MOD = 'odoo.addons.ugurlar_ai_studio.models.ai_studio_session'
 
 
 @tagged('post_install', '-at_install', 'ugurlar_ai_studio')
@@ -140,10 +147,15 @@ class TestApprovalGate(TransactionCase):
         self.assertEqual(open_line.session_id, locked)
 
     def test_operator_can_still_edit_in_review(self):
+        # J10: review'da oturum alanları serbest, ama hedef değişimi onayı düşürür; onay alanları kapalı
         session = self._session()
+        session.with_user(self.operator).write({'extra_prompt': 'kolu düzelt'})
+        self.assertTrue(session.generation_ids.is_approved)
         session.with_user(self.operator).write({'product_id': self.other_product.id})
-        session.generation_ids.with_user(self.operator).write({'is_excluded': True})
         self.assertEqual(session.product_id, self.other_product)
+        self.assertFalse(session.generation_ids.is_approved)
+        with self.assertRaises(AccessError):
+            session.generation_ids.with_user(self.operator).write({'is_excluded': True})
 
     # --- Y2 / O2 / ek yolu / unlink / aday (kayıt kuralı kilidi) ---
     def _image(self, rgb):
@@ -202,6 +214,7 @@ class TestApprovalGate(TransactionCase):
         # ir.attachment model write override'ını çağırmaz; erişimi res_model/res_id kaydının write kuralı belirler
         locked = self._session(state='saving', reviewer_id=self.reviewer.id)
         open_session = self._session()
+        open_session.generation_ids.write({'is_approved': False})   # J10: onaylı üretim review'da da kilitli
         for session in (locked, open_session):
             session.generation_ids.write({'generated_image': self._image((10, 200, 10))})
         Att = self.env['ir.attachment']
@@ -285,3 +298,218 @@ class TestApprovalGate(TransactionCase):
         with patch.object(type(self.Session), '_save_to_product', side_effect=UserError('Ürün arşivli')):
             self.Session._run_save_job(session.id)
         self.assertIn('Ürün arşivli', session.message_ids[0].body)
+
+    # --- J10 / Y3: 'review' durumunda onay bütünlüğü ---
+    def _review_pair(self):
+        """review oturumu: onaycının onayladığı ön (YEŞİL, ana) + onaysız arka (KIRMIZI)."""
+        session = self._session()
+        approved = session.generation_ids
+        approved.write({'generated_image': self._image((10, 200, 10))})
+        pending = self.Gen.create({'session_id': session.id, 'photo_type': 'back', 'state': 'done',
+                                   'generated_image': self._image((200, 10, 10))})
+        return session, approved, pending
+
+    def test_operator_cannot_write_approval_fields(self):
+        session, approved, pending = self._review_pair()
+        op_pending = pending.with_user(self.operator)
+        for vals in ({'is_approved': True}, {'is_excluded': True}, {'is_primary': True}):
+            with self.subTest(vals=vals), self.assertRaises(AccessError):
+                op_pending.write(vals)
+        # onaylı üretimin hiçbir alanı yazılamaz, silinemez
+        op_approved = approved.with_user(self.operator)
+        for vals in ({'generated_image': self._image((200, 10, 10))}, {'photo_type': 'back'},
+                     {'generation_mode': 'set_combo'}, {'is_approved': False}):
+            with self.subTest(vals=vals), self.assertRaises(AccessError):
+                op_approved.write(vals)
+        with self.assertRaises(AccessError):
+            op_approved.unlink()
+        # kontrol: onaysız üretimin diğer alanları operatöre açık
+        op_pending.write({'error_message': 'not'})
+        self.assertFalse(pending.is_approved or pending.is_excluded)
+        self.assertTrue(approved.is_approved and approved.is_primary)
+        # onaycı serbest
+        pending.with_user(self.reviewer).write({'is_approved': True})
+        self.assertTrue(pending.is_approved)
+
+    def test_operator_cannot_create_approved_generation(self):
+        session = self._session()
+        OpGen = self.Gen.with_user(self.operator)
+        attacks = {
+            'vals': lambda: OpGen.create({'session_id': session.id, 'photo_type': 'back', 'is_approved': True}),
+            'default_is_approved': lambda: OpGen.with_context(default_is_approved=True).create(
+                {'session_id': session.id, 'photo_type': 'back'}),
+            'default_is_excluded': lambda: OpGen.with_context(default_is_excluded=True).create(
+                {'session_id': session.id, 'photo_type': 'back'}),
+            'copy approved': lambda: session.generation_ids.with_user(self.operator).copy(),
+            'o2m (0,0)': lambda: session.with_user(self.operator).write(
+                {'generation_ids': [(0, 0, {'photo_type': 'back', 'state': 'done', 'is_approved': True})]}),
+        }
+        for label, attack in attacks.items():
+            with self.subTest(label), self.assertRaises(AccessError):
+                attack()
+        res = OpGen.load(['session_id/.id', 'photo_type', 'is_approved'], [[str(session.id), 'back', '1']])
+        self.assertFalse(res['ids'])
+        self.assertEqual(len(session.generation_ids), 1)
+        # kontrol: onaysız üretimi (varsayılan ana görsel dahil) operatör oluşturur (action_start_processing)
+        OpGen.create({'session_id': session.id, 'photo_type': 'side', 'is_primary': True})
+
+    def test_operator_attachment_swap_in_review_blocked(self):
+        _session, approved, _pending = self._review_pair()
+        att = self.env['ir.attachment'].search([('res_model', '=', approved._name), ('res_id', '=', approved.id),
+                                                ('res_field', '=', 'generated_image')])
+        self.assertTrue(att)
+        with self.assertRaises(AccessError):
+            att.with_user(self.operator).write({'datas': self._image((200, 10, 10))})
+        with self.assertRaises(AccessError):
+            att.with_user(self.operator).unlink()
+
+    def test_operator_session_change_drops_approval(self):
+        session, approved, _pending = self._review_pair()
+        op = session.with_user(self.operator)
+        # aynı değer / ilgisiz alan: düşmez (apply_to_siblings varsayılanı True)
+        op.write({'product_id': self.product.id, 'apply_to_siblings': True, 'extra_prompt': 'x'})
+        self.assertTrue(approved.is_approved)
+        for vals in ({'apply_to_siblings': False}, {'session_type': 'set'}, {'product_id': self.other_product.id}):
+            approved.write({'is_approved': True, 'is_primary': True})
+            with self.subTest(vals=vals):
+                op.write(vals)
+                self.assertFalse(approved.is_approved or approved.is_primary)
+        self.assertIn('onaylar kaldırıldı', session.message_ids[0].body)
+        # onaycının değişikliği onayı korur
+        approved.write({'is_approved': True})
+        session.with_user(self.reviewer).write({'product_id': self.product.id})
+        self.assertTrue(approved.is_approved)
+
+    def test_operator_set_line_change_drops_approval(self):
+        SetLine = self.env['ai.studio.set.line']
+        for action in ('create', 'write'):
+            session, approved, _pending = self._review_pair()
+            line = SetLine.create({'session_id': session.id, 'product_id': self.product.id})
+            line.with_user(self.operator).write({'sequence': 5})   # ürüne yazımı etkilemez
+            self.assertTrue(approved.is_approved)
+            with self.subTest(action):
+                if action == 'create':
+                    SetLine.with_user(self.operator).create(
+                        {'session_id': session.id, 'product_id': self.other_product.id})
+                else:
+                    line.with_user(self.operator).write({'product_id': self.other_product.id})
+                self.assertFalse(approved.is_approved)
+
+    def test_operator_cannot_mark_review_done_or_leave_review(self):
+        for vals in ({'state': 'done'}, {'state': 'draft'}, {'state': 'cancelled'},
+                     {'state': 'photos_ready'}, {'state': 'preprocessing'}):
+            session = self._session()
+            with self.subTest(vals=vals), self.assertRaises(AccessError):
+                session.with_user(self.operator).write(vals)
+            self.assertEqual(session.state, 'review')
+        session = self._session(state='photos_ready')
+        with self.assertRaises(AccessError):
+            session.with_user(self.operator).write({'state': 'done'})
+        # kontrol: operatörün olağan geçişi açık
+        session.with_user(self.operator).write({'state': 'processing'})
+        self.assertEqual(session.state, 'processing')
+
+    def test_reviewer_reject_and_cancel_paths_still_work(self):
+        # KK4 yalnız yetkisizi kapatır: onaycının ret (yeni sürüm) ve iptal yolları açık
+        session, approved, _pending = self._review_pair()
+        reason = self.env['ai.studio.reject.reason'].create({'name': 'J10 red'})
+        rev_gen = approved.with_user(self.reviewer)
+        rev_gen.write({'reject_reason_id': reason.id})
+        with patch.object(type(self.Session), '_process_single_generation') as proc:
+            rev_gen.action_confirm_reject()
+        proc.assert_called_once()
+        self.assertFalse(approved.is_approved)
+        new_gen = session.generation_ids.filtered(lambda g: g.parent_generation_id == approved)
+        self.assertEqual((new_gen.state, new_gen.is_approved), ('pending', False))
+        self.assertEqual(session.state, 'review')
+        session.with_user(self.reviewer).action_cancel()
+        self.assertEqual(session.state, 'cancelled')
+
+    def test_complete_session_refuses_changed_approvals(self):
+        session, approved, _pending = self._review_pair()
+        seen = [{'id': approved.id, 'is_primary': True}]   # onaycının ekranındaki onaylı küme
+        session.with_user(self.operator).write({'product_id': self.other_product.id})   # onay düştü
+        env = self.env(user=self.reviewer)
+        with patch(CTRL + '.request', SimpleNamespace(env=env)):
+            res = AiStudioController().complete_session(session.id, approved_items=seen)
+        self.assertFalse(res['success'])
+        self.assertIn('değişti', res['error'])
+        self.assertEqual(session.state, 'review')
+        approved.with_user(self.reviewer).action_approve()
+        with patch(CTRL + '.request', SimpleNamespace(env=env)):
+            res = AiStudioController().complete_session(session.id, approved_items=seen)
+        self.assertTrue(res['success'])
+        self.assertEqual(session.state, 'saving')
+
+    def test_review_data_operator_does_not_write_primary(self):
+        session = self._session()
+        session.generation_ids.write({'is_primary': False, 'is_approved': False})
+        env = self.env(user=self.operator)
+        with patch(CTRL + '.request', SimpleNamespace(env=env)):
+            res = AiStudioController().get_review_data(session.id)
+        self.assertNotIn('error', res)
+        self.assertFalse(session.generation_ids.is_primary)
+
+    def test_y3_poc_flow_product_gets_reviewer_image(self):
+        # A4 Y3 PoC: onaydan sonra operatör görseli değiştiremez, arkayı onaylayamaz; ürün onaylananı alır
+        session, approved, pending = self._review_pair()
+        with self.assertRaises(AccessError):
+            approved.with_user(self.operator).write({'generated_image': self._image((200, 10, 10))})
+        with self.assertRaises(AccessError):
+            pending.with_user(self.operator).write({'is_approved': True})
+        session.with_user(self.reviewer).write({'reviewer_id': self.reviewer.id, 'state': 'saving'})
+        self.Session._run_save_job(session.id)
+        self.assertEqual(session.state, 'done')
+        pixel = Image.open(io.BytesIO(base64.b64decode(self.product.image_1920))).convert('RGB').getpixel((2, 2))
+        self.assertGreater(pixel[1], 150)   # yeşil (onaylanan)
+        self.assertFalse(self.env['product.image'].search([('product_variant_id', '=', self.product.id)]))
+
+    # --- J10 / D2: kaydetme işinde DB çakışması ---
+    def test_save_job_serialization_failure_keeps_saving(self):
+        session = self._session(state='saving', reviewer_id=self.reviewer.id)
+        conflict = pg_errors.SerializationFailure('could not serialize access due to concurrent update')
+        with patch.object(type(self.Session), '_save_to_product', side_effect=conflict), \
+                self.assertRaises(pg_errors.SerializationFailure):
+            self.Session._run_save_job(session.id)
+        self.assertEqual(session.state, 'saving')
+        # kuyruk: geri alır, yeniden tetikler, kirayı bırakır; oturum 'saving'de kalır
+        with patch.object(type(self.Session), '_run_save_job', side_effect=conflict), \
+                patch.object(self.env.cr, 'rollback') as rollback, \
+                patch.object(type(self.Session), '_trigger_ai_queue') as trigger, \
+                patch(SESSION_MOD + '._release_session_lease') as release:
+            self.Session._queue_run_job(('save', session.id, False), 'owner-j10')
+        rollback.assert_called_once()
+        trigger.assert_called_once()
+        release.assert_called_once()
+        self.assertEqual(session.state, 'saving')
+
+    def test_notify_save_problem_never_raises(self):
+        session = self._session(reviewer_id=self.reviewer.id)
+        with patch.object(type(self.Session), 'message_post', side_effect=RuntimeError('aborted')) as post:
+            session._notify_save_problem('x')
+        self.assertEqual(post.call_count, 2)
+
+    # --- J10 / G1: fotoğraf kilidi ---
+    def test_photo_locked_for_operator(self):
+        Photo = self.env['ai.studio.photo']
+        img = self._image((1, 2, 3))
+        for state in ('saving', 'done'):
+            locked = self._session(state=state, reviewer_id=self.reviewer.id)
+            photo = Photo.create({'session_id': locked.id, 'photo_type': 'front', 'image_original': img})
+            op_photo = photo.with_user(self.operator)
+            self.assertTrue(op_photo.read(['photo_type']))
+            attacks = {
+                'write': lambda: op_photo.write({'image_original': self._image((9, 9, 9))}),
+                'create': lambda: Photo.with_user(self.operator).create(
+                    {'session_id': locked.id, 'photo_type': 'back', 'image_original': img}),
+            }
+            for label, attack in attacks.items():
+                with self.subTest(state=state, attack=label), self.assertRaises(AccessError):
+                    attack()
+        open_session = self._session(state='draft')
+        open_photo = Photo.with_user(self.operator).create(
+            {'session_id': open_session.id, 'photo_type': 'front', 'image_original': img})
+        with self.assertRaises(AccessError):   # açık oturumdan kilitli oturuma taşıma
+            open_photo.write({'session_id': locked.id})
+        open_photo.write({'photo_type': 'back'})   # kontrol: açık oturumda serbest
+        photo.with_user(self.reviewer).write({'photo_type': 'side'})   # onaycı kilide takılmaz

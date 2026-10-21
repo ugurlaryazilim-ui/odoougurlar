@@ -691,6 +691,19 @@ class AiStudioController(http.Controller):
             if session.generation_ids.filtered(lambda g: g.state in ('pending', 'processing')):
                 return {'success': False, 'error': 'İşlenmekte olan üretimler var; tamamlanmalarını bekleyin.'}
 
+            # NEDEN (J10 KK3): onaycının ekranda onayladığı küme sunucudakiyle aynı olmalı. Operatörün
+            # onaydan sonraki hedef değişikliği onayları düşürür (KK2); ekran bayatsa kaydetme yapılmaz.
+            # EKIP-BORC: içerik damgası (onay anında ek checksum'ı saklayan stored alan) bilinçli eklenmedi
+            # (yeni kolon deploy riski); bütünlük kural+onay düşürmeye dayanır. Yükseltme: generation'a
+            # approval_checksum, complete_session/_run_save_job yeniden hesaplayıp karşılaştırır.
+            if approved_items is not None:
+                client_ids = {int(item.get('id') or 0) for item in approved_items}
+                server_ids = set(session.generation_ids.filtered(
+                    lambda g: g.is_approved and g.state == 'done' and not g.is_excluded).ids)
+                if client_ids != server_ids:
+                    return {'success': False, 'error': 'Onaylar siz incelerken değişti; ekranı yenileyip '
+                                                       'görselleri yeniden kontrol edin.'}
+
             # 1. is_primary değerlerini güncelle
             if approved_items:
                 primary_ids = []
@@ -910,7 +923,9 @@ class AiStudioController(http.Controller):
             ))
 
             # Eğer hiçbir görsel ana görsel değilse varsayılan olarak ön görseli işaretle
-            if generations and not any(g.is_primary for g in generations):
+            # NEDEN (J10): is_primary yalnız onaycı yazar; operatörün açtığı görünümde varsayılan atanmaz
+            if generations and not any(g.is_primary for g in generations) \
+                    and session._is_approval_authority():
                 front_gen = generations.filtered(lambda g: g.photo_type == 'front')[:1] or generations[:1]
                 if front_gen:
                     front_gen.write({'is_primary': True})

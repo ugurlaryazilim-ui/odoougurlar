@@ -3,13 +3,16 @@ import time
 from collections import OrderedDict
 
 from odoo import models, fields, api, _
-from odoo.exceptions import UserError, ValidationError
+from odoo.exceptions import AccessError, UserError, ValidationError
 
 from ..services.garment_analyzer import report_gemini_usage
 
 _logger = logging.getLogger(__name__)
 
 # Aynı metin (red formunda yazılıp silinen, revizyonda tekrar çevrilen) ikinci kez API'ye gitmesin
+# Yalnız onaycı/yönetici/sunucu kodu yazar (J10): kuyruk bunlara göre ürüne yazar.
+APPROVAL_FIELDS = frozenset({'is_approved', 'is_excluded', 'is_primary'})
+
 _TRANSLATION_CACHE = OrderedDict()
 _TRANSLATION_CACHE_SIZE = 500
 _TRANSLATE_URL = "https://generativelanguage.googleapis.com/v1beta/models/gemini-2.5-flash:generateContent"
@@ -462,8 +465,24 @@ class AiStudioGeneration(models.Model):
             self.check_access('read')
             self.browse().check_access('write')
             return super(AiStudioGeneration, self.sudo()).write(vals)
-        self.env['ai.studio.session']._check_target_session_unlocked(vals, _('üretim'))
+        Session = self.env['ai.studio.session']
+        Session._check_target_session_unlocked(vals, _('üretim'))
+        # DIKKAT (J10/Y3): onay alanları kuyruğun ürüne ne yazacağını belirler (onaylı küme, ana görsel).
+        # Kural onaylı kaydı korur ama onaysızı onaylamayı göremez (yazım öncesi kaydı denetler).
+        if APPROVAL_FIELDS & set(vals) and not Session._is_approval_authority():
+            raise AccessError(_('Onay, hariç tutma ve ana görsel yalnız onaycı veya yönetici tarafından değiştirilebilir.'))
         return super().write(vals)
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        records = super().create(vals_list)
+        # NEDEN: create SONRASI denetim; default_is_excluded bağlamı, copy ve o2m da yakalanır.
+        # is_primary hariç: action_start_processing operatörle ön görseli varsayılan ana görsel yaratır;
+        # onaysız üretimde ana görsel ürüne yazılmaz (kuyruk yalnız onaylıları alır).
+        if records.filtered(lambda g: g.is_approved or g.is_excluded) \
+                and not self.env['ai.studio.session']._is_approval_authority():
+            raise AccessError(_('Onaylı veya hariç tutulmuş üretimi yalnız onaycı veya yönetici oluşturabilir.'))
+        return records
 
     def action_reject(self):
         """Red dialog'u aç — revize için."""

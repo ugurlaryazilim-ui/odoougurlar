@@ -64,12 +64,15 @@
             <field name="groups" eval="[(4, ref('group_ai_studio_reviewer'))]"/>
         </record>
 
-        <!-- Fotoğraf: oturum sahibi veya onayıcı -->
+        <!-- Fotoğraf: oturum sahibi veya onayıcı (yazma: aşağıdaki kilit kuralı) -->
         <record id="rule_photo_operator" model="ir.rule">
             <field name="name">AI Stüdyo Fotoğraf: Operatör</field>
             <field name="model_id" ref="model_ai_studio_photo"/>
             <field name="domain_force">[('session_id.user_id', '=', user.id)]</field>
             <field name="groups" eval="[(4, ref('group_ai_studio_operator'))]"/>
+            <field name="perm_write" eval="False"/>
+            <field name="perm_create" eval="False"/>
+            <field name="perm_unlink" eval="False"/>
         </record>
 
         <record id="rule_photo_reviewer" model="ir.rule">
@@ -130,8 +133,25 @@
     <record id="rule_generation_operator_edit" model="ir.rule">
         <field name="name">AI Stüdyo Üretim: Operatör açık oturumda düzenler</field>
         <field name="model_id" ref="model_ai_studio_generation"/>
+        <!-- NEDEN (J10/Y3): onaylı üretim 'review'da da operatöre kapalı; yoksa onaycı onayladıktan sonra
+             görsel (alan veya ek) değiştirilip "Tamamla" ile ürüne gider. Kural create SONRASI da denetler:
+             default_is_approved / copy / o2m ile onaylı üretim oluşturulamaz. Onaysızı onaylamak modelde. -->
+        <field name="domain_force">[('session_id.user_id', '=', user.id), ('session_id.state', 'not in', ('saving', 'done')), ('is_approved', '=', False)]</field>
+        <field name="groups" eval="[(4, ref('group_ai_studio_operator'))]"/>
+        <field name="perm_read" eval="False"/>
+    </record>
+    <record id="rule_photo_operator_edit" model="ir.rule">
+        <field name="name">AI Stüdyo Fotoğraf: Operatör açık oturumda düzenler</field>
+        <field name="model_id" ref="model_ai_studio_photo"/>
         <field name="domain_force">[('session_id.user_id', '=', user.id), ('session_id.state', 'not in', ('saving', 'done'))]</field>
         <field name="groups" eval="[(4, ref('group_ai_studio_operator'))]"/>
+        <field name="perm_read" eval="False"/>
+    </record>
+    <record id="rule_photo_admin_edit" model="ir.rule">
+        <field name="name">AI Stüdyo Fotoğraf: Erişim yöneticisi düzenler</field>
+        <field name="model_id" ref="model_ai_studio_photo"/>
+        <field name="domain_force">[(1, '=', 1)]</field>
+        <field name="groups" eval="[(4, ref('base.group_erp_manager'))]"/>
         <field name="perm_read" eval="False"/>
     </record>
     <record id="rule_set_line_operator_edit" model="ir.rule">
@@ -189,7 +209,7 @@
          -u XML'deki perm_* değişikliğini uygulamaz ve açık kalan perm_write kilidi OR ile deler.
          Bu çağrı her kurulum/güncellemede onları salt okumaya çeker (idempotent). -->
     <function model="ir.rule" name="write">
-        <value eval="[ref('rule_session_operator'), ref('rule_generation_operator')]"/>
+        <value eval="[ref('rule_session_operator'), ref('rule_generation_operator'), ref('rule_photo_operator')]"/>
         <value eval="{'perm_write': False, 'perm_create': False, 'perm_unlink': False}"/>
     </function>
     <record id="rule_ai_studio_candidate_reviewer" model="ir.rule">

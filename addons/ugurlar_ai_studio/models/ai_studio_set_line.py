@@ -1,4 +1,4 @@
-from odoo import models, fields, _
+from odoo import api, models, fields, _
 
 
 class AiStudioSetLine(models.Model):
@@ -56,5 +56,22 @@ class AiStudioSetLine(models.Model):
     # DIKKAT: 'saving'/'done' oturumda set satırı değişirse kuyruk onaylanandan farklı ürüne yazar (A4 O1).
     # Kilit kayıt kuralında (rule_set_line_operator_edit); burada yalnız kuralın göremediği taşıma.
     def write(self, vals):
-        self.env['ai.studio.session']._check_target_session_unlocked(vals, _('takım parçası'))
-        return super().write(vals)
+        Session = self.env['ai.studio.session']
+        Session._check_target_session_unlocked(vals, _('takım parçası'))
+        before = self.session_id
+        res = super().write(vals)
+        if {'product_id', 'role', 'session_id'} & set(vals):
+            self._drop_session_approvals(before | self.session_id)
+        return res
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        records = super().create(vals_list)
+        records._drop_session_approvals(records.session_id)
+        return records
+
+    def _drop_session_approvals(self, sessions):
+        # NEDEN (J10 KK2): takım modunda kuyruk set satırlarının ürünlerine yazar; onaydan sonra yetkisiz
+        # değişen takım onaylanmamış ürünlere görsel yazdırırdı. unlink yok: operatör ACL'inde silme kapalı.
+        if sessions and not self.env['ai.studio.session']._is_approval_authority():
+            sessions._drop_approvals(_('takım parçaları'))
