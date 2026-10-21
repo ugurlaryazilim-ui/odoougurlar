@@ -642,8 +642,8 @@ class AiStudioGeneration(models.Model):
             count = len(stuck)
 
         if count:
-            # Hemen cron'u da tetikle ki beklemeden kuyruktan başlasın
-            self.env['ai.studio.session']._cron_check_stuck_generations()
+            # Kuyruk cron'unu uyandır; uzun iş HTTP isteğinde koşmaz
+            self.env['ai.studio.session']._trigger_ai_queue()
 
         return {
             'type': 'ir.actions.client',
@@ -658,43 +658,32 @@ class AiStudioGeneration(models.Model):
         }
 
     def action_batch_retry(self, *args, **kwargs):
-        """Seçilen veya başarısız olan revizyonları toplu olarak sırayla tekrar dene."""
+        """Seçilen veya başarısız olan revizyonları toplu olarak sırayla tekrar dene.
+
+        Kayıtlar 'pending' yapılır; kuyruk cron'u (_cron_process_queue) sırayla işler.
+        """
         self._check_ai_studio_group('reviewer')
-        import threading
         failed_records = self.filtered(lambda g: g.state == 'failed')
         if not failed_records:
             failed_records = self.search([
                 ('state', '=', 'failed'),
                 '|', ('revision_number', '>', 1), ('parent_generation_id', '!=', False),
             ])
+        # Kuyruk yalnız işlenen / incelenen / başarısız oturumların üretimlerini alır;
+        # tamamlanmış/iptal oturumdaki kayıt 'pending'de asılı kalmasın
+        failed_records = failed_records.filtered(
+            lambda g: g.session_id.state in ('preprocessing', 'processing', 'review', 'failed'))
 
         if not failed_records:
             raise UserError(_('Tekrar denenecek başarısız revizyon bulunamadı.'))
 
-        from .ai_studio_session import CLEAR_FAL_REQUEST
-        failed_records.write(dict(CLEAR_FAL_REQUEST, state='pending', error_message=False))
-
-        provider_type = self.env['ir.config_parameter'].sudo().get_param(
-            'ugurlar_ai_studio.default_provider', 'fashn'
-        )
-        api_key = self.env['ir.config_parameter'].sudo().get_param(
-            'ugurlar_ai_studio.fashn_api_key' if provider_type == 'fashn' else 'ugurlar_ai_studio.fal_api_key'
-        )
-        if not api_key:
+        Session = self.env['ai.studio.session']
+        if not Session._get_active_api_key():
             raise UserError(_('AI API anahtarı ayarlanmamış.'))
 
-        gen_ids = failed_records.ids
-        uid = self.env.uid or 1
-
-        # Commit'ten ÖNCE başlarsa thread kayıtları hâlâ 'failed' görür ve atlar
-        def _start():
-            thread = threading.Thread(
-                target=self._batch_retry_worker_thread,
-                args=(gen_ids, api_key, uid),
-            )
-            thread.daemon = True
-            thread.start()
-        self.env.cr.postcommit.add(_start)
+        from .ai_studio_session import CLEAR_FAL_REQUEST
+        failed_records.write(dict(CLEAR_FAL_REQUEST, state='pending', error_message=False))
+        Session._trigger_ai_queue()
 
         return {
             'type': 'ir.actions.client',
@@ -707,41 +696,6 @@ class AiStudioGeneration(models.Model):
                 'next': {'type': 'ir.actions.client', 'tag': 'reload'},
             }
         }
-
-    @api.model
-    def _batch_retry_worker_thread(self, gen_ids, api_key, uid):
-        """Toplu revizyonları sırayla işleyen arka plan thread'i."""
-        import time
-        _logger.info("Toplu revizyon tekrar deneme thread'i baslatildi: %d adet", len(gen_ids))
-        for gen_id in gen_ids:
-            try:
-                with self.pool.cursor() as cr:
-                    env = api.Environment(cr, uid, {'lang': 'tr_TR'})
-                    gen = env['ai.studio.generation'].browse(gen_id)
-                    if not gen.exists() or gen.state != 'pending':
-                        continue
-                    session_model = gen.session_id
-                    session_id = session_model.id
-
-                # Kira + semaphore sarmalayıcısı: oturum başka yerde işleniyorsa
-                # generation 'pending' kalır ve cron devralır
-                session_model._retry_generation_thread(session_id, gen_id, api_key, uid)
-                time.sleep(1.0)
-            except Exception as e:
-                _logger.error("Toplu tekrar deneme hatası (gen=%s): %s", gen_id, e)
-                try:
-                    with self.pool.cursor() as cr:
-                        env = api.Environment(cr, uid, {'lang': 'tr_TR'})
-                        gen = env['ai.studio.generation'].browse(gen_id)
-                        if gen.exists() and gen.state == 'pending':
-                            gen.write({
-                                'state': 'failed',
-                                'error_message': _('Toplu işlem hatası: %s') % str(e),
-                            })
-                            cr.commit()
-                except Exception:
-                    pass
-        _logger.info("Toplu revizyon tekrar deneme thread'i tamamlandi.")
 
     def action_batch_cancel(self, *args, **kwargs):
         """Seçilen revizyonları iptal edip önceki hallerine döndür."""

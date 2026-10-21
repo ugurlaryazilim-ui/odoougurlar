@@ -1,7 +1,6 @@
 import logging
 import base64
 import hashlib
-import threading
 import time
 import json
 import uuid
@@ -23,21 +22,31 @@ from .ai_studio_usage import GEMINI_INPUT_PRICE, GEMINI_OUTPUT_PRICE
 
 _logger = logging.getLogger(__name__)
 
-# Süreç içi eşzamanlılık sınırı (API baskısını azaltır). Süreçler / worker'lar
-# arası tekillik veritabanı kirası (ai_lease_*) ile sağlanır.
-_AI_SESSION_SEMAPHORE = threading.Semaphore(2)
+# AI işleri HTTP/cron worker'ı içinde thread açılarak DEĞİL, kuyruk cron'larıyla
+# işlenir (data/cron.xml). Her slot cron'u aynı anda tek iş yürütür; slot numarası
+# concurrent_limit'i aşan cron çalışmaz → eşzamanlılık tüm worker'lar için globaldir.
+AI_QUEUE_CRONS = ('ugurlar_ai_studio.cron_ai_queue_1', 'ugurlar_ai_studio.cron_ai_queue_2')
+# NEDEN: cron worker'ı limit_time_real (2400 sn) aşarsa süreç öldürülür. Oturum işi bu
+# süreden sonra yeni görünüme başlamaz; kalanlar 'pending' kalır ve kuyruk yeniden
+# tetiklenir. Tek görünüm (hazırlık + try-on 180 sn + denetim/yeniden üretim) en kötü
+# ~15 dk sürdüğünden 900 + 900 < 2400.
+QUEUE_JOB_BUDGET_SECONDS = 900
+_queue_limit_warned = False
 
-# Oturum kirası: bir thread oturumu işlerken her görünümde yenilenir. Süresi
-# dolmuş kira = ölü thread → cron devralabilir.
+# Oturum kirası: bir kuyruk işi oturumu işlerken her adımda yenilenir. Süresi
+# dolmuş kira = ölü iş → cron devralabilir.
 LEASE_MINUTES = 10
 # fal'e gönderilmiş ama bu süre içinde sonuçlanmamış iş başarısız sayılır
 SUBMITTED_TIMEOUT_MINUTES = 30
+# Manken üretimi (3 görünüm, her biri ≤ ~2 dk fal çağrısı) bu süreyi aşarsa iş ölmüş sayılır
+MANNEQUIN_STUCK_MINUTES = 60
 _UTC_NOW_SQL = "(now() at time zone 'UTC')"
 
 
 def _lease_owner():
     import socket
-    return '%s:%s:%s' % (socket.gethostname(), os.getpid(), threading.get_ident())
+    # NEDEN: workers=0 modunda birden çok cron thread'i aynı süreçte koşar; uuid her işi ayırır
+    return '%s:%s:%s' % (socket.gethostname(), os.getpid(), uuid.uuid4().hex[:12])
 
 
 def _try_acquire_lease(cr, session_id, owner):
@@ -783,9 +792,12 @@ class AiStudioSession(models.Model):
         'product.category', string='Kategori',
         related='product_id.categ_id', store=True
     )
+    # NEDEN: store=True, her stok hareketinde product.qty_available'ı yeniden hesaplatıp
+    # oturum satırlarına yazdırıyordu (anlık değer zaten ürün üzerinde). Eski kolon DB'de
+    # kalır (Odoo saklanmayan alanın kolonunu düşürmez; veri silen temizlik yok).
     qty_available = fields.Float(
         string='Stok Miktarı',
-        related='product_id.qty_available', store=True
+        related='product_id.qty_available',
     )
     color_value_ids = fields.Many2many(
         'product.attribute.value', 'ai_session_color_rel', string='Renk',
@@ -1323,8 +1335,8 @@ class AiStudioSession(models.Model):
             for line in tmpl.attribute_line_ids:
                 if (line.attribute_id.name or '') in ('Reyon', 'Ürün Grubu'):
                     texts.extend(v.name for v in line.value_ids if v.name)
-        except Exception:
-            pass
+        except Exception as attr_err:
+            _logger.warning('Ürün nitelikleri okunamadı (session=%s): %s', self.id, attr_err)
         categ = tmpl.categ_id
         while categ:
             texts.append(categ.name or '')
@@ -1364,8 +1376,8 @@ class AiStudioSession(models.Model):
                         for val in line.value_ids:
                             if val.name and f"{attr_name}: {val.name}" not in attr_parts:
                                 attr_parts.append(f"{attr_name}: {val.name}")
-            except Exception:
-                pass
+            except Exception as attr_err:
+                _logger.warning('Ürün nitelikleri okunamadı (session=%s): %s', self.id, attr_err)
         if attr_parts:
             parts.append(f"Attributes: {', '.join(attr_parts)}")
         return " | ".join(parts)
@@ -1544,15 +1556,7 @@ class AiStudioSession(models.Model):
             body=_('🔄 %d başarısız/bekleyen üretim sırayla işlenmek üzere arka plana alındı.') % len(retryable),
         )
 
-        # Arka planda AI işlemeyi başlat (commit sonrası)
-        def _start_thread():
-            thread = threading.Thread(
-                target=self._process_ai_thread,
-                args=(self.id, api_key, self.env.uid),
-            )
-            thread.daemon = True
-            thread.start()
-        self.env.cr.postcommit.add(_start_thread)
+        self._trigger_ai_queue()
 
         return {
             'type': 'ir.actions.client',
@@ -2102,30 +2106,8 @@ class AiStudioSession(models.Model):
             'provider': provider_type,
         })
 
-        # Eşzamanlı istek limiti kontrolü
-        concurrent_limit = int(self.env['ir.config_parameter'].sudo().get_param(
-            'ugurlar_ai_studio.concurrent_limit', '2'
-        ))
-        active_processing = self.search_count([
-            ('state', '=', 'processing'),
-            ('id', '!=', self.id),
-        ])
-        if active_processing >= concurrent_limit:
-            _logger.warning(
-                'Eşzamanlı AI işlem limiti (%d) aşıldı. '
-                'Aktif: %d. İşlem yine de başlatılıyor (kuyrukta bekleyecek).',
-                concurrent_limit, active_processing,
-            )
-
-        # Arka planda AI işlemeyi başlat (commit sonrası)
-        def _start_thread():
-            thread = threading.Thread(
-                target=self._process_ai_thread,
-                args=(self.id, api_key, self.env.uid),
-            )
-            thread.daemon = True
-            thread.start()
-        self.env.cr.postcommit.add(_start_thread)
+        # Eşzamanlılık kuyruk cron'larında (concurrent_limit) uygulanır
+        self._trigger_ai_queue()
 
         return {
             'type': 'ir.actions.client',
@@ -2224,18 +2206,8 @@ class AiStudioSession(models.Model):
         if gen_vals_list:
             self.env['ai.studio.generation'].create(gen_vals_list)
 
-        # Ana veritabanı işlemini commit et ki arka plan thread'i yeni generation verilerini görebilsin
-        self.env.cr.commit()
-
-        session_ids = valid_sessions.ids
-        uid = self.env.uid
-
-        thread = threading.Thread(
-            target=self._process_batch_ai_thread,
-            args=(session_ids, api_key, uid),
-        )
-        thread.daemon = True
-        thread.start()
+        # Kuyruk cron'u istek commit edildikten sonra uyanır ve oturumları sırayla alır
+        self._trigger_ai_queue()
 
         skipped_count = len(self) - len(valid_sessions)
         msg = _("%d adet oturum yeniden AI işlemeye gönderildi ve arka planda sırayla işleniyor.") % len(valid_sessions)
@@ -2263,88 +2235,178 @@ class AiStudioSession(models.Model):
             from ..services.fal_provider import FalProvider
             return FalProvider(api_key)
 
-    def _process_ai_thread(self, session_id, api_key, uid):
-        """Thread içinde tüm generation'ları işle (wrapper)."""
-        owner = _lease_owner()
-        _logger.info("AI Thread kuyrukta bekliyor (session_id=%s)", session_id)
-        with _AI_SESSION_SEMAPHORE:
-            # Semaphore'dan SONRA kira al: beklerken kira tutulursa süresi dolabilir
-            if not _acquire_session_lease(self.pool, session_id, owner):
-                _logger.warning("AI Thread: Oturum %s başka bir thread/worker tarafından işleniyor, atlandı.", session_id)
-                return
-            try:
-                _logger.info("AI Thread kira aldı, işleme başlıyor (session_id=%s)", session_id)
-                try:
-                    self._process_ai_thread_body(session_id, api_key, uid, lease_owner=owner)
-                except Exception as thread_err:
-                    _logger.exception("AI Thread: Beklenmeyen kritik hata olustu: %s", thread_err)
-                    try:
-                        with self.pool.cursor() as cr:
-                            env = api.Environment(cr, uid, {'lang': 'tr_TR'})
-                            session = env['ai.studio.session'].sudo().browse(session_id)
-                            # Kalan kayıtları failed yap — fal'e gönderilmiş olanlar hariç
-                            # (sonuçları cron tarafından request_id ile alınır)
-                            for g in session.generation_ids.filtered(
-                                    lambda x: x.state == 'pending' or (x.state == 'processing' and not x.fal_request_id)):
-                                g.write(_failure_vals(
-                                    thread_err,
-                                    _('Kritik sistem hatası nedeniyle işlem tamamlanamadı: %s') % str(thread_err)[:200]))
-                            if not session.generation_ids.filtered(lambda x: x.state == 'processing'):
-                                has_done = any(x.state == 'done' for x in session.generation_ids)
-                                session.write({'state': 'review' if has_done else 'failed'})
-                            cr.commit()
-                            try:
-                                session.message_post(body=_('Kritik Sistem Hatası: %s') % str(thread_err))
-                                cr.commit()
-                            except Exception as msg_err:
-                                _logger.error("AI Thread message_post hatası: %s", msg_err)
-                    except Exception:
-                        pass
-            finally:
-                clear_usage_recorder()
-                _release_session_lease(self.pool, session_id, owner)
+    # ═══ AI KUYRUĞU (cron slotları) ═══
+    @api.model
+    def _trigger_ai_queue(self):
+        """Kuyruk cron'larını uyandır. ir.cron.trigger satırı çağıranın transaction'ıyla
+        commit edilir; yani cron, istek kaydettiği 'pending' üretimleri görerek başlar."""
+        for xmlid in AI_QUEUE_CRONS:
+            cron = self.env.ref(xmlid, raise_if_not_found=False)
+            if cron:
+                cron.sudo()._trigger()
 
-    def _process_batch_ai_thread(self, session_ids, api_key, uid):
-        """Toplu seçilen oturumları sırayla arka planda AI ile işler.
-        
-        Her oturum semaphore ile korunur — eşzamanlı limit aşılmaz.
+    def _queue_session_domain(self):
+        return [
+            ('state', 'in', ['preprocessing', 'processing']),
+            ('generation_ids.state', '=', 'pending'),
+            # Ön yüz fal kuyruğundaysa önce stuck cron sonucu alsın (referans + analiz)
+            ('generation_ids', 'not any', [
+                ('photo_type', '=', 'front'),
+                ('state', '=', 'processing'),
+                ('fal_request_id', '!=', False),
+            ]),
+        ] + self._lease_free_domain()
+
+    def _queue_revision_domain(self):
+        # Oturum işleme durumundaysa bekleyen üretimleri oturum işi alır; inceleme /
+        # başarısız oturumdaki tek üretim (revizyon, Tekrar Dene) ayrı iştir
+        return [
+            ('session_id.state', 'in', ['review', 'failed']),
+            ('state', '=', 'pending'),
+        ] + self._lease_free_domain('session_id.')
+
+    @api.model
+    def _queue_has_work(self):
+        return bool(
+            self.search_count(self._queue_session_domain(), limit=1)
+            or self.env['ai.studio.generation'].search_count(self._queue_revision_domain(), limit=1)
+            or self.env['ai.studio.model.preset'].search_count(
+                [('mannequin_generation_state', '=', 'queued')], limit=1)
+        )
+
+    def _queue_lock_and_lease(self, session_id, owner):
+        """Oturum kirasını bu cursor'da al (commit ETMEZ). Diğer slot aynı satırı aldıysa False."""
+        from psycopg2 import errors as pg_errors
+        cr = self.env.cr
+        try:
+            with cr.savepoint():
+                # NEDEN: REPEATABLE READ'de iki slot aynı adayı seçebilir; kilitli satır
+                # atlanır, bizim snapshot'tan sonra kiralanmışsa SerializationFailure gelir
+                cr.execute("SELECT id FROM ai_studio_session WHERE id = %s "
+                           "FOR NO KEY UPDATE SKIP LOCKED", (session_id,))
+                if not cr.fetchone():
+                    return False
+                return _try_acquire_lease(cr, session_id, owner)
+        except (pg_errors.SerializationFailure, pg_errors.LockNotAvailable):
+            return False
+
+    @api.model
+    def _queue_claim_job(self, slot, owner):
+        """Sıradaki tek işi seç ve kirasını al (commit ETMEZ; cron sarmalayıcısı commit eder).
+
+        Returns: None | ('session', session_id, False) | ('revision', session_id, gen_id)
+                 | ('mannequin', preset_id, False)
         """
-        _logger.info("Toplu AI İşleme Thread başlatıldı. Toplam oturum sayısı: %d", len(session_ids))
-        owner = _lease_owner()
-        for session_id in session_ids:
-            _logger.info("Toplu işleme: Oturum %s için semaphore bekleniyor...", session_id)
-            with _AI_SESSION_SEMAPHORE:
-                if not _acquire_session_lease(self.pool, session_id, owner):
-                    _logger.warning("Toplu AI Thread: Oturum %s başka yerde işleniyor, atlanıyor.", session_id)
-                    continue
-                try:
-                    _logger.info("Toplu işleme: Oturum %s kira aldı, işleniyor...", session_id)
-                    try:
-                        self._process_ai_thread_body(session_id, api_key, uid, lease_owner=owner)
-                    except Exception as e:
-                        _logger.error("Toplu AI işleme hatası (session_id=%s): %s", session_id, e, exc_info=True)
-                        try:
-                            with self.pool.cursor() as cr:
-                                env = api.Environment(cr, uid, {'lang': 'tr_TR'})
-                                sess = env['ai.studio.session'].browse(session_id)
-                                # Kalanları failed yap — fal'e gönderilmiş olanlar hariç (cron alır)
-                                for g in sess.generation_ids.filtered(
-                                        lambda x: x.state == 'pending' or (x.state == 'processing' and not x.fal_request_id)):
-                                    g.write(_failure_vals(
-                                        e, _('Toplu işleme sırasında beklenmeyen hata: %s') % str(e)[:200]))
-                                if not sess.generation_ids.filtered(lambda x: x.state == 'processing'):
-                                    has_done = any(x.state == 'done' for x in sess.generation_ids)
-                                    sess.write({'state': 'review' if has_done else 'failed'})
-                                cr.commit()
-                        except Exception:
-                            pass
-                finally:
-                    clear_usage_recorder()
-                    _release_session_lease(self.pool, session_id, owner)
-            time.sleep(2)  # Oturumlar arası API baskısını azaltmak için 2s bekleme
+        global _queue_limit_warned
+        limit = int(self.env['ir.config_parameter'].sudo().get_param(
+            'ugurlar_ai_studio.concurrent_limit', '2') or 2)
+        if limit > len(AI_QUEUE_CRONS) and not _queue_limit_warned:
+            _queue_limit_warned = True
+            # EKIP-BORC: concurrent_limit slot sayısını aşarsa fazlası kullanılmaz; gerekirse
+            # data/cron.xml'e cron_ai_queue_N eklenip AI_QUEUE_CRONS'a yazılmalı
+            _logger.warning('AI kuyruğu: concurrent_limit=%d ama yalnız %d kuyruk slotu var; '
+                            'eşzamanlılık %d ile sınırlı.', limit, len(AI_QUEUE_CRONS), len(AI_QUEUE_CRONS))
+        if slot > limit:
+            return None
+        if not self._get_active_api_key():
+            if self._queue_has_work():
+                _logger.warning('AI kuyruğu: bekleyen iş var ama API anahtarı bulunamadı!')
+            return None
+        # Bütçe yalnız oturum/revizyon üretimlerini durdurur (manken üretimi eskiden de denetlenmezdi)
+        if self._budget_status()[0]:
+            _logger.warning('AI kuyruğu: aylık AI bütçesi dolu, yeni üretim başlatılmıyor')
+        else:
+            for session in self.search(self._queue_session_domain(),
+                                       order='date_processing_start asc, id asc', limit=20):
+                if self._queue_lock_and_lease(session.id, owner):
+                    return ('session', session.id, False)
+            for gen in self.env['ai.studio.generation'].search(
+                    self._queue_revision_domain(), order='write_date asc, id asc', limit=20):
+                if self._queue_lock_and_lease(gen.session_id.id, owner):
+                    return ('revision', gen.session_id.id, gen.id)
+        preset_id = self.env['ai.studio.model.preset']._queue_claim_mannequin()
+        if preset_id:
+            return ('mannequin', preset_id, False)
+        return None
 
-    def _process_ai_thread_body(self, session_id, api_key, uid, lease_owner=None):
-        """Thread içinde tüm generation'ları işle (body)."""
+    @api.model
+    def _cron_process_queue(self, slot=1):
+        """Kuyruk slot cron'u: tek iş al, işle, iş kaldıysa kuyruğu yeniden tetikle.
+
+        Uzun AI işi (dakikalar) HTTP worker'ında değil burada, cron worker'ında koşar.
+        """
+        owner = _lease_owner()
+        job = self._queue_claim_job(slot, owner)
+        if not job:
+            return
+        # DIKKAT: kira commit edilmeden diğer slot aynı oturumu görür; ayrıca iş boyunca
+        # bu cursor'da açık snapshot / satır kilidi kalmamalı (iş kendi cursor'larını açar)
+        self.env.cr.commit()
+        self._queue_run_job(job, owner, deadline=time.time() + QUEUE_JOB_BUDGET_SECONDS)
+        self.env.invalidate_all()
+        if self._queue_has_work():
+            self._trigger_ai_queue()
+
+    @api.model
+    def _queue_run_job(self, job, owner, deadline=None):
+        kind, res_id, gen_id = job
+        uid = self.env.uid
+        if kind == 'mannequin':
+            self.env['ai.studio.model.preset']._run_mannequin_job(res_id)
+            return
+        api_key = self._get_active_api_key()
+        _logger.info('AI kuyruğu: iş başlıyor (%s, session=%s, gen=%s)', kind, res_id, gen_id)
+        try:
+            if kind == 'session':
+                self._process_ai_thread_body(res_id, api_key, uid, lease_owner=owner, deadline=deadline)
+            else:
+                self._retry_generation_thread_body(res_id, gen_id, api_key, uid, lease_owner=owner)
+        except Exception as err:
+            _logger.exception('AI kuyruğu: beklenmeyen hata (%s, session=%s, gen=%s)', kind, res_id, gen_id)
+            self._queue_mark_job_failed(kind, res_id, gen_id, err, uid)
+        finally:
+            clear_usage_recorder()
+            _release_session_lease(self.pool, res_id, owner)
+
+    @api.model
+    def _queue_mark_job_failed(self, kind, session_id, gen_id, err, uid):
+        """Beklenmeyen hatada kalan işleri 'failed' yap (kuyruk aynı işi sonsuza dek almasın).
+
+        fal'e gönderilmiş (request_id'li) üretimlere dokunulmaz: sonucu stuck cron alır.
+        """
+        try:
+            with self.pool.cursor() as cr:
+                env = api.Environment(cr, uid, {'lang': 'tr_TR'})
+                if kind == 'revision':
+                    gen = env['ai.studio.generation'].browse(gen_id)
+                    if gen.exists() and gen.state in ('pending', 'processing') and not gen.fal_request_id:
+                        gen.write(_failure_vals(err, _('Kritik Sistem Hatası: %s') % str(err)[:200]))
+                    cr.commit()
+                    return
+                session = env['ai.studio.session'].sudo().browse(session_id)
+                for g in session.generation_ids.filtered(
+                        lambda x: x.state == 'pending' or (x.state == 'processing' and not x.fal_request_id)):
+                    g.write(_failure_vals(
+                        err, _('Kritik sistem hatası nedeniyle işlem tamamlanamadı: %s') % str(err)[:200]))
+                if session.state in ('preprocessing', 'processing') and not session.generation_ids.filtered(
+                        lambda x: x.state == 'processing'):
+                    has_done = any(x.state == 'done' for x in session.generation_ids)
+                    session.write({'state': 'review' if has_done else 'failed'})
+                cr.commit()
+                try:
+                    session.message_post(body=_('Kritik Sistem Hatası: %s') % str(err)[:500])
+                    cr.commit()
+                except Exception as msg_err:
+                    cr.rollback()
+                    _logger.warning('AI kuyruğu: hata mesajı paylaşılamadı (session=%s): %s', session_id, msg_err)
+        except Exception:
+            _logger.exception('AI kuyruğu: hata durumu kaydedilemedi (session=%s, gen=%s)', session_id, gen_id)
+
+    def _process_ai_thread_body(self, session_id, api_key, uid, lease_owner=None, deadline=None):
+        """Oturumun bekleyen tüm görünümlerini işle (kuyruk işi; kendi cursor'larını açar).
+
+        deadline (time.time()): aşılınca yeni görünüme başlanmaz, kalanlar 'pending' kalır.
+        """
         _logger.info("AI Thread starting for session %s with uid %s", session_id, uid)
         with self.pool.cursor() as cr:
             env = api.Environment(cr, uid, {'lang': 'tr_TR'})
@@ -2382,6 +2444,14 @@ class AiStudioSession(models.Model):
         with self.pool.cursor() as cr:
             env = api.Environment(cr, uid, {'lang': 'tr_TR'})
             session = env['ai.studio.session'].browse(session_id)
+
+            def _keep_lease():
+                # Hazırlık adımları (analiz, etiket silme, görünüm yapısı) dakikalar sürer;
+                # kira (LEASE_MINUTES) dolarsa stuck cron işi sahipsiz sanıp devralır
+                if lease_owner:
+                    _renew_session_lease(cr, session_id, lease_owner)
+                    cr.commit()
+
             for attempt in range(3):
                 try:
                     session.write({'state': 'processing'})
@@ -2445,6 +2515,7 @@ class AiStudioSession(models.Model):
                     _logger.info('Ürün detayları: %s', design_hint(cached_analysis) or '-')
             except Exception as ae:
                 _logger.warning('Kıyafet analizi başarısız, varsayılan kullanılacak: %s', ae)
+            _keep_lease()
 
             try:
                 mannequin_variant = _mannequin_variant(session, cached_analysis)
@@ -2497,6 +2568,11 @@ class AiStudioSession(models.Model):
                 # sonucunu (ör. ön yüz görselini) bu generation'a yazmamalı.
                 gen_b64 = tryon_result = None
                 elapsed = 0.0
+                # Ön yüz başarısızsa kalanlar yalnız 'failed' işaretlenir (anlık); bölünmemeli
+                if deadline and not front_failed and time.time() > deadline:
+                    _logger.info('Kuyruk süre bütçesi doldu (session_id=%s); kalan görünümler '
+                                 'sonraki kuyruk çalıştırmasında işlenecek', session_id)
+                    break
                 # Oturum iptal/sıfırlandıysa yeni ücretli çağrı yapma
                 if lease_owner:
                     _renew_session_lease(cr, session_id, lease_owner)
@@ -2592,15 +2668,18 @@ class AiStudioSession(models.Model):
                         design_details=design_hint(cached_analysis) if photo_type == 'front' else '',
                         garment_text=_garment_text(cached_analysis),
                     )
+                    _keep_lease()
                     if photo_type == 'front':
                         self._apply_fastener_check(session, cached_analysis, gen.source_photo_id,
                                                    processed_garment_b64)
+                        _keep_lease()
                     # Hazırlık maliyeti (etiket silme + ilk kez türetilen manken) bu üretime yazılır
                     prep_cost = (erase_cost or 0.0) + (mannequin_cost or 0.0)
                     # Yan görünüm kendi fotoğrafı yoksa ön fotoğraftan üretilir: o açının yapısı bilinmez
                     own_photo = (gen.source_photo_id.photo_type or photo_type) == photo_type
                     keep_boxes, view_construction = self._garment_view_info(
                         session, gen.source_photo_id, processed_garment_b64, photo_type, own_photo=own_photo)
+                    _keep_lease()
 
                     # fal: ayardaki Seedream modeli (v4 Edit seed'li / v5 Pro Edit)
                     tryon_model = _get_tryon_model(env) if provider_type == 'fal' else 'tryon-v1.6'
@@ -2903,66 +2982,31 @@ class AiStudioSession(models.Model):
                 time.sleep(1.0 + attempt * 0.5)
 
     def _process_single_generation(self, generation, check_budget=True):
-        """Tek bir generation'ı yeniden işle (retry / revizyon için)."""
+        """Tek bir 'pending' generation'ı (retry / revizyon) kuyruğa al.
+
+        İş HTTP isteğinde değil kuyruk cron'unda yapılır (_cron_process_queue).
+        """
+        # Kuyruk yalnız bu durumlardaki oturumların üretimlerini alır (bkz. _queue_*_domain)
+        if self.state not in ('preprocessing', 'processing', 'review', 'failed'):
+            raise UserError(_('Bu oturum durumunda (%s) yeniden üretim yapılamaz.') % self.state)
         if check_budget:
             self._check_monthly_budget()
-        provider_type = self.env['ir.config_parameter'].sudo().get_param(
-            'ugurlar_ai_studio.default_provider', 'fashn'
-        )
-        if provider_type == 'fashn':
-            api_key = self.env['ir.config_parameter'].sudo().get_param(
-                'ugurlar_ai_studio.fashn_api_key'
-            )
-        else:
-            api_key = self.env['ir.config_parameter'].sudo().get_param(
-                'ugurlar_ai_studio.fal_api_key'
-            )
-        if not api_key:
+        if not self._get_active_api_key():
             raise UserError(_('AI API anahtarı ayarlanmamış.'))
-
-        def _start_retry_thread():
-            thread = threading.Thread(
-                target=self._retry_generation_thread,
-                args=(self.id, generation.id, api_key, self.env.uid),
-            )
-            thread.daemon = True
-            thread.start()
-        self.env.cr.postcommit.add(_start_retry_thread)
-
-    def _retry_generation_thread(self, session_id, gen_id, api_key, uid):
-        """Tek generation retry thread'i (wrapper). Kira + süreç içi semaphore."""
-        owner = _lease_owner()
-        _logger.info("AI Retry Thread kuyrukta bekliyor (session_id=%s, gen_id=%s)", session_id, gen_id)
-        with _AI_SESSION_SEMAPHORE:
-            if not _acquire_session_lease(self.pool, session_id, owner):
-                # Oturum başka yerde işleniyor; generation 'pending' kalır, cron devralır
-                _logger.warning("AI Retry Thread: Oturum %s meşgul, gen %s cron'a bırakıldı.", session_id, gen_id)
-                return
-            try:
-                _logger.info("AI Retry Thread kira aldı (session_id=%s, gen_id=%s)", session_id, gen_id)
-                try:
-                    self._retry_generation_thread_body(session_id, gen_id, api_key, uid, lease_owner=owner)
-                except Exception as thread_err:
-                    _logger.exception("AI Retry Thread: Beklenmeyen kritik hata olustu: %s", thread_err)
-                    try:
-                        with self.pool.cursor() as cr:
-                            env = api.Environment(cr, uid, {'lang': 'tr_TR'})
-                            gen = env['ai.studio.generation'].browse(gen_id)
-                            gen.write(_failure_vals(
-                                thread_err, _('Kritik Sistem Hatası: %s') % str(thread_err)))
-                            cr.commit()
-                    except Exception:
-                        pass
-            finally:
-                clear_usage_recorder()
-                _release_session_lease(self.pool, session_id, owner)
+        self._trigger_ai_queue()
 
     def _retry_generation_thread_body(self, session_id, gen_id, api_key, uid, lease_owner=None):
-        """Tek generation retry thread'i (body)."""
+        """Tek generation'ı (retry / revizyon) işle (kuyruk işi; kendi cursor'ını açar)."""
         _logger.info("AI Retry Thread starting for session %s, gen %s with uid %s", session_id, gen_id, uid)
         with self.pool.cursor() as cr:
             env = api.Environment(cr, uid, {'lang': 'tr_TR'})
-            
+
+            def _keep_lease():
+                # Hazırlık adımları dakikalar sürer; kira dolarsa stuck cron işi devralır
+                if lease_owner:
+                    _renew_session_lease(cr, session_id, lease_owner)
+                    cr.commit()
+
             # Fetch prompt locks OUTSIDE
             all_locks = env['ai.studio.prompt.template'].search([
                 ('scope', '=', 'global'),
@@ -3121,6 +3165,7 @@ class AiStudioSession(models.Model):
                     _logger.warning('Retry kıyafet analizi başarısız: %s', ae)
                 _mark_coord_set(session, analysis)
                 _logger.info('Ürün detayları: %s', design_hint(analysis) or '-')
+                _keep_lease()
 
                 # Etiketler _prepare_garment_for_tryon içinde ayrı taramayla bulunur
                 garment_url, processed_b64, erase_cost = self._prepare_garment_for_tryon(
@@ -3129,11 +3174,14 @@ class AiStudioSession(models.Model):
                     design_details=design_hint(analysis) if photo_type == 'front' else '',
                     garment_text=_garment_text(analysis),
                 )
+                _keep_lease()
                 if photo_type == 'front':
                     self._apply_fastener_check(session, analysis, gen.source_photo_id, processed_b64)
+                    _keep_lease()
                 own_photo = (gen.source_photo_id.photo_type or photo_type) == photo_type
                 keep_boxes, view_construction = self._garment_view_info(
                     session, gen.source_photo_id, processed_b64, photo_type, own_photo=own_photo)
+                _keep_lease()
                 if isinstance(analysis, dict):
                     gemini_cat = analysis.get('clothingCategory', '')
                     if gemini_cat in ('dress', 'one_piece', 'one-piece', 'full-body') and not analysis.get('isSet'):
@@ -3195,8 +3243,10 @@ class AiStudioSession(models.Model):
                         front_seed = front_gen[0].seed or False
                         try:
                             front_output_url = provider.upload_image(front_result_b64)
-                        except Exception:
-                            pass
+                        except Exception as up_e:
+                            # Ön referanssız devam edilir (tutarlılık düşer ama üretim sürer)
+                            _logger.warning('Retry: ön yüz referans görseli yüklenemedi (gen=%s): %s',
+                                            gen_id, up_e)
 
                         # Elbise/etek/şortta sonucu kullanılmıyor (ücretli çağrıyı atla)
                         if mannequin_variant != 'legs':
@@ -3658,8 +3708,10 @@ class AiStudioSession(models.Model):
                 if gen.submitted_at and gen.submitted_at < fields.Datetime.now() - timedelta(minutes=SUBMITTED_TIMEOUT_MINUTES):
                     try:
                         client.cancel(app, request_id)
-                    except Exception:
-                        pass
+                    except Exception as cancel_err:
+                        # İptal edilemese de üretim başarısız sayılır; fal işi kendi süresinde düşer
+                        _logger.warning('fal isteği iptal edilemedi (gen=%s, request_id=%s): %s',
+                                        gen.id, request_id, cancel_err)
                     gen.write({
                         'state': 'failed',
                         'error_message': _('fal.ai %d dakika içinde sonuç vermedi.') % SUBMITTED_TIMEOUT_MINUTES,
@@ -3735,15 +3787,31 @@ class AiStudioSession(models.Model):
 
     @api.model
     def _cron_check_stuck_generations(self):
-        """Veritabanı tabanlı kuyruk yöneticisi.
+        """Stuck cron girişi: çekirdeği her kayıttan sonra commit ederek çalıştırır."""
+        self._check_stuck_generations(commit=self.env.cr.commit)
 
-        Görevler (sırasıyla):
+    def _stuck_step(self, label, record, func):
+        """Tek kaydın adımını savepoint içinde çalıştır: bozuk kayıt cron'u durdurmaz."""
+        try:
+            with self.env.cr.savepoint():
+                func()
+            return True
+        except Exception:
+            _logger.exception('Stuck cron: %s başarısız (%s), kayıt atlandı', label, record)
+            return False
+
+    @api.model
+    def _check_stuck_generations(self, commit=None):
+        """Veritabanı tabanlı kuyruk bakımı (commit'siz çekirdek; testler doğrudan çağırır).
+
+        Görevler (sırasıyla), her kayıt kendi savepoint'inde:
         0. fal'e gönderilmiş, sahibi ölmüş üretimlerin sonucunu request_id ile al
         1. Gönderilmeden ölmüş 'processing' üretimleri tekrar 'pending' yap
         2. Bekleyen işi kalmamış oturumları review/failed'a taşı
-        3. Kapasite varsa sahipsiz bekleyen oturum/revizyonları başlat
-        4. Kalıcı olmayan hatalarla başarısız oturumları üstel beklemeyle yeniden dene
+        3. Kalıcı olmayan hatalarla başarısız oturumları üstel beklemeyle yeniden dene
+        4. İş varsa kuyruk cron'larını tetikle (işleme _cron_process_queue'da)
         """
+        commit = commit or (lambda: None)
         Gen = self.env['ai.studio.generation']
         now = fields.Datetime.now()
 
@@ -3753,14 +3821,23 @@ class AiStudioSession(models.Model):
             ('fal_request_id', '!=', False),
             ('fal_app', '!=', False),
         ] + self._lease_free_domain('session_id.'), limit=20, order='submitted_at asc')
-        if submitted:
-            fal_key = self.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.fal_api_key')
-            if fal_key:
-                import fal_client
-                client = fal_client.SyncClient(key=fal_key)
-                for gen in submitted:
-                    self._recover_submitted_generation(gen, client)
-                    self.env.cr.commit()
+        fal_key = submitted and self.env['ir.config_parameter'].sudo().get_param('ugurlar_ai_studio.fal_api_key')
+        if fal_key:
+            import fal_client
+            client = fal_client.SyncClient(key=fal_key)
+            timeout_at = now - timedelta(minutes=SUBMITTED_TIMEOUT_MINUTES)
+            for gen in submitted:
+                if not self._stuck_step('fal kurtarma', gen,
+                                        lambda: self._recover_submitted_generation(gen, client)):
+                    # NEDEN: kurtarma hep patlıyorsa (bozuk sonuç, silinmiş app) üretim sonsuza
+                    # dek 'processing' kalır ve her 2 dk tekrar denenir; süre aşımında kapat
+                    if gen.submitted_at and gen.submitted_at < timeout_at:
+                        self._stuck_step('kurtarılamayan üretimi kapatma', gen, lambda: gen.write({
+                            'state': 'failed', 'error_type': 'timeout', 'is_retryable': True,
+                            'error_message': _('fal sonucu %d dakika içinde kurtarılamadı.')
+                            % SUBMITTED_TIMEOUT_MINUTES,
+                        }))
+                commit()
 
         # ═══ 1: gönderilmeden ölmüş işler → tekrar kuyruğa ═══
         orphans = Gen.search([
@@ -3769,98 +3846,71 @@ class AiStudioSession(models.Model):
             ('write_date', '<', now - timedelta(minutes=2)),
         ] + self._lease_free_domain('session_id.'))
         for gen in orphans:
-            if gen.retry_count >= 3:
-                gen.write({'state': 'failed', 'error_type': 'orphaned', 'is_retryable': False,
-                           'error_message': _('İşlem 3 kez yarıda kesildi (sunucu yeniden başlıyor olabilir).')})
-            else:
-                gen.write(dict(CLEAR_FAL_REQUEST, state='pending', error_message=False,
-                               retry_count=gen.retry_count + 1))
-                _logger.warning('Cron: sahipsiz üretim tekrar kuyruğa alındı (gen=%s, deneme %d/3)',
-                                gen.id, gen.retry_count)
+            def _requeue(gen=gen):
+                if gen.retry_count >= 3:
+                    gen.write({'state': 'failed', 'error_type': 'orphaned', 'is_retryable': False,
+                               'error_message': _('İşlem 3 kez yarıda kesildi (sunucu yeniden başlıyor olabilir).')})
+                else:
+                    gen.write(dict(CLEAR_FAL_REQUEST, state='pending', error_message=False,
+                                   retry_count=gen.retry_count + 1))
+                    _logger.warning('Cron: sahipsiz üretim tekrar kuyruğa alındı (gen=%s, deneme %d/3)',
+                                    gen.id, gen.retry_count)
+            self._stuck_step('sahipsiz üretimi kuyruğa alma', gen, _requeue)
 
         # ═══ 2: bekleyen işi kalmamış oturumları sonlandır ═══
         active_states = ['preprocessing', 'processing']
-        self.search([('state', 'in', active_states)] + self._lease_free_domain())._finalize_idle_session_state()
-        self.env.cr.commit()
+        for session in self.search([('state', 'in', active_states)] + self._lease_free_domain()):
+            self._stuck_step('oturumu sonlandırma', session, session._finalize_idle_session_state)
+        commit()
 
-        # ═══ 3: kapasite varsa sahipsiz işleri başlat ═══
-        api_key = self._get_active_api_key()
-        concurrent_limit = int(self.env['ir.config_parameter'].sudo().get_param(
-            'ugurlar_ai_studio.concurrent_limit', '2') or 2)
-        active_leases = self.search_count([('ai_lease_until', '>', now)])
-        slots = max(0, concurrent_limit - active_leases)
-        if not api_key:
-            if self.search_count([('state', 'in', active_states)]):
-                _logger.warning('Cron Kuyruk: Bekleyen işlemler var ama API anahtarı bulunamadı!')
-        elif slots and self._budget_status()[0]:
-            _logger.warning('Cron Kuyruk: aylık AI bütçesi dolu, yeni iş başlatılmıyor')
-        elif slots:
-            # Yeni başlatılan oturumun thread'i kira almadan önce semaphore bekliyor
-            # olabilir; 1 dk'dan yeni oturumlara dokunma (kira yine de mükerrer işi engeller)
-            waiting_sessions = self.search([
-                ('state', 'in', active_states),
-                ('generation_ids.state', '=', 'pending'),
-                ('write_date', '<', now - timedelta(minutes=1)),
-                # Ön yüz fal kuyruğundaysa önce 0. adım sonucu alsın (referans + analiz)
-                ('generation_ids', 'not any', [
-                    ('photo_type', '=', 'front'),
-                    ('state', '=', 'processing'),
-                    ('fal_request_id', '!=', False),
-                ]),
-            ] + self._lease_free_domain(), order='write_date asc', limit=slots)
-            if waiting_sessions:
-                _logger.info('Cron Kuyruk: %d sahipsiz oturum başlatılıyor (%s)',
-                             len(waiting_sessions), waiting_sessions.ids)
-                thread = threading.Thread(target=self._process_batch_ai_thread,
-                                          args=(waiting_sessions.ids, api_key, self.env.uid or 1))
-                thread.daemon = True
-                thread.start()
-                slots -= len(waiting_sessions)
-            if slots > 0:
-                pending_revisions = Gen.search([
-                    ('session_id.state', '=', 'review'),
-                    ('state', '=', 'pending'),
-                    ('write_date', '<', now - timedelta(minutes=1)),
-                ] + self._lease_free_domain('session_id.'), order='write_date asc, id asc', limit=slots)
-                for rev_gen in pending_revisions:
-                    _logger.info('Cron Kuyruk: bekleyen revizyon başlatılıyor (gen=%s)', rev_gen.id)
-                    rev_gen.session_id._process_single_generation(rev_gen, check_budget=False)
+        # ═══ 3: otomatik yeniden deneme — sadece kalıcı olmayan hatalar, üstel bekleme ═══
+        if not self._budget_status()[0]:
+            failed_sessions = self.search([
+                ('state', '=', 'failed'),
+                ('retry_count', '<', 3),
+                ('write_date', '>=', now - timedelta(minutes=60)),
+            ])
+            for session in failed_sessions:
+                # 2, 4, 8 dakika bekle
+                if session.write_date > now - timedelta(minutes=2 ** (session.retry_count + 1)):
+                    continue
+                retryable = session.generation_ids.filtered(lambda g: g.state == 'failed' and g.is_retryable)
+                if not retryable:
+                    continue
 
-        # ═══ 4: otomatik yeniden deneme — sadece kalıcı olmayan hatalar, üstel bekleme ═══
-        if self._budget_status()[0]:
-            return
-        failed_sessions = self.search([
-            ('state', '=', 'failed'),
-            ('retry_count', '<', 3),
-            ('write_date', '>=', now - timedelta(minutes=60)),
-        ])
-        for session in failed_sessions:
-            # 2, 4, 8 dakika bekle
-            if session.write_date > now - timedelta(minutes=2 ** (session.retry_count + 1)):
-                continue
-            failed_gens = session.generation_ids.filtered(lambda g: g.state == 'failed')
-            retryable = failed_gens.filtered('is_retryable')
-            if not retryable:
-                continue
-            retryable.write(dict(CLEAR_FAL_REQUEST, state='pending', error_message=False, error_type=False))
-            session.write({'state': 'processing', 'retry_count': session.retry_count + 1})
-            try:
-                session.message_post(body=_('🔄 Otomatik yeniden deneme #%d/3 — %d üretim kuyruğa alındı.') % (
-                    session.retry_count, len(retryable)))
-            except Exception:
-                pass
-            _logger.info('Cron: başarısız oturum yeniden denemeye alındı (session=%s, retry=%d/3)',
-                         session.name, session.retry_count)
+                def _auto_retry(session=session, retryable=retryable):
+                    retryable.write(dict(CLEAR_FAL_REQUEST, state='pending', error_message=False, error_type=False))
+                    session.write({'state': 'processing', 'retry_count': session.retry_count + 1})
+                    _logger.info('Cron: başarısız oturum yeniden denemeye alındı (session=%s, retry=%d/3)',
+                                 session.name, session.retry_count)
+                if self._stuck_step('otomatik yeniden deneme', session, _auto_retry):
+                    # Bilgi mesajı ayrı savepoint'te: chatter hatası yeniden denemeyi geri almasın
+                    self._stuck_step('yeniden deneme mesajı', session, lambda session=session, n=len(retryable):
+                                     session.message_post(body=_(
+                                         '🔄 Otomatik yeniden deneme #%d/3 — %d üretim kuyruğa alındı.')
+                                         % (session.retry_count, n)))
 
-        # Retry limiti aşılmış oturumlar için tek seferlik bildirim
-        for session in self.search([('state', '=', 'failed'), ('retry_count', '=', 3)]):
-            try:
-                session.message_post(
-                    body=_('❌ Otomatik yeniden deneme limiti (3/3) aşıldı. '
-                           'Lütfen sorunu kontrol edip "🔄 Kaldığı Yerden Devam Et" ile tekrar deneyin.'))
-                session.write({'retry_count': 4})
-            except Exception:
-                pass
+            # Retry limiti aşılmış oturumlar için tek seferlik bildirim
+            for session in self.search([('state', '=', 'failed'), ('retry_count', '=', 3)]):
+                def _notify_limit(session=session):
+                    session.message_post(
+                        body=_('❌ Otomatik yeniden deneme limiti (3/3) aşıldı. '
+                               'Lütfen sorunu kontrol edip "🔄 Kaldığı Yerden Devam Et" ile tekrar deneyin.'))
+                    session.write({'retry_count': 4})
+                self._stuck_step('yeniden deneme limiti bildirimi', session, _notify_limit)
+
+        # Ölü kuyruk işinde (worker yeniden başladı) 'generating' kalan manken: buton gizli
+        # kalmasın. write_date işin alındığı an (_queue_claim_mannequin yazar).
+        for preset in self.env['ai.studio.model.preset'].search([
+                ('mannequin_generation_state', '=', 'generating'),
+                ('write_date', '<', now - timedelta(minutes=MANNEQUIN_STUCK_MINUTES))]):
+            _logger.warning('Stuck cron: manken üretimi yarıda kalmış (preset=%s), başarısız sayıldı', preset.id)
+            self._stuck_step('takılmış manken üretimi', preset,
+                             lambda preset=preset: preset.write({'mannequin_generation_state': 'failed'}))
+
+        # ═══ 4: kuyruk cron'larını uyandır (kurtarılan ön yüz, yeniden kuyruğa alınanlar) ═══
+        if self._queue_has_work():
+            self._trigger_ai_queue()
 
     def write(self, vals):
         res = super(AiStudioSession, self).write(vals)

@@ -9,6 +9,7 @@ from . import ai_studio_candidate
 from . import ai_studio_set_line
 from . import ai_studio_usage
 from . import ai_studio_session
+from . import ai_studio_cost_report
 from . import ai_studio_imageless
 from . import ai_studio_dashboard
 from . import res_config_settings
