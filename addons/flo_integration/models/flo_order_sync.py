@@ -1,14 +1,11 @@
 
 import json
 import logging
-import pytz
 from datetime import datetime, timedelta
 
 from odoo import api, fields, models
 
 _logger = logging.getLogger(__name__)
-
-IST = pytz.timezone('Europe/Istanbul')
 
 # Flo'nun kabul ettiği sipariş statüleri (string)
 FLO_VALID_ORDER_STATUSES = ('Created', 'Picking')
@@ -40,13 +37,14 @@ class FloOrderSync(models.Model):
         updated_count = 0
         error_count = 0
         
-        # Flo API Türkiye saatinde çalışır — sorgu tarihlerini Türkiye saatine çevir
-        now_turkey = datetime.now(pytz.UTC).astimezone(IST).replace(tzinfo=None)
-        start_date = now_turkey - timedelta(days=store.order_day_range or 1)
-        end_date = now_turkey + timedelta(minutes=5)  # küçük güvenlik marjı
-        
-        _logger.info("Flo [%s] sipariş çekme (TR saati): %s → %s", store.name, start_date, end_date)
-        
+        # NEDEN: Flo startDate/endDate gerçek UNIX epoch'tur (orderDate yanıtı da öyle); pencere UTC'de
+        # kurulur. Eskiden TR saati naive geçilip sunucu UTC'sinde epoch'a çevriliyordu → 3 saat kayma.
+        now_utc = fields.Datetime.now()
+        start_date = now_utc - timedelta(days=store.order_day_range or 1)
+        end_date = now_utc + timedelta(minutes=5)  # küçük güvenlik marjı
+
+        _logger.info("Flo [%s] sipariş çekme (UTC): %s → %s", store.name, start_date, end_date)
+
         page = 1
         total_pages = 1
         
@@ -69,9 +67,7 @@ class FloOrderSync(models.Model):
                 order_date_ts = order_json.get('orderDate')
                 if order_date_ts:
                     try:
-                        # UNIX timestamp → UTC → Türkiye saati (start_date Türkiye saatinde)
-                        _utc_dt = datetime.utcfromtimestamp(int(order_date_ts))
-                        order_dt = pytz.UTC.localize(_utc_dt).astimezone(IST).replace(tzinfo=None)
+                        order_dt = datetime.utcfromtimestamp(int(order_date_ts))
                         if order_dt < start_date:
                             _logger.debug(
                                 "Eski sipariş atlandı (orderDate=%s < startDate=%s): %s",
@@ -107,10 +103,14 @@ class FloOrderSync(models.Model):
         if not order_number:
             return 'skipped'
 
-        existing_flo = self.search([('order_number', '=', order_number)], limit=1)
-        
+        # NEDEN: store_id olmadan yalnız order_number ile aramak, iki mağazada aynı numara gelirse
+        # yanlış kayda yazar.
+        existing_flo = self.search([
+            ('store_id', '=', store.id), ('order_number', '=', str(order_number)),
+        ], limit=1)
+
         order_status = order_json.get('shipmentPackageStatus', '')
-        
+
         if existing_flo:
             update_vals = {'order_status': order_status}
             cargo_tracking = order_json.get('cargoTrackingNumber', '')
@@ -119,6 +119,10 @@ class FloOrderSync(models.Model):
             cargo_provider = order_json.get('cargoProviderName', '')
             if cargo_provider and not existing_flo.cargo_provider:
                 update_vals['cargo_provider'] = cargo_provider
+            # NEDEN: koşulsuz write her 5 dk'da tüm pencereyi write_date'e bulayıp 'updated' sayıyordu.
+            update_vals = {k: v for k, v in update_vals.items() if (existing_flo[k] or '') != (v or '')}
+            if not update_vals:
+                return 'unchanged'
             existing_flo.write(update_vals)
             return 'updated'
 

@@ -1,11 +1,21 @@
 import base64
 import logging
 import requests
-from datetime import datetime
+from datetime import datetime, timezone
 
 _logger = logging.getLogger(__name__)
 
 FLO_API_URL = 'https://api.flo.com.tr/v1'
+
+
+def _epoch(value):
+    """datetime -> UNIX epoch (sn). Naive datetime UTC kabul edilir (Odoo kuralı)."""
+    # NEDEN: naive .timestamp() sunucu yerel saatini kullanır; TZ'si UTC olmayan sunucuda pencere kayar.
+    if isinstance(value, datetime):
+        if value.tzinfo is None:
+            value = value.replace(tzinfo=timezone.utc)
+        return int(value.timestamp())
+    return int(value)
 
 
 class FloAPIClient:
@@ -60,16 +70,10 @@ class FloAPIClient:
         }
         
         if start_date:
-            if isinstance(start_date, datetime):
-                params['startDate'] = int(start_date.timestamp())
-            else:
-                params['startDate'] = int(start_date)
-        
+            params['startDate'] = _epoch(start_date)
+
         if end_date:
-            if isinstance(end_date, datetime):
-                params['endDate'] = int(end_date.timestamp())
-            else:
-                params['endDate'] = int(end_date)
+            params['endDate'] = _epoch(end_date)
 
         return self._request('GET', '/orders', params=params)
 
@@ -95,7 +99,7 @@ class FloAPIClient:
         _logger.warning("Flo get_payment_agreements: Bu servis henüz FLO API'de desteklenmiyor olabilir.")
         params = {}
         if start_date:
-            params['startDate'] = int(start_date.timestamp()) if isinstance(start_date, datetime) else int(start_date)
+            params['startDate'] = _epoch(start_date)
         if end_date:
-            params['endDate'] = int(end_date.timestamp()) if isinstance(end_date, datetime) else int(end_date)
+            params['endDate'] = _epoch(end_date)
         return self._request('GET', '/payment-agreements', params=params)
