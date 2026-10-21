@@ -835,6 +835,20 @@ export class PackingScreen extends Component {
         return true;
     }
 
+    // Okutma yanıtındaki satır durumunu listeye işler; satır listede yoksa false (çağıran tam yeniler).
+    // Sayaçlar sunucu detayıyla aynı kuralla türetilir: iptal satırı sayıma girmez.
+    _applyItemUpdate(upd) {
+        const items = this.state.items || [];
+        const item = upd && items.find(i => i.move_id === upd.move_id);
+        if (!item) return false;
+        const { move_id, ...fields } = upd;
+        Object.assign(item, fields);
+        const counted = items.filter(i => !i.cancelled);
+        this.state.matched = counted.filter(i => i.matched).length;
+        this.state.all_matched = this.state.matched === counted.length;
+        return true;
+    }
+
     // Aynı rotada bir picking için otomatik etiket bir kez istenir; tekrarında "Tekrar Yazdır" sunulur
     _autoPrintLabel(pickingId) {
         if (!this._alive) return false;  // ekrandan çıkıldıktan sonra etiket penceresi açılmaz
@@ -941,8 +955,12 @@ export class PackingScreen extends Component {
                 this.state.scanOk = true;
                 speak('packing_scan_success');
 
-                // Listeyi güncelle (sıra numaralı: eski yanıt yeni listeyi ezmez)
-                await this._refreshList(batchId, ctx);
+                // Listeyi güncelle. Sıradan okutmada yanıttaki satır yamanır (ikinci ağır istek yok);
+                // sipariş tamamlanması, hata, rota kapanışı gibi yapı değişince tam yenilenir
+                // (sıra numaralı: eski yanıt yeni listeyi ezmez)
+                if (res.refresh_needed || !this._applyItemUpdate(res.item_update)) {
+                    await this._refreshList(batchId, ctx);
+                }
 
                 if (res.validate_error) {
                     // Okutma sayıldı ama sevkiyat doğrulanamadı: etiket basılmaz, Nebim çalışmaz
