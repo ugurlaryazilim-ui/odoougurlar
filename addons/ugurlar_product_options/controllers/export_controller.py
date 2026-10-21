@@ -3,6 +3,7 @@ import json
 import logging
 
 from odoo import http
+from odoo.exceptions import AccessError
 from odoo.http import request, content_disposition
 
 _logger = logging.getLogger(__name__)
@@ -22,6 +23,12 @@ class ProductExportController(http.Controller):
 
     @http.route('/ugurlar/product/export', type='http', auth='user', methods=['POST'], csrf=True)
     def export_products(self, **kwargs):
+        # NEDEN: auth='user' portal kullanıcısını da içerir; istemci alan adlarını kendi seçtiği için
+        # (maliyet fiyatı vb.) yalnız iç kullanıcıya açık
+        if not request.env.user.has_group('base.group_user'):
+            return request.make_response(
+                'Forbidden', headers=[('Content-Type', 'text/plain')], status=403,
+            )
         data = json.loads(kwargs.get('data', '{}'))
         res_model = data.get('res_model', 'product.product')
         if res_model not in ('product.product', 'product.template'):
@@ -39,7 +46,13 @@ class ProductExportController(http.Controller):
 
         # Ürünleri oku
         field_names = [f['name'] for f in field_defs]
-        products = request.env[res_model].sudo().browse(ids).read(field_names)
+        # NEDEN: sudo yok — kullanıcının kendi alan/kayıt hakları geçerli; yetkisiz alan 403 döner
+        try:
+            products = request.env[res_model].browse(ids).read(field_names)
+        except AccessError:
+            return request.make_response(
+                'Forbidden', headers=[('Content-Type', 'text/plain')], status=403,
+            )
 
         # XLSX oluştur
         output = io.BytesIO()

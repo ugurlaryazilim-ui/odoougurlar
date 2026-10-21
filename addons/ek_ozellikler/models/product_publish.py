@@ -28,7 +28,8 @@ class ProductTemplate(models.Model):
             return
 
         # ── Görseli olan ürün ID'lerini SQL ile bul (MemoryError önleme) ──
-        # image_1920 attachment olarak saklanıyor, binary yüklemeden kontrol
+        # NEDEN: image_1920 attachment alanı, product_template'te kolonu yok (SELECT image_1920 SQL hatası verir);
+        # DB'de saklanan görsel de ir_attachment satırı olarak durur, ayrı bir kolon kontrolü gerekmez
         cr = self.env.cr
         cr.execute("""
             SELECT DISTINCT res_id
@@ -38,17 +39,6 @@ class ProductTemplate(models.Model):
               AND res_id IN %s
         """, (tuple(self.ids),))
         ids_with_image = {row[0] for row in cr.fetchall()}
-
-        # Attachment'ta bulunamadıysa, tabloda direkt saklananları da kontrol et
-        if len(ids_with_image) < len(self):
-            remaining_ids = tuple(set(self.ids) - ids_with_image)
-            if remaining_ids:
-                cr.execute("""
-                    SELECT id FROM product_template
-                    WHERE id IN %s
-                      AND image_1920 IS NOT NULL
-                """, (remaining_ids,))
-                ids_with_image.update(row[0] for row in cr.fetchall())
 
         # ── Filtreleme ──
         templates_with_image = self.browse(
