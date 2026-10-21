@@ -8,9 +8,18 @@ Marka/Sezon/Cinsiyet bilgilerini Nitelikler'den (product.attribute) çeker.
 """
 
 import logging
+from datetime import timedelta
+
 from odoo import api, fields, models
 
 _logger = logging.getLogger(__name__)
+
+# NEDEN: menü her açılışta TRUNCATE + tam stok/ürün taraması yapıyordu (ACCESS EXCLUSIVE kilit + dakikalar).
+# Liste bu süre içinde yeniden hesaplanmaz; "Listeyi Yenile" düğmesi süreyi beklemeden zorlar.
+IMAGELESS_CACHE_MINUTES = 15
+IMAGELESS_REFRESHED_PARAM = 'ugurlar_ai_studio.imageless_refreshed_at'
+# DIKKAT: eşzamanlı iki yenileme aynı tabloyu TRUNCATE+INSERT eder; ikincisi beklemez, mevcut listeyi gösterir.
+IMAGELESS_LOCK_KEY = 7430195221
 
 
 class AiStudioImagelessLine(models.Model):
@@ -73,7 +82,28 @@ class AiStudioImagelessLine(models.Model):
     # Listeyi Yenile
     # -------------------------------------------------------------------------
     @api.model
+    def action_refresh_cached(self):
+        """Menü açılışı: liste yeterince tazeyse hesaplama yapmadan göster."""
+        last = self.env['ir.config_parameter'].sudo().get_param(IMAGELESS_REFRESHED_PARAM)
+        if last and fields.Datetime.now() - fields.Datetime.to_datetime(last) < timedelta(
+                minutes=IMAGELESS_CACHE_MINUTES):
+            return {'type': 'ir.actions.client', 'tag': 'reload'}
+        return self.action_refresh()
+
+    @api.model
     def action_refresh(self):
+        """Listeyi zorla yenile (düğme); başka bir yenileme sürüyorsa beklemeden mevcut listeyi göster."""
+        self.env.cr.execute("SELECT pg_try_advisory_xact_lock(%s)", (IMAGELESS_LOCK_KEY,))
+        if not self.env.cr.fetchone()[0]:
+            _logger.info('Görselsiz ürün listesi başka bir yenileme tarafından hesaplanıyor; atlandı.')
+            return {'type': 'ir.actions.client', 'tag': 'reload'}
+        result = self._refresh_lines()
+        self.env['ir.config_parameter'].sudo().set_param(
+            IMAGELESS_REFRESHED_PARAM, fields.Datetime.to_string(fields.Datetime.now()))
+        return result
+
+    @api.model
+    def _refresh_lines(self):
         """Görselsiz + stokta olan ürünleri tespit et ve tabloyu güncelle."""
         _logger.info('Görselsiz ürün listesi yenileniyor...')
 

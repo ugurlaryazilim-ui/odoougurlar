@@ -18,3 +18,4 @@ from . import test_nebim_chain_budget
 from . import test_find_product_index
 from . import test_no_scan_chatter
 from . import test_perf_packing_schedule
+from . import test_gc_operations

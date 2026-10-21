@@ -37,18 +37,18 @@ export class SocialInbox extends Component {
         
         onMounted(() => {
             // Live Polling every 10 seconds
+            // NEDEN: gizli sekmede ve önceki tur bitmeden sorgu atılmaz (10 sn'de bir limitsiz okuma sunucuyu yoruyordu).
             this.pollInterval = setInterval(async () => {
-                await this.loadConversations();
-                if (this.state.activeConversation) {
-                    // Save scroll position before reload to see if we need to auto-scroll
-                    const isAtBottom = this.chatContainerRef.el ? 
-                        (this.chatContainerRef.el.scrollHeight - this.chatContainerRef.el.scrollTop <= this.chatContainerRef.el.clientHeight + 50) : false;
-                    
-                    await this.loadMessages(this.state.activeConversation.id);
-                    
-                    if (isAtBottom) {
-                        setTimeout(() => this.scrollToBottom(), 50);
-                    }
+                if (document.hidden || this._polling) {
+                    return;
+                }
+                this._polling = true;
+                try {
+                    await this._pollOnce();
+                } catch (e) {
+                    // geçici ağ/sunucu hatası: sonraki turda yeniden denenir
+                } finally {
+                    this._polling = false;
                 }
             }, 10000);
             this.scrollToBottom();
@@ -99,12 +99,25 @@ export class SocialInbox extends Component {
         return enStr;
     }
 
+    async _pollOnce() {
+        await this.loadConversations();
+        if (this.state.activeConversation) {
+            // Save scroll position before reload to see if we need to auto-scroll
+            const el = this.chatContainerRef.el;
+            const isAtBottom = el ? (el.scrollHeight - el.scrollTop <= el.clientHeight + 50) : false;
+            await this.loadMessages(this.state.activeConversation.id);
+            if (isAtBottom) {
+                setTimeout(() => this.scrollToBottom(), 50);
+            }
+        }
+    }
+
     async loadConversations() {
         this.state.conversations = await this.orm.searchRead(
             "social.media.conversation",
             [],
             ["id", "name", "platform", "unread_count", "state", "user_id"],
-            { order: "last_message_date desc" }
+            { order: "last_message_date desc", limit: 100 }
         );
     }
 
@@ -154,12 +167,14 @@ export class SocialInbox extends Component {
     }
 
     async loadMessages(convId) {
-        this.state.messages = await this.orm.searchRead(
+        // NEDEN: uzun görüşmede tüm geçmiş her 10 sn okunmasın; son 200 mesaj (en yeni → eski çekilip çevrilir).
+        const msgs = await this.orm.searchRead(
             "social.media.message",
             [["conversation_id", "=", convId]],
             ["id", "content", "message_type", "date", "is_read", "post_link", "has_attachment"],
-            { order: "date asc" }
+            { order: "date desc, id desc", limit: 200 }
         );
+        this.state.messages = msgs.reverse();
     }
 
     autoResizeInput(ev) {

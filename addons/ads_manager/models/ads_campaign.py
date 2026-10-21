@@ -148,7 +148,8 @@ class AdsCampaign(models.Model):
             raise UserError(_('Only draft campaigns can be submitted for approval.'))
         self.write({'approval_status': 'pending'})
         # Notify managers
-        managers = self.env.ref('ads_manager.group_ads_manager').users
+        # NEDEN: Odoo 19'da res.groups.users yok; all_user_ids ima edilen (admin) kullanıcıları da kapsar.
+        managers = self.env.ref('ads_manager.group_ads_manager').all_user_ids
         for manager in managers:
             self.activity_schedule(
                 'mail.mail_activity_data_todo',

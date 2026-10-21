@@ -1,6 +1,12 @@
 # -*- coding: utf-8 -*-
 from odoo import models, fields, api
-from datetime import datetime
+from datetime import datetime, timedelta
+
+# NEDEN: Facebook/Instagram/token isteklerinde timeout yoktu; yanıt vermeyen sunucu cron işçisini sonsuza dek tutuyordu.
+_HTTP_TIMEOUT = 60
+# DIKKAT: cron her 3 dk çalışır; işçi ölürse ('posting' commit'lenmiş) gönderi sonsuza dek takılırdı.
+# Eşik, en uzun yükleme süresinden (300 sn) ve cron limit_time_real'den büyük olmalı.
+POSTING_STUCK_MINUTES = 30
 
 class SocialMediaPost(models.Model):
     _name = 'social.media.post'
@@ -137,6 +143,20 @@ class SocialMediaPost(models.Model):
         return {'success': False, 'message': f"'{barcode}' barkoduna sahip ürün bulunamadı."}
 
     @api.model
+    def _fail_stuck_posting_posts(self):
+        """`posting`'de zaman aşımından uzun kalan gönderiyi hataya çevir (kullanıcı yeniden zamanlayabilir)."""
+        limit_dt = fields.Datetime.now() - timedelta(minutes=POSTING_STUCK_MINUTES)
+        stuck = self.search([('state', '=', 'posting'), ('write_date', '<', limit_dt)])
+        if not stuck:
+            return stuck
+        stuck.post_line_ids.filtered(lambda l: l.state == 'pending').write({
+            'state': 'error',
+            'error_message': 'Paylaşım %s dakikadan uzun sürdü (zaman aşımı).' % POSTING_STUCK_MINUTES,
+        })
+        stuck.write({'state': 'error'})
+        return stuck
+
+    @api.model
     def _cron_publish_scheduled_posts(self):
         """ Cron job to publish posts whose time has come """
         
@@ -145,10 +165,14 @@ class SocialMediaPost(models.Model):
         if enable_posting != 'True':
             return
             
+        if self._fail_stuck_posting_posts():
+            self.env.cr.commit()
+
+        # NEDEN: bir turda sınırlı sayıda gönderi; her biri dakikalarca sürebilir.
         posts = self.search([
             ('state', '=', 'scheduled'),
             ('scheduled_date', '<=', fields.Datetime.now())
-        ])
+        ], order='scheduled_date asc', limit=10)
         for post in posts:
             post.state = 'posting'
             self.env.cr.commit()
@@ -220,7 +244,7 @@ class SocialMediaPostLine(models.Model):
             # Text only post
             url = f"https://graph.facebook.com/v19.0/{page_id}/feed"
             payload = {'message': message, 'access_token': token}
-            res = requests.post(url, data=payload).json()
+            res = requests.post(url, data=payload, timeout=_HTTP_TIMEOUT).json()
             if 'error' in res:
                 raise ValueError(res['error']['message'])
             self.platform_post_id = res.get('id')
@@ -233,7 +257,7 @@ class SocialMediaPostLine(models.Model):
                 # 3-step Resumable Upload for Facebook Video Stories
                 start_url = f"https://graph.facebook.com/v19.0/{page_id}/video_stories"
                 start_payload = {'upload_phase': 'start', 'access_token': token}
-                start_res = requests.post(start_url, data=start_payload).json()
+                start_res = requests.post(start_url, data=start_payload, timeout=_HTTP_TIMEOUT).json()
                 if 'error' in start_res:
                     raise ValueError("Upload Phase 1 Error: " + start_res['error']['message'])
                 
@@ -242,13 +266,13 @@ class SocialMediaPostLine(models.Model):
                 
                 # Phase 2: Transfer (pass file_url in headers for rupload.facebook.com)
                 headers = {'Authorization': f'OAuth {token}', 'file_url': media_url}
-                transfer_res = requests.post(upload_url, headers=headers).json()
+                transfer_res = requests.post(upload_url, headers=headers, timeout=_HTTP_TIMEOUT).json()
                 if 'error' in transfer_res:
                     raise ValueError("Upload Phase 2 Error: " + transfer_res['error']['message'])
                 
                 # Phase 3: Finish
                 finish_payload = {'upload_phase': 'finish', 'video_id': video_id, 'access_token': token}
-                finish_res = requests.post(start_url, data=finish_payload).json()
+                finish_res = requests.post(start_url, data=finish_payload, timeout=_HTTP_TIMEOUT).json()
                 if 'error' in finish_res:
                     raise ValueError("Upload Phase 3 Error: " + finish_res['error']['message'])
                     
@@ -256,7 +280,7 @@ class SocialMediaPostLine(models.Model):
             else:
                 url = f"https://graph.facebook.com/v19.0/{page_id}/photo_stories"
                 payload = {'url': media_url, 'access_token': token}
-                res = requests.post(url, data=payload).json()
+                res = requests.post(url, data=payload, timeout=_HTTP_TIMEOUT).json()
                 if 'error' in res:
                     raise ValueError(res['error']['message'])
                 self.platform_post_id = res.get('post_id') or res.get('id')
@@ -264,7 +288,7 @@ class SocialMediaPostLine(models.Model):
             url = f"https://graph.facebook.com/v19.0/{page_id}/videos"
             media_url = f"{base_url}/web/content/{images[0].id}"
             payload = {'file_url': media_url, 'description': message, 'access_token': token}
-            res = requests.post(url, data=payload).json()
+            res = requests.post(url, data=payload, timeout=_HTTP_TIMEOUT).json()
             if 'error' in res:
                 raise ValueError(res['error']['message'])
             self.platform_post_id = res.get('id')
@@ -281,7 +305,7 @@ class SocialMediaPostLine(models.Model):
                 url = f"https://graph.facebook.com/v19.0/{page_id}/photos"
                 payload = {'url': media_url, 'message': message, 'access_token': token}
                 
-            res = requests.post(url, data=payload).json()
+            res = requests.post(url, data=payload, timeout=_HTTP_TIMEOUT).json()
             if 'error' in res:
                 raise ValueError(res['error']['message'])
             self.platform_post_id = res.get('post_id') or res.get('id')
@@ -292,7 +316,7 @@ class SocialMediaPostLine(models.Model):
                 url = f"https://graph.facebook.com/v19.0/{page_id}/photos"
                 img_url = f"{base_url}/web/image/{img.id}"
                 payload = {'url': img_url, 'published': 'false', 'access_token': token}
-                res = requests.post(url, data=payload).json()
+                res = requests.post(url, data=payload, timeout=_HTTP_TIMEOUT).json()
                 if 'error' in res:
                     raise ValueError(res['error']['message'])
                 attached_media.append({'media_fbid': res.get('id')})
@@ -305,7 +329,7 @@ class SocialMediaPostLine(models.Model):
                 'attached_media': json.dumps(attached_media),
                 'access_token': token
             }
-            res2 = requests.post(feed_url, data=payload).json()
+            res2 = requests.post(feed_url, data=payload, timeout=_HTTP_TIMEOUT).json()
             if 'error' in res2:
                 raise ValueError(res2['error']['message'])
             self.platform_post_id = res2.get('id')
@@ -362,7 +386,7 @@ class SocialMediaPostLine(models.Model):
             if len(images) == 1 and self.post_id.post_type != 'story':
                  cont_url += f"&caption={urllib.parse.quote(message, safe='')}"
                  
-            res = requests.post(cont_url).json()
+            res = requests.post(cont_url, timeout=_HTTP_TIMEOUT).json()
             if 'error' in res:
                 raise ValueError(res['error']['message'])
             container_ids.append(res.get('id'))
@@ -374,7 +398,7 @@ class SocialMediaPostLine(models.Model):
             import json
             children = "%2C".join(container_ids)
             carousel_url = f"https://graph.facebook.com/v19.0/{ig_id}/media?media_type=CAROUSEL&children={children}&caption={urllib.parse.quote(message, safe='')}&access_token={token}"
-            res2 = requests.post(carousel_url).json()
+            res2 = requests.post(carousel_url, timeout=_HTTP_TIMEOUT).json()
             if 'error' in res2:
                 raise ValueError(res2['error']['message'])
             publish_container_id = res2.get('id')
@@ -389,7 +413,7 @@ class SocialMediaPostLine(models.Model):
             if is_video_post and attempt > 0:
                 time.sleep(wait_time)
                 
-            res3 = requests.post(pub_url).json()
+            res3 = requests.post(pub_url, timeout=_HTTP_TIMEOUT).json()
             
             if 'error' not in res3:
                 self.platform_post_id = res3.get('id')
