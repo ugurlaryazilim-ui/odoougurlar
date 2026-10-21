@@ -1,6 +1,5 @@
 """İleri Özellikler API — stock_movements, label_data, bulk_scan, operator_performance."""
 import logging
-from markupsafe import Markup
 from datetime import datetime, timedelta
 
 from odoo import http
@@ -188,18 +187,7 @@ class OperationsApiController(BarcodeApiBase):
                     'state': 'done',
                 })
 
-                # Varyant chatter log
-                try:
-                    user = request.env.user
-                    msg = Markup(
-                        '<b>&#128230; Toplu Raflama:</b> <em>%s</em> tarafindan '
-                        '<b>%d</b> adet '
-                        '<b>%s</b> rafina yerlestirildi.'
-                    ) % (user.name, int(qty), location.complete_name)
-                    product.sudo().message_post(
-                        body=msg, message_type='notification', subtype_xmlid='mail.mt_note')
-                except Exception as e:
-                    _logger.warning('Chatter log hatasi: %s', e)
+                # NEDEN: ürün chatter'ı yazılmaz; iz yukarıdaki operation kaydında
 
                 results.append({
                     'barcode': bc,
