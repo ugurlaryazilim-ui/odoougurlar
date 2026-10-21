@@ -2274,6 +2274,11 @@ class AiStudioSession(models.Model):
             ]),
         ] + self._lease_free_domain()
 
+    def _queue_saving_domain(self):
+        # NEDEN: complete_session görselleri ürüne HTTP isteğinde değil kuyrukta yazar (resize + çok
+        # varyantlı product.image oluşturma onlarca sn sürebiliyordu)
+        return [('state', '=', 'saving')] + self._lease_free_domain()
+
     def _queue_revision_domain(self):
         # Oturum işleme durumundaysa bekleyen üretimleri oturum işi alır; inceleme /
         # başarısız oturumdaki tek üretim (revizyon, Tekrar Dene) ayrı iştir
@@ -2285,7 +2290,8 @@ class AiStudioSession(models.Model):
     @api.model
     def _queue_has_work(self):
         return bool(
-            self.search_count(self._queue_session_domain(), limit=1)
+            self.search_count(self._queue_saving_domain(), limit=1)
+            or self.search_count(self._queue_session_domain(), limit=1)
             or self.env['ai.studio.generation'].search_count(self._queue_revision_domain(), limit=1)
             or self.env['ai.studio.model.preset'].search_count(
                 [('mannequin_generation_state', '=', 'queued')], limit=1)
@@ -2313,7 +2319,7 @@ class AiStudioSession(models.Model):
         """Sıradaki tek işi seç ve kirasını al (commit ETMEZ; cron sarmalayıcısı commit eder).
 
         Returns: None | ('session', session_id, False) | ('revision', session_id, gen_id)
-                 | ('mannequin', preset_id, False)
+                 | ('save', session_id, False) | ('mannequin', preset_id, False)
         """
         global _queue_limit_warned
         limit = int(self.env['ir.config_parameter'].sudo().get_param(
@@ -2326,6 +2332,10 @@ class AiStudioSession(models.Model):
                             'eşzamanlılık %d ile sınırlı.', limit, len(AI_QUEUE_CRONS), len(AI_QUEUE_CRONS))
         if slot > limit:
             return None
+        # Ürüne kaydetme API anahtarı/bütçe gerektirmez ve onaycıyı bekletir: AI işlerinden önce
+        for session in self.search(self._queue_saving_domain(), order='write_date asc, id asc', limit=20):
+            if self._queue_lock_and_lease(session.id, owner):
+                return ('save', session.id, False)
         if not self._get_active_api_key():
             if self._queue_has_work():
                 _logger.warning('AI kuyruğu: bekleyen iş var ama API anahtarı bulunamadı!')
@@ -2388,6 +2398,16 @@ class AiStudioSession(models.Model):
         if kind == 'mannequin':
             self.env['ai.studio.model.preset']._run_mannequin_job(res_id)
             return
+        if kind == 'save':
+            try:
+                self._run_save_job(res_id)
+                # NEDEN: commit burada (testte cr.commit yasak olduğundan _run_save_job içinde değil)
+                self.env.cr.commit()
+            except Exception:
+                _logger.exception('AI kuyruğu: ürüne kaydetme beklenmeyen hata (session=%s)', res_id)
+            finally:
+                _release_session_lease(self.pool, res_id, owner)
+            return
         api_key = self._get_active_api_key()
         # DIKKAT: okuma cron cursor'ında yeni transaction açar; iş (dakikalar) boyunca
         # idle-in-transaction snapshot kalmasın
@@ -2404,6 +2424,34 @@ class AiStudioSession(models.Model):
         finally:
             clear_usage_recorder()
             _release_session_lease(self.pool, res_id, owner)
+
+    @api.model
+    def _run_save_job(self, session_id):
+        """'saving' oturumun onaylı görsellerini ürüne yaz; başarıda 'done', hatada 'review' (mesajla).
+
+        DIKKAT: hata durumunda oturum 'saving'de bırakılırsa kuyruk aynı işi sonsuza dek alır; 'review'a
+        dönmek onaycının yeniden denemesine izin verir. Kaydetme idempotenttir (eski AI görselleri silinip
+        yeniden yazılır), kira dolup başka slot alsa da çift kayıt oluşmaz.
+        """
+        session = self.browse(session_id)
+        if session.state != 'saving':
+            return
+        try:
+            with self.env.cr.savepoint():
+                approved = session.generation_ids.filtered(
+                    lambda g: g.is_approved and g.state == 'done' and not g.is_excluded)
+                if not approved:
+                    raise UserError(_('Onaylı görsel bulunamadı.'))
+                session._save_to_product(approved)
+                # Seçilmeyen alternatif adaylar artık gereksiz — depolamayı boşalt
+                session.generation_ids.candidate_ids.unlink()
+                session.write({'state': 'done', 'date_done': fields.Datetime.now()})
+                session.message_post(body=_('%d onaylı görsel ürüne başarıyla kaydedildi.') % len(approved))
+            _logger.info('Ürüne kaydetme: %s (%s) tamamlandı, %d görsel.', session.name, session.id, len(approved))
+        except Exception as err:
+            _logger.exception('Ürüne kaydetme hatası (session=%s)', session_id)
+            session.write({'state': 'review'})
+            session.message_post(body=_('Ürüne kaydetme başarısız, tekrar "Tamamla" deneyin: %s') % str(err)[:300])
 
     @api.model
     def _queue_mark_job_failed(self, kind, session_id, gen_id, err, uid):
