@@ -40,7 +40,8 @@ class TestPazaramaSyncWrites(TransactionCase):
         self._sync({'orderId': 'W2', 'orderNumber': 'W2'})
         self.assertGreater(rec.last_checked, old)
 
-    def test_cron_window_capped_manual_not(self):
+    def test_cron_uses_store_window(self):
+        # A4 K1: cron mağaza penceresini (14 gün) kullanır, 3 güne daraltmaz.
         calls = []
 
         def fake_fetch(api_client, start_date, end_date, *a, **kw):
@@ -51,6 +52,13 @@ class TestPazaramaSyncWrites(TransactionCase):
         with patch.object(M, '_fetch_orders', side_effect=fake_fetch), \
                 patch.object(M, '_refresh_stale_orders'), patch.object(M, '_cancel_pending_orders'), \
                 patch.object(type(self.store), 'get_api'):
-            self.Order.sync_orders_for_store(self.store, max_days=3)
             self.Order.sync_orders_for_store(self.store)
-        self.assertEqual(calls, [3, 14])
+            self.Order.sync_orders_for_store(self.store, max_days=3)
+        self.assertEqual(calls, [14, 3])
+
+    def test_cron_entry_passes_no_max_days(self):
+        seen = []
+        M = type(self.Order)
+        with patch.object(M, 'sync_orders_for_store', side_effect=lambda store, **kw: seen.append(kw)):
+            self.Order.sync_orders_from_pazarama()
+        self.assertTrue(all(not kw for kw in seen))
