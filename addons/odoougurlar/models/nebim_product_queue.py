@@ -189,7 +189,10 @@ class NebimProductQueue(models.Model):
                 parsed[record.id] = json.loads(record.raw_data)
             except Exception:
                 pass
-        processor._init_cache([row for rows in parsed.values() for row in rows])
+        # Yalnız liste biçimindeki kayıtlar cache kapsamına girer (dict/None gibi bozuk veri
+        # işleme döngüsünde kendi kaydını error yapar, partiyi düşürmez).
+        processor._init_cache([
+            row for rows in parsed.values() if isinstance(rows, list) for row in rows])
 
         batch_created = 0
         batch_updated = 0
