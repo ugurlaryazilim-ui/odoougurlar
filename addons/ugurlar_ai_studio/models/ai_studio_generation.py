@@ -3,7 +3,7 @@ import time
 from collections import OrderedDict
 
 from odoo import models, fields, api, _
-from odoo.exceptions import AccessError, UserError, ValidationError
+from odoo.exceptions import UserError, ValidationError
 
 from ..services.garment_analyzer import report_gemini_usage
 
@@ -452,28 +452,21 @@ class AiStudioGeneration(models.Model):
         self.revision_prompt_en = self._translate_prompt(self.revision_prompt)
 
 
-    # Onay sonrası ('saving'/'done') değişirse onaylanandan farklı görsel/ürün yazılır (A4 O1)
-    _APPROVED_LOCKED_FIELDS = frozenset((
-        'session_id', 'set_line_id', 'product_id', 'photo_type', 'original_image', 'generated_image',
-        'is_approved', 'is_excluded', 'is_primary', 'source_photo_id', 'parent_generation_id',
-    ))
+    # Onay sonrası ('saving'/'done') değişirse onaylanandan farklı görsel/ürün yazılır (A4 O1).
+    # NEDEN: kara liste değil TÜM alanlar kilitli; yalnız yerel klasöre aktarım işareti açık.
+    # DIKKAT: kilit mevcut VE hedef (session_id taşıma) oturuma bakar.
+    _APPROVED_WRITE_ALLOW = frozenset(('is_exported_to_local',))
 
     @api.model_create_multi
     def create(self, vals_list):
         # Batch create'de çeviri yapmıyoruz — performans için
         # Onchange zaten UI'dan gelen kayıtlarda çeviriyi yapıyor
-        session_model = self.env['ai.studio.session']
-        if not session_model._is_approval_authority():
-            sessions = session_model.browse([v['session_id'] for v in vals_list if v.get('session_id')])
-            if sessions.filtered(lambda s: s.state in ('saving', 'done')):
-                raise AccessError(_('Onaylanan oturuma yalnız onaycı veya yönetici üretim ekleyebilir.'))
+        self.env['ai.studio.session']._check_approved_lock_create(vals_list, _('üretim'))
         return super().create(vals_list)
 
     def write(self, vals):
-        session_model = self.env['ai.studio.session']
-        if (self._APPROVED_LOCKED_FIELDS & set(vals)) and not session_model._is_approval_authority() \
-                and self.session_id.filtered(lambda s: s.state in ('saving', 'done')):
-            raise AccessError(_('Onaylanan oturumun üretimini yalnız onaycı veya yönetici değiştirebilir.'))
+        self.env['ai.studio.session']._check_approved_lock_on(
+            self.session_id, vals, self._APPROVED_WRITE_ALLOW, _('üretim'))
         return super().write(vals)
 
     def action_reject(self):

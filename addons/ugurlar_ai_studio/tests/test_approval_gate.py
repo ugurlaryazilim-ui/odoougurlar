@@ -97,6 +97,44 @@ class TestApprovalGate(TransactionCase):
                     {'session_id': session.id, 'product_id': self.other_product.id})
             self.assertEqual(session.product_id, self.product)
 
+    def test_operator_cannot_write_any_other_field_when_saving(self):
+        # izin listesi dışındaki HER alan kilitli (kara liste değil): kısmen sayılmayan alanlar da
+        session = self._session(state='saving', reviewer_id=self.reviewer.id)
+        gen = session.generation_ids[0]
+        for rec, vals in ((session, {'category': 'tops'}), (session, {'extra_prompt': 'x'}),
+                          (session, {'session_type': 'set'}),
+                          (gen, {'state': 'pending'}), (gen, {'revision_number': 9}),
+                          (gen, {'generation_mode': 'set_combo'}), (gen, {'error_message': 'x'})):
+            with self.assertRaises(AccessError, msg=str(vals)):
+                rec.with_user(self.operator).write(vals)
+        # kısa izin listesi açık
+        gen.with_user(self.operator).write({'is_exported_to_local': True})
+        session.with_user(self.operator).write({'state': 'review'})
+
+    def test_operator_cannot_move_rows_into_or_out_of_locked_session(self):
+        locked = self._session(state='saving', reviewer_id=self.reviewer.id)
+        open_session = self._session()
+        open_gen = open_session.generation_ids[0]
+        open_line = self.env['ai.studio.set.line'].create(
+            {'session_id': open_session.id, 'product_id': self.product.id})
+        # açık oturumdan kilitli oturuma taşıma (hedef kilit)
+        with self.assertRaises(AccessError):
+            open_gen.with_user(self.operator).write({'session_id': locked.id})
+        with self.assertRaises(AccessError):
+            open_line.with_user(self.operator).write({'session_id': locked.id})
+        # kilitli oturumdan dışarı taşıma (mevcut kilit)
+        locked_gen = locked.generation_ids[0]
+        with self.assertRaises(AccessError):
+            locked_gen.with_user(self.operator).write({'session_id': open_session.id})
+        # o2m komutuyla ekleme/bağlama
+        with self.assertRaises(AccessError):
+            locked.with_user(self.operator).write({'generation_ids': [(4, open_gen.id)]})
+        self.assertEqual(open_gen.session_id, open_session)
+        self.assertEqual(open_line.session_id, open_session)
+        # onaycı taşıyabilir
+        open_line.with_user(self.reviewer).write({'session_id': locked.id})
+        self.assertEqual(open_line.session_id, locked)
+
     def test_operator_can_still_edit_in_review(self):
         session = self._session()
         session.with_user(self.operator).write({'product_id': self.other_product.id})
