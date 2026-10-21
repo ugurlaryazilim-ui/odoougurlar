@@ -52,6 +52,10 @@ class TestPowerBI(HttpCase):
         self.assertEqual(
             self.url_open('/api/powerbi/image/PBITEST0?token=yanlis').status_code, 403)
 
+    def test_ascii_disi_token_403(self):
+        # G3: ASCII dışı token TypeError → 500 vermemeli
+        self.assertEqual(self.url_open('/api/powerbi/products?token=ğüş').status_code, 403)
+
     def test_kapali_iken_403(self):
         self.env['ir.config_parameter'].sudo().set_param('ugurlar_images.powerbi_enabled', 'False')
         self.assertEqual(self._get('/api/powerbi/products').status_code, 403)

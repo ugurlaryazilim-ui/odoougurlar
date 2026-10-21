@@ -262,15 +262,18 @@ class BulkImageWizard(models.TransientModel):
         except Exception as e:
             # NEDEN: UserError ile ana transaction geri alınır; log ayrı cursor'da yazıldığı için
             # hata nedeni kaybolmaz.
+            # NEDEN: UserError metni bilerek yazılmış; diğer istisnalar (FileNotFoundError vb.)
+            # filestore yolu gibi sunucu ayrıntısı taşıyabilir, kullanıcıya/log kaydına yalnız türü gider.
+            msg = str(e) if isinstance(e, UserError) else type(e).__name__
             self._save_log({
                 'state': 'error',
-                'detail_log': f'HATA: {e}',
+                'detail_log': f'HATA: {msg}',
                 'end_date': fields.Datetime.now(),
             }, log_id)
             if isinstance(e, UserError):
                 raise
             _logger.exception('ZIP toplu görsel yükleme hatası')
-            raise UserError(f'ZIP işleme hatası: {e}') from e
+            raise UserError(f'ZIP işleme hatası: {msg}') from e
 
         self._save_log(log_vals, log_id)
         self.result_message = report
@@ -299,20 +302,23 @@ class BulkImageWizard(models.TransientModel):
             with zipfile.ZipFile(src, 'r') as zf:
                 image_groups, skipped_files = self._group_zip_members(zf, separator, main_index)
 
-                # Barkod → varyant: tek sorgu (barkod başına search yok). İlk eşleşme geçerli.
+                # Barkod → varyant id: tek sorgu (barkod başına search yok). İlk eşleşme geçerli.
+                # NEDEN: kayıt değil id tutulur; döngüde browse edilen tek kayıtlık prefetch,
+                # aramadaki tüm varyantların görsellerinin toplu okunmasını önler.
                 variants_by_code = {}
                 for v in self.env['product.product'].search([(match_field, 'in', list(image_groups))]):
-                    variants_by_code.setdefault(v[match_field], v)
+                    variants_by_code.setdefault(v[match_field], v.id)
 
                 matched = 0
                 not_found = []
                 errors = []
                 details = []
                 for barcode, images in image_groups.items():
-                    variant = variants_by_code.get(barcode)
-                    if not variant:
+                    variant_id = variants_by_code.get(barcode)
+                    if not variant_id:
                         not_found.append(barcode)
                         continue
+                    variant = self.env['product.product'].browse(variant_id)
                     # NEDEN: barkod başına savepoint; bozuk bir görsel yalnız o barkodu geri alır,
                     # diğer barkodlar ve log korunur.
                     try:
@@ -323,6 +329,11 @@ class BulkImageWizard(models.TransientModel):
                     except Exception as e:  # noqa: BLE001 — barkod hatası toplanır, diğerleri sürer
                         _logger.warning('Toplu görsel: %s işlenemedi: %s', barcode, e)
                         errors.append(f'{barcode} → {e}')
+                    # NEDEN: yazılan görsel, 1024/512/256/128 yeniden boyutları ve ek resimler env
+                    # önbelleğinde kalır; boşaltılmazsa tepe bellek barkod sayısıyla doğrusal artar
+                    # (~12 MB/barkod, limit_memory_soft=4GB'a çarpar). flush_all savepoint içinde yapıldı.
+                    # DIKKAT: döngü dışında değişkende tutulan kayıtlar boşaltmadan sonra yeniden okunur.
+                    self.env.invalidate_all()
 
         total = len(image_groups)
         error_count = len(not_found) + len(errors)

@@ -107,7 +107,9 @@ class PowerBIController(http.Controller):
         )
         if not stored_token:
             return False
-        return hmac.compare_digest(str(token), str(stored_token))
+        # NEDEN: compare_digest iki str'den biri ASCII dışıysa TypeError atar (?token=ğ → 500);
+        # bytes karşılaştırması her girdiyle 403'e düşer.
+        return hmac.compare_digest(str(token).encode(), str(stored_token).encode())
 
     def _json_error(self, message, status=403):
         """Standart JSON hata yanıtı."""
