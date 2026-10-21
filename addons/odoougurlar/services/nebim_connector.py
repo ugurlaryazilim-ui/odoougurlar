@@ -67,10 +67,12 @@ CONNECT_TIMEOUT = 8       # Connect/login — kısa tutulmalı
 DATA_TIMEOUT = 300         # Veri gönder/al — tüm ürünleri çekmek uzun sürer
 MAX_RETRIES = 2            # 2 deneme yeterli (toplam maks ~25s)
 # NEDEN: Depo telefonları JSON-RPC ile bekler ve HTTP worker sayısı sınırlı (10); Nebim asılı kalınca
-# 300 sn x 2 deneme bir worker'ı ~10 dk tutuyordu. Varsayılan (cron / toplu içe aktarma) 300 sn kalır;
-# etkileşimli çağıran `timeout=` verir ya da `with_context(nebim_timeout=...)` ile zincire yayar.
+# 300 sn x 2 deneme bir worker'ı ~10 dk tutuyordu. Varsayılan (cron / toplu içe aktarma) 300 sn, 2 deneme kalır;
+# etkileşimli çağıran `timeout=` / `retries=` verir ya da `with_context(nebim_timeout=..., nebim_retries=0)` ile
+# zincire yayar. Not: timeout yalnız ÇAĞRI BAŞINA okuma süresidir; zincirde birden çok çağrı olduğundan
+# toplam süre bunların toplamıdır (tek sipariş: cari + sipariş + fatura + Post, her biri en çok 60 sn).
 INTERACTIVE_TIMEOUT = 15   # Mağaza / depo ekranı okuma uçları (yeniden deneme yok)
-WRITE_CHAIN_TIMEOUT = 60   # Paketleme cari / sipariş / fatura zinciri (HTTP isteği içinde)
+WRITE_CHAIN_TIMEOUT = 60   # Paketleme cari / sipariş / fatura zinciri: çağrı başına (HTTP isteği içinde)
 
 # Session token cache: (token, expiry_timestamp)
 _session_cache = {'token': None, 'expires': 0}
@@ -149,7 +151,8 @@ class NebimConnector(models.AbstractModel):
         """
         Nebim IntegratorService'e bağlanır ve session token döner.
         Token cache'lenir (5dk TTL); force=True ile zorunlu yenileme.
-        retries: ilk denemeden sonraki ek deneme sayısı (None = varsayılan, 0 = yeniden deneme yok).
+        retries: ilk denemeden sonraki ek deneme sayısı (None = context `nebim_retries`, o da yoksa varsayılan;
+        0 = yeniden deneme yok).
 
         URL: POST {base_url}/Connect
 
@@ -157,7 +160,7 @@ class NebimConnector(models.AbstractModel):
             str: SessionID
         """
         global _session_cache
-        max_attempts = MAX_RETRIES if retries is None else retries + 1
+        max_attempts = self._max_attempts(retries)
 
         # Cached token varsa ve süresi dolmamışsa kullan
         if not force and _session_cache['token'] and time.time() < _session_cache['expires']:
@@ -226,10 +229,17 @@ class NebimConnector(models.AbstractModel):
         return f"{root_url}/(S({token}))/IntegratorService/{endpoint}"
 
     @api.private
+    def _max_attempts(self, retries):
+        """Azami deneme: açık `retries` > context `nebim_retries` > MAX_RETRIES (ek deneme sayısı; 0 = tek deneme)."""
+        if retries is None:
+            retries = self.env.context.get('nebim_retries')
+        return MAX_RETRIES if retries is None else retries + 1
+
+    @api.private
     def _call_policy(self, timeout, retries):
-        """(okuma zaman aşımı, azami deneme) — açık parametre > context `nebim_timeout` > varsayılan."""
+        """(okuma zaman aşımı, azami deneme) — açık parametre > context (`nebim_timeout` / `nebim_retries`) > varsayılan."""
         timeout = timeout or self.env.context.get('nebim_timeout') or DATA_TIMEOUT
-        return timeout, MAX_RETRIES if retries is None else retries + 1
+        return timeout, self._max_attempts(retries)
 
     def run_proc(self, proc_name, params=None, timeout=None, retries=None):
         """
@@ -239,7 +249,8 @@ class NebimConnector(models.AbstractModel):
         Body: { ProcName, Parameters: [{Name, Value}] }
 
         timeout: okuma zaman aşımı sn (None = context `nebim_timeout`, o da yoksa 300).
-        retries: ilk denemeden sonraki ek deneme sayısı (None = varsayılan, 0 = yeniden deneme yok).
+        retries: ilk denemeden sonraki ek deneme sayısı (None = context `nebim_retries`, o da yoksa
+        varsayılan 1; 0 = yeniden deneme yok).
         """
         timeout, max_attempts = self._call_policy(timeout, retries)
         token = self._connect(retries=retries)

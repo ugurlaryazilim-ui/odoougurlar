@@ -65,7 +65,7 @@ class TestNebimTimeouts(PackingCase):
         real_post = self.conn_cls.post_data
 
         def spy(conn, endpoint, payload):
-            seen.append(conn.env.context.get('nebim_timeout'))
+            seen.append((conn.env.context.get('nebim_timeout'), conn.env.context.get('nebim_retries')))
             return real_post(conn, endpoint, payload)
         # _nebim_real zaten post_data'yı taklit etti; onun üstüne gözlemci
         with patch.object(self.conn_cls, 'post_data', spy):
@@ -73,8 +73,10 @@ class TestNebimTimeouts(PackingCase):
             res = self.pack_ctl.packing_complete(batch_id=batch.id)
         self.assertTrue(res.get('success'), res)
         self.assertEqual(rec['posts'], 1)
-        self.assertEqual(seen, [nc.WRITE_CHAIN_TIMEOUT])
+        self.assertEqual(seen, [(nc.WRITE_CHAIN_TIMEOUT, 0)])
         self.assertEqual(nc.WRITE_CHAIN_TIMEOUT, 60)
+        # NEDEN: istemci RPC süresi ~90 sn; bütçe onun altında kalmalı
+        self.assertLess(packing_api.NEBIM_COMPLETE_BUDGET, 90)
 
     def test_packing_complete_defers_nebim_when_budget_exhausted(self):
         rec = self._nebim_real()

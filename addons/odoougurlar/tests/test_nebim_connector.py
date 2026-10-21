@@ -126,6 +126,31 @@ class TestNebimCallPolicy(TransactionCase):
                 self.connector.post_data('Post', {}, timeout=60)
         self.assertEqual(self._timeouts(post), [(nc.CONNECT_TIMEOUT, 60)])
 
+    def test_context_retries_zero_disables_retries_including_connect(self):
+        """nebim_retries=0 (paketleme zinciri): idempotent okuma da, bağlantı da tek deneme."""
+        conn = self.connector.with_context(nebim_retries=0)
+        self.addCleanup(nc._session_cache.update, dict(nc._session_cache))
+        nc._session_cache.update(token=None, expires=0)
+        with patch.object(nc._http_session, 'post', side_effect=requests.exceptions.ConnectTimeout()) as post, \
+                patch.object(nc.time, 'sleep') as sleep:
+            with self.assertRaises(Exception):
+                conn.run_proc('sp_GetX')
+        self.assertEqual(post.call_count, 1, 'Connect tek deneme')
+        sleep.assert_not_called()
+        with patch.object(type(self.connector), '_connect', return_value='T'), \
+                patch.object(nc._http_session, 'post', side_effect=requests.exceptions.ReadTimeout()) as post:
+            with self.assertRaises(Exception):
+                conn.run_proc('sp_GetX')
+        self.assertEqual(post.call_count, 1, 'idempotent SP de yeniden denenmez')
+
+    def test_explicit_retries_override_context(self):
+        conn = self.connector.with_context(nebim_retries=0)
+        with patch.object(type(self.connector), '_connect', return_value='T'), \
+                patch.object(nc._http_session, 'post', side_effect=[requests.exceptions.ReadTimeout(), self._ok()]) as post, \
+                patch.object(nc.time, 'sleep'):
+            conn.run_proc('sp_GetX', retries=1)
+        self.assertEqual(post.call_count, 2)
+
     def test_connect_retries_zero_makes_single_attempt(self):
         # NEDEN: modül düzeyinde süreç-geneli önbellek; testten sonra eski haline döner
         self.addCleanup(nc._session_cache.update, dict(nc._session_cache))

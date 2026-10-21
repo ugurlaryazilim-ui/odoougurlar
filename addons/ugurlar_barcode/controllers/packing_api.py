@@ -21,7 +21,7 @@ from .base_api import BarcodeApiBase
 _logger = logging.getLogger(__name__)
 
 # packing_complete'te Nebim zincirine ayrılan toplam süre (sn); aşılınca kalan siparişler ertelenir
-NEBIM_COMPLETE_BUDGET = 120
+NEBIM_COMPLETE_BUDGET = 75
 
 
 # ── PDF etiket HTML'i: pazaryeri / şablon değerleri kaçışsız yazılırsa wkhtmltopdf
@@ -981,9 +981,10 @@ class PackingApiController(BarcodeApiBase):
         # (`_trigger_nebim_sync`) kardeşlerin son durumunu görür
         synced_origins = set()
         deferred = []
-        # NEDEN: sipariş başına zincir 60 sn'ye varabilir; Nebim yavaşken N sipariş istemci /
-        # proxy zaman aşımını aşar. Süre dolunca kalanlar atlanır: picking'ler zaten done, nebim_*
-        # bayrakları yazılmadığı için tekrar "Tamamla" ya da cron aynı yerden devam eder.
+        # NEDEN: bütçe istemci RPC süresinin (~90 sn) altında tutulur ki yanıt (ertelenen listesi)
+        # istemciye ulaşsın. Bütçe SİPARİŞLER ARASINDA kontrol edilir; başlamış bir sipariş zinciri
+        # (çağrı başına 60 sn) bütçeyi aşabilir. Süre dolunca kalanlar atlanır: picking'ler zaten
+        # done, nebim_* bayrakları yazılmadığı için tekrar "Tamamla" ya da cron aynı yerden devam eder.
         deadline = time.monotonic() + NEBIM_COMPLETE_BUDGET
         for picking in shipped:
             key = picking.origin or picking.id
@@ -1552,9 +1553,13 @@ class PackingApiController(BarcodeApiBase):
         from odoo import fields
 
         # NEDEN: zincir (cari / sipariş / fatura) bir HTTP isteği içinde koşar; Nebim asılırsa
-        # çağrı başına 300 sn worker'ı dakikalarca tutuyordu. Context processor'lardan connector'a
-        # kadar yayılır; cron yolu (bu context yok) 300 sn kalır.
-        picking = picking.with_context(nebim_timeout=WRITE_CHAIN_TIMEOUT)
+        # çağrı başına 300 sn x 2 deneme worker'ı dakikalarca tutuyordu. Context processor'lardan
+        # connector'a kadar yayılır (bağlantı dahil yeniden deneme yok); cron yolunda bu context yok,
+        # 300 sn / 2 deneme kalır. 60 sn ÇAĞRI başınadır: Nebim tamamen asılıysa tek sipariş en kötü
+        # birkaç dakika sürebilir (bu yüzden Tamamla'da süre bütçesi var). Yeniden denemenin kapanması
+        # oturum süresi dolduğunda o çağrının hata vermesi demektir; mükerrer belge riski yoktur,
+        # sonraki Tamamla / cron nebim_* bayraklarından devam eder.
+        picking = picking.with_context(nebim_timeout=WRITE_CHAIN_TIMEOUT, nebim_retries=0)
         sale_order = picking.sale_id
         if not sale_order and picking.origin:
             sale_order = picking.env['sale.order'].sudo().search([('name', '=', picking.origin)], limit=1)
