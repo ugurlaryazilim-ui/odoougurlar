@@ -63,14 +63,14 @@ class TestHepsiburadaSyncLoad(TransactionCase):
     def _logs(self):
         return self.Log.search_count([('store_id', '=', self.store.id)])
 
-    def _age_heavy_stamp(self, minutes):
-        key = f'hepsiburada_integration.heavy_sync.{self.store.id}'
+    def _age_stamp(self, kind, minutes):
+        key = f'hepsiburada_integration.{kind}.{self.store.id}'
         self.ICP.set_param(key, fields.Datetime.to_string(fields.Datetime.subtract(
             fields.Datetime.now(), minutes=minutes)))
 
     # ── ağır tarama sıklığı ──
 
-    def test_heavy_scans_run_at_most_every_15_minutes(self):
+    def test_history_scan_every_15_and_cancel_scan_every_5_minutes(self):
         first = self._run()
         self.assertTrue(first.count('/cancelled'))
         self.assertTrue(first.count('/shipped'))
@@ -83,14 +83,21 @@ class TestHepsiburadaSyncLoad(TransactionCase):
         self.assertEqual(second.count('/delivered'), 0)
         self.assertEqual(second.count('/undelivered'), 0)
         self.assertLessEqual(len(second.urls), 3)
-        self._age_heavy_stamp(16)
+        # 6 dk sonra yalnız iptal taraması (tek istek: son 1 gün), geçmiş statü hâlâ bekler
+        self._age_stamp('cancel_sync', 6)
+        self._age_stamp('heavy_sync', 6)
         third = self._run()
-        self.assertTrue(third.count('/cancelled'))
+        self.assertEqual(third.count('/cancelled'), 1)
+        self.assertEqual(third.count('/shipped'), 0)
+        # 16 dk sonra geçmiş statü de
+        self._age_stamp('heavy_sync', 16)
+        self.assertTrue(self._run().count('/shipped'))
 
     def test_manual_sync_forces_heavy_scan_and_log(self):
         self._run()
         forced = self._run(force=True)
-        self.assertTrue(forced.count('/cancelled'))
+        self.assertEqual(forced.count('/cancelled'), 3)  # elle senkron: tam pencere (order_day_range=3)
+        self.assertTrue(forced.count('/shipped'))
         self.assertGreaterEqual(self._logs(), 1)
 
     # ── log yalnız iş yapıldıysa ──

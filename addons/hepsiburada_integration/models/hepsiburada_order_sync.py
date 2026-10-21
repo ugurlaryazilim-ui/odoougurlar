@@ -23,8 +23,11 @@ _HB_DATE_FMT = '%Y-%m-%d %H:%M'
 # İptal taraması: engellenen/başarısız iptal warning_message'a bu önekle yazılır ve süre dolana dek atlanır
 _CANCEL_MARK = 'Otomatik iptal edilmedi'
 _CANCEL_RETRY_AFTER = timedelta(hours=24)
-# Ağır taramalar (iptal + geçmiş statü: ≥12 HTTP isteği) mağaza başına en fazla bu sıklıkta
+# Geçmiş statü taraması (3 uç × gün sayısı HTTP isteği) mağaza başına en fazla bu sıklıkta
 _HEAVY_INTERVAL = timedelta(minutes=15)
+# İptal taraması ucuz (son 1 gün = 1 istek) ve gecikmesi kargoya verilme riski taşır → sık
+_CANCEL_INTERVAL = timedelta(minutes=5)
+_CANCEL_SCAN_DAYS = 1
 # Odoo'da oluşamayan siparişin detayı bu süreden önce yeniden çekilmez
 _MISSING_RETRY = timedelta(minutes=30)
 
@@ -96,24 +99,24 @@ class HepsiburadaOrderSync(models.AbstractModel):
                      for m in ('hepsiburada.order', 'hepsiburada.order.line'))
 
     @api.private
-    def _heavy_due(self, store):
-        """İptal + geçmiş statü taraması için süre doldu mu? Doluysa damgayı hemen yeniler."""
+    def _scan_due(self, store, kind, interval):
+        """`kind` taraması için süre doldu mu? Doluysa damgayı hemen yeniler (ICP, mağaza bazlı)."""
         ICP = self.env['ir.config_parameter'].sudo()
-        key = f'hepsiburada_integration.heavy_sync.{store.id}'
+        key = f'hepsiburada_integration.{kind}.{store.id}'
         now = fields.Datetime.now()
         last = ICP.get_param(key)
-        if last and now - fields.Datetime.to_datetime(last) < _HEAVY_INTERVAL:
+        if last and now - fields.Datetime.to_datetime(last) < interval:
             return False
-        # NEDEN: tarama hata verse bile 15 dk sonra denensin; her dakika HB'ye ≥12 istekle yüklenmesin
+        # NEDEN: tarama hata verse bile süre dolunca denensin; her dakika HB'ye toplu istekle yüklenmesin
         ICP.set_param(key, fields.Datetime.to_string(now))
         return True
 
     @api.model
     def _sync_store_orders(self, store, force=False):
-        """force=True (elle senkron): ağır taramalar süre beklemez, log her zaman açılır.
+        """force=True (elle senkron): taramalar süre beklemez (iptal tam pencereyle), log her zaman açılır.
 
         Her dakika yalnız açık paketler + bozulan paketler çekilir (yeni sipariş gecikmesi artmasın);
-        iptal ve geçmiş statü taraması (~12 istek) mağaza başına en fazla 15 dakikada bir çalışır.
+        iptal taraması (son 1 gün, 1 istek) en fazla 5 dk'da bir, geçmiş statü taraması (~9 istek) 15 dk'da bir.
         """
         store = store.sudo()
         started = fields.Datetime.now()
@@ -133,14 +136,17 @@ class HepsiburadaOrderSync(models.AbstractModel):
         error_count = 0
         log_msgs = []
         ids_before = self._max_ids()
-        heavy = force or self._heavy_due(store)
+        # DIKKAT: iptal taraması geçmiş taramaya bağlanmasın; iptal gecikmesi paketlenip kargoya verilme riskidir
+        cancel_due = force or self._scan_due(store, 'cancel_sync', _CANCEL_INTERVAL)
+        heavy = force or self._scan_due(store, 'heavy_sync', _HEAVY_INTERVAL)
 
         # 1. İptaller ÖNCE (kalem bazlı): kısmi iptalde kalan ürünlerle sipariş yeniden kurulur
         cancel_count = 0
-        if heavy:
+        if cancel_due:
             try:
                 with self.env.cr.savepoint():
-                    cancel_count = self._sync_cancellations(store, session, clean_merchant)
+                    cancel_count = self._sync_cancellations(
+                        store, session, clean_merchant, days=None if force else _CANCEL_SCAN_DAYS)
             except Exception as e:
                 self.env.invalidate_all(flush=False)
                 log_msgs.append(f"İptal senkronizasyonu hatası: {e}")
@@ -427,10 +433,11 @@ class HepsiburadaOrderSync(models.AbstractModel):
     # ═════════════════════════════════════════════════════════════
 
     @api.private
-    def _sync_cancellations(self, store, session, merchant_id):
-        """/orders/.../cancelled: iptal edilen KALEMLERİ (lineItemId + adet) döndürür."""
+    def _sync_cancellations(self, store, session, merchant_id, days=None):
+        """/orders/.../cancelled: iptal edilen KALEMLERİ (lineItemId + adet) döndürür.
+        days: tarama penceresi (gün); verilmezse mağazanın order_day_range değeri."""
         url = f"https://{store._get_api_domain()}/orders/merchantid/{merchant_id}/cancelled"
-        day_limit = store.order_day_range or 3
+        day_limit = days or store.order_day_range or 3
         items = self._fetch_windowed(session, url, day_limit, _HIST_PAGE_LIMIT)
         if items is None:
             _logger.warning("HB iptal listesi tarih filtresiyle alınamadı, filtresiz deneniyor [%s]", store.name)
