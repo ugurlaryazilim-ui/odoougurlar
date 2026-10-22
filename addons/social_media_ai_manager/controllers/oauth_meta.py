@@ -4,8 +4,11 @@ from odoo.http import request
 import requests
 import werkzeug
 import logging
+import urllib.parse
 
-from ..tools import mask_secrets
+from odoo.tools import html_escape
+
+from ..tools import check_oauth_state, make_oauth_state, mask_secrets, require_system_user
 
 _logger = logging.getLogger(__name__)
 
@@ -14,6 +17,7 @@ class MetaOAuthController(http.Controller):
     @http.route('/social_media_ai/facebook/login', type='http', auth='user')
     def facebook_login(self, **kw):
         env = request.env
+        require_system_user(env)
         app_id = env['ir.config_parameter'].sudo().get_param('social_media_ai.meta_app_id')
         if not app_id:
             return "Meta App ID not configured in settings."
@@ -26,18 +30,25 @@ class MetaOAuthController(http.Controller):
 
         scope = "pages_show_list,pages_messaging,pages_manage_metadata,pages_read_engagement,pages_manage_posts,instagram_basic,instagram_manage_comments,instagram_manage_messages,instagram_content_publish"
         
-        auth_url = f"https://www.facebook.com/v19.0/dialog/oauth?client_id={app_id}&redirect_uri={redirect_uri}&scope={scope}&response_type=code"
+        # NEDEN (A5 O1): state yoktu; login CSRF ile saldırganın Facebook oturumu şirket sayfalarına bağlanabilirdi.
+        # Callback tüm facebook hesaplarını günceller, hesap id'si 0.
+        auth_url = "https://www.facebook.com/v19.0/dialog/oauth?" + urllib.parse.urlencode({
+            'client_id': app_id, 'redirect_uri': redirect_uri, 'scope': scope, 'response_type': 'code',
+            'state': make_oauth_state(env, 'meta', 0)})
         return werkzeug.utils.redirect(auth_url)
 
     @http.route('/social_media_ai/facebook/callback', type='http', auth='user')
     def facebook_callback(self, **kw):
         app_secret = user_access_token = long_user_token = None  # except bloğunda maskelemek için
+        env = request.env
+        require_system_user(env)
+        if check_oauth_state(env, 'meta', kw.get('state')) is None:
+            return "Invalid or expired state. Please start the login again."
         try:
             code = kw.get('code')
             if not code:
                 return "No code returned from Facebook."
 
-            env = request.env
             app_id = env['ir.config_parameter'].sudo().get_param('social_media_ai.meta_app_id')
             app_secret = env['ir.config_parameter'].sudo().get_param('social_media_ai.meta_app_secret')
             base_url = env['ir.config_parameter'].sudo().get_param('web.base.url')
@@ -54,8 +65,9 @@ class MetaOAuthController(http.Controller):
             
             user_access_token = token_resp.get('access_token')
             if not user_access_token:
-                _logger.error("Meta OAuth Error: %s", token_resp)
-                return f"Error getting access token: {token_resp}"
+                _logger.error("Meta OAuth Error: %s", mask_secrets(token_resp, app_secret, code))
+                # NEDEN (A5 Y2): yanıt metni HTML olarak döner; kaçışsız dönüş yansıyan XSS'e açıktı
+                return "Error getting access token: %s" % html_escape(mask_secrets(token_resp, app_secret, code))
 
             # 2. Get Long-lived User Token
             long_token_resp = requests.post("https://graph.facebook.com/v19.0/oauth/access_token", data={
@@ -64,7 +76,8 @@ class MetaOAuthController(http.Controller):
             }, timeout=30).json()
             long_user_token = long_token_resp.get('access_token')
             if not long_user_token:
-                return f"Error getting long-lived token: {long_token_resp}"
+                return "Error getting long-lived token: %s" % html_escape(
+                    mask_secrets(long_token_resp, app_secret, user_access_token))
 
             # 3. Bypass `me/accounts` (pages_show_list) by directly querying configured pages
             # Since Meta blocks pages_show_list for internal apps, we fetch the token directly for the pages configured in Odoo.
@@ -84,7 +97,7 @@ class MetaOAuthController(http.Controller):
                     f"https://graph.facebook.com/v19.0/{page_id}",
                     params={'fields': 'name,access_token,instagram_business_account'},
                     headers={'Authorization': f'Bearer {long_user_token}'}, timeout=30).json()
-                responses_log.append(f"Page {page_id}: {page_resp}")
+                responses_log.append("Page %s: %s" % (page_id, mask_secrets(page_resp, long_user_token, page_resp.get('access_token'))))
                 
                 page_token = page_resp.get('access_token')
                 if not page_token:
@@ -131,7 +144,7 @@ class MetaOAuthController(http.Controller):
                     created_accounts.append(ig_acc.name)
 
             if not created_accounts:
-                return f"Facebook bağlandı ancak Odoo'daki hesaplarda geçerli bir 'Meta Page ID' bulunamadı veya Facebook token vermedi! Facebook Yanıtları: {responses_log}"
+                return "Facebook bağlandı ancak Odoo'daki hesaplarda geçerli bir 'Meta Page ID' bulunamadı veya Facebook token vermedi! Facebook Yanıtları: %s" % html_escape(str(responses_log))
 
             return request.redirect('/web#action=social_media_ai_manager.action_social_media_account')
         except Exception as e:

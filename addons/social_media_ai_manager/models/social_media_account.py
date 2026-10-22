@@ -58,9 +58,17 @@ class SocialMediaAccount(models.Model):
         ('connected', 'Connected'),
         ('error', 'Error / Disconnected')
     ], string="Status", default='draft')
-    
+
+    # NEDEN (A5 Y1): hesap kaydı jetonun GİDECEĞİ yeri (platform, whatsapp_api_url, sayfa/kanal id) belirler.
+    # Yazma/oluşturma/silme yalnız base.group_system (ir.model.access); jetonu dış servise gönderen
+    # yönetici düğmeleri de RPC ile çağrılabildiği için metot başında ayrıca denetlenir.
+    def _check_social_admin(self):
+        if not (self.env.su or self.env.user.has_group('base.group_system')):
+            raise exceptions.AccessError("Bu işlemi yalnız sistem yöneticisi yapabilir.")
+
     def action_subscribe_webhooks(self):
         """ Manually subscribe the Page to the App's Webhooks and show result """
+        self._check_social_admin()
         self.ensure_one()
         if self.platform not in ['facebook', 'instagram'] or not self.api_token or not self.meta_page_id:
             raise exceptions.UserError("Bu işlem için Facebook/Instagram seçili olmalı, Meta Page ID ve API Token dolu olmalıdır.")
@@ -85,6 +93,7 @@ class SocialMediaAccount(models.Model):
             raise exceptions.UserError(f"Bağlantı hatası: {e}")
 
     def action_open_qr_wizard(self):
+        self._check_social_admin()
         self.ensure_one()
         if self.platform != 'whatsapp':
             raise exceptions.UserError("Bu işlem sadece WhatsApp için geçerlidir.")
@@ -96,6 +105,7 @@ class SocialMediaAccount(models.Model):
         return wizard._reopen()
 
     def action_setup_webhook(self):
+        self._check_social_admin()
         self.ensure_one()
         if self.platform != 'whatsapp':
             raise exceptions.UserError("Bu işlem sadece WhatsApp için geçerlidir.")
@@ -136,6 +146,7 @@ class SocialMediaAccount(models.Model):
             raise exceptions.UserError(f"Webhook bağlantı hatası: {e}")
 
     def action_logout_whatsapp(self):
+        self._check_social_admin()
         self.ensure_one()
         if self.platform != 'whatsapp':
             raise exceptions.UserError("Bu işlem sadece WhatsApp için geçerlidir.")
@@ -168,6 +179,7 @@ class SocialMediaAccount(models.Model):
 
     def action_login_facebook(self):
         """ Redirect to Facebook Login """
+        self._check_social_admin()
         return {
             'type': 'ir.actions.act_url',
             'url': '/social_media_ai/facebook/login',
@@ -176,6 +188,7 @@ class SocialMediaAccount(models.Model):
 
     def action_login_youtube(self):
         """ Redirect to Google OAuth Login for YouTube """
+        self._check_social_admin()
         self.ensure_one()
         return {
             'type': 'ir.actions.act_url',
@@ -185,6 +198,7 @@ class SocialMediaAccount(models.Model):
 
     def action_login_tiktok(self):
         """ Redirect to TikTok OAuth Login """
+        self._check_social_admin()
         self.ensure_one()
         return {
             'type': 'ir.actions.act_url',
@@ -411,7 +425,7 @@ class SocialMediaAccount(models.Model):
         try:
             res = requests.post(url, headers=headers, json=payload, timeout=10)
             if not res.ok:
-                logging.getLogger(__name__).error(f"Failed to reply to YouTube comment {comment_id}: {res.status_code} - {res.text}")
+                logging.getLogger(__name__).error(f"Failed to reply to YouTube comment {comment_id}: {res.status_code} - {mask_secrets(res.text, account.api_token)}")
         except Exception as e:
             logging.getLogger(__name__).error("Exception replying to YouTube comment: %s", mask_secrets(e, account.api_token))
 
@@ -447,7 +461,7 @@ class SocialMediaAccount(models.Model):
             try:
                 res = requests.post(url, data=payload, files=files, headers={"Authorization": f"Bearer {self.api_token}"}, timeout=20)
                 if not res.ok:
-                    logging.getLogger(__name__).error(f"Meta Private Image Error: {res.status_code} - {res.text}")
+                    logging.getLogger(__name__).error(f"Meta Private Image Error: {res.status_code} - {mask_secrets(res.text, self.api_token)}")
                     success = False
             except Exception as e:
                 logging.getLogger(__name__).error("Exception sending Meta private image: %s", mask_secrets(e, self.api_token))
@@ -459,7 +473,7 @@ class SocialMediaAccount(models.Model):
             try:
                 res = requests.post(url, headers=headers, json=payload, timeout=10)
                 if not res.ok:
-                    logging.getLogger(__name__).error(f"Meta Private Text Error: {res.status_code} - {res.text}")
+                    logging.getLogger(__name__).error(f"Meta Private Text Error: {res.status_code} - {mask_secrets(res.text, self.api_token)}")
                     success = False
             except Exception as e:
                 logging.getLogger(__name__).error("Exception sending Meta private text: %s", mask_secrets(e, self.api_token))
@@ -484,7 +498,7 @@ class SocialMediaAccount(models.Model):
             try:
                 res = requests.post(url, data=payload, files=files, headers={"Authorization": f"Bearer {self.api_token}"}, timeout=20)
                 if not res.ok:
-                    logging.getLogger(__name__).error(f"Meta Image Error: {res.status_code} - {res.text}")
+                    logging.getLogger(__name__).error(f"Meta Image Error: {res.status_code} - {mask_secrets(res.text, self.api_token)}")
             except Exception as e:
                 logging.getLogger(__name__).error("Exception sending Meta image: %s", mask_secrets(e, self.api_token))
                 
@@ -494,7 +508,7 @@ class SocialMediaAccount(models.Model):
             try:
                 res = requests.post(url, headers=headers, json=payload, timeout=10)
                 if not res.ok:
-                    logging.getLogger(__name__).error(f"Meta Text Error: {res.status_code} - {res.text}")
+                    logging.getLogger(__name__).error(f"Meta Text Error: {res.status_code} - {mask_secrets(res.text, self.api_token)}")
             except Exception as e:
                 logging.getLogger(__name__).error("Exception sending Meta text: %s", mask_secrets(e, self.api_token))
 
@@ -562,12 +576,12 @@ class SocialMediaAccount(models.Model):
             try:
                 res = requests.post(url, headers=headers, json=media_message, timeout=20)
                 if not res.ok:
-                    logging.getLogger(__name__).error(f"Evolution API Media Error: {res.status_code} - {res.text}")
+                    logging.getLogger(__name__).error(f"Evolution API Media Error: {res.status_code} - {mask_secrets(res.text, self.api_token)}")
                     success = False
                 else:
                     return True # If text is sent as caption, we are done
             except Exception as e:
-                logging.getLogger(__name__).error(f"Exception sending Evolution API media: {e}")
+                logging.getLogger(__name__).error(f"Exception sending Evolution API media: {mask_secrets(e, self.api_token)}")
                 success = False
 
         # Send Text
@@ -580,10 +594,10 @@ class SocialMediaAccount(models.Model):
             try:
                 res = requests.post(url, headers=headers, json=text_message, timeout=10)
                 if not res.ok:
-                    logging.getLogger(__name__).error(f"Evolution API Text Error: {res.status_code} - {res.text}")
+                    logging.getLogger(__name__).error(f"Evolution API Text Error: {res.status_code} - {mask_secrets(res.text, self.api_token)}")
                     success = False
             except Exception as e:
-                logging.getLogger(__name__).error(f"Exception sending Evolution API text: {e}")
+                logging.getLogger(__name__).error(f"Exception sending Evolution API text: {mask_secrets(e, self.api_token)}")
                 success = False
 
         return success
@@ -591,6 +605,7 @@ class SocialMediaAccount(models.Model):
     def action_test_whatsapp(self):
         """ Send a test message to the configured phone number """
         from odoo import exceptions
+        self._check_social_admin()
         self.ensure_one()
         if self.platform != 'whatsapp':
             raise exceptions.UserError("Bu özellik sadece WhatsApp hesapları için geçerlidir.")
@@ -606,11 +621,16 @@ class SocialMediaAccount(models.Model):
             raise exceptions.UserError("Mesaj gönderilemedi. Lütfen logları ve API bağlantısını kontrol edin.")
 
     def action_fix_youtube_errors(self):
+        # NEDEN (A5 D1): her mesaj ücretli AI çağrısı; yetki ve jeton denetimi çağrılardan ÖNCE
+        # (eskiden AccessError ancak ilk AI çağrısından sonra jeton okunurken geliyordu).
+        self._check_social_admin()
         self.ensure_one()
         if self.platform != 'youtube':
             return
-            
+
         self._refresh_youtube_token()
+        if not self.api_token or not self.youtube_channel_id:
+            raise exceptions.UserError("YouTube bağlantısı eksik: önce Google ile giriş yapın (jeton ve kanal kimliği gerekli).")
         # Her kayıt bir ücretli AI çağrısı: tek tıklamada sınırlı sayıda düzeltilir
         error_msgs = self.env['social.media.message'].search([
             ('message_type', '=', 'outgoing'),
