@@ -1275,7 +1275,9 @@ class PackingApiController(BarcodeApiBase):
         """
         try:
             png = request.env['ir.actions.report'].barcode(barcode_type, value, **params)
-        except (ValueError, AttributeError):
+        except Exception:
+            # NEDEN (A5 Ö-3): reportlab değere/parametreye göre TypeError vb. de atar; tek bozuk
+            # barkod tüm etiketi (ve paketlemeyi) düşürmesin, görselsiz basılsın
             _logger.warning('Etiket barkodu üretilemedi (tür=%s)', barcode_type, exc_info=True)
             return ''
         return 'data:image/png;base64,' + base64.b64encode(png).decode()

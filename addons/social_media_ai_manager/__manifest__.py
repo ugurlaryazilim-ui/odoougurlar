@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Sosyal Medya & Yapay Zeka Yöneticisi',
-    'version': '19.0.1.1.0',
+    'version': '19.0.1.2.0',
     'summary': 'Sosyal Medya (WhatsApp, Instagram, Facebook, TikTok, YouTube) ve Yapay Zeka Desteği Yönetimi',
     'sequence': 10,
     'description': """

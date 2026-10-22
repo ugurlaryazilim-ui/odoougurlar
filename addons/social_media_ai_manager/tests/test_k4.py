@@ -14,7 +14,7 @@ from odoo.exceptions import AccessError
 from odoo.tests import HttpCase, TransactionCase, new_test_user, tagged
 
 from odoo.addons.social_media_ai_manager.controllers import oauth_meta
-from odoo.addons.social_media_ai_manager.tools import mask_secrets
+from odoo.addons.social_media_ai_manager.tools import make_oauth_state, mask_secrets
 
 SECRET = 'SEKRETDEGER9'
 
@@ -82,10 +82,15 @@ class TestOAuthSecrets(TransactionCase):
         ICP = self.env['ir.config_parameter'].sudo()
         ICP.set_param('social_media_ai.meta_app_id', '111')
         ICP.set_param('social_media_ai.meta_app_secret', SECRET)
-        self.fake_request = SimpleNamespace(env=self.env, redirect=lambda url, **kw: ('REDIRECT', url))
+        # NEDEN (A5 O1): OAuth uçları yalnız sistem yöneticisine açık ve imzalı state ister
+        admin_env = self.env(user=new_test_user(
+            self.env, login='k4_oauth_admin', groups='base.group_user,base.group_system'))
+        self.fake_request = SimpleNamespace(env=admin_env, redirect=lambda url, **kw: ('REDIRECT', url))
+        state = make_oauth_state(admin_env, 'meta', 0)
         # NEDEN: @http.route sarmalayıcısı dönüşü Response'a çevirir; gerçek metodu doğrudan çağırıyoruz
         ctrl = oauth_meta.MetaOAuthController()
-        self.callback = lambda **kw: oauth_meta.MetaOAuthController.facebook_callback.__wrapped__(ctrl, **kw)
+        self.callback = lambda **kw: oauth_meta.MetaOAuthController.facebook_callback.__wrapped__(
+            ctrl, state=state, **kw)
 
     def test_secrets_go_in_body_and_header_not_url(self):
         self.env['social.media.account'].create({'name': 'FB', 'platform': 'facebook', 'meta_page_id': 'p1'})
@@ -232,13 +237,17 @@ class TestAccountTokenAccess(TransactionCase):
             self._out_message(self.user, wa)
         self.assertEqual(post.call_args.kwargs['headers']['apikey'], 'WAKEY1')
 
-    def test_whatsapp_test_button_for_unprivileged_user(self):
+    def test_whatsapp_test_button_admin_only(self):
+        # A5 Y1: test düğmesi jetonu hesabın URL'sine gönderir; yalnız sistem yöneticisi
         wa = self.env['social.media.account'].create({
             'name': 'WA', 'platform': 'whatsapp', 'api_token': 'WAKEY1', 'phone_number': '905551112233',
             'whatsapp_api_url': 'https://evo.example', 'whatsapp_instance_name': 'inst'})
         with patch('requests.post', return_value=_resp({})) as post:
-            with self.assertRaisesRegex(Exception, 'başarıyla gönderildi'):
+            with self.assertRaises(AccessError):
                 wa.with_user(self.user).action_test_whatsapp()
+            post.assert_not_called()
+            with self.assertRaisesRegex(Exception, 'başarıyla gönderildi'):
+                wa.with_user(self.admin).action_test_whatsapp()
         self.assertEqual(post.call_args.kwargs['headers']['apikey'], 'WAKEY1')
 
     def test_youtube_reply_and_token_refresh_for_unprivileged_user(self):

@@ -3,6 +3,7 @@ from . import stock
 from . import shelf_export_cleanup
 from . import invoice
 from . import nebim_settings
+from . import res_config_secret_guard
 from . import nebim_log
 from . import nebim_dashboard
 from . import nebim_dashboard_products
