@@ -1,9 +1,8 @@
 import flet as ft
 import threading
-import time
 import logging
 import traceback
-from sync_agent import OdooImageSync, load_config, _logger
+from sync_agent import OdooImageSync, load_config, poll_loop, resolve_scan_interval, _logger
 
 class FletLogHandler(logging.Handler):
     """Logları Flet arayüzüne (ListView'e) basmak için özel log handler."""
@@ -75,38 +74,29 @@ def main(page: ft.Page):
         try:
             add_log("Agent başlatılıyor...", logging.INFO)
             agent = OdooImageSync(config)
-            interval = config.get('scan_interval_seconds', 3)
-            
+            interval = resolve_scan_interval(config)
+
             # Güncellenmiş klasör yolunu UI'a yansıt
             folder_text.value = f"İzlenen Klasör: {config.get('watch_folder')}"
             page.update()
             
             add_log(f"İzleme başladı (Aralık: {interval}sn)", logging.INFO)
             
-            while not stop_event.is_set():
+            def run_once():
+                agent.download_ai_exports()
+                return agent.process_folder()
+
+            def reconnect(_error):
+                # Hata mesajı poll_loop'tan _logger ile zaten arayüze düşer
                 try:
-                    agent.download_ai_exports()
-                    agent.process_folder()
-                except Exception as e:
-                    add_log(f"Hata oluştu: {str(e)}", logging.ERROR)
-                    add_log("30 sn bekleyip tekrar denenecek...", logging.INFO)
-                    # Beklerken de stop event'i kontrol et
-                    for _ in range(30):
-                        if stop_event.is_set(): break
-                        time.sleep(1)
-                    if stop_event.is_set(): break
-                    try:
-                        agent._connect()
-                        add_log("Bağlantı yenilendi.", logging.INFO)
-                    except Exception:
-                        pass
-                    continue
-                
-                # Normal bekleme süresi
-                for _ in range(interval):
-                    if stop_event.is_set(): break
-                    time.sleep(1)
-                    
+                    agent._connect()
+                    add_log("Bağlantı yenilendi.", logging.INFO)
+                except Exception:
+                    pass
+
+            # Event.wait durdurulunca hemen döner; iş bulan tur beklemeden tekrarlanır
+            poll_loop(run_once, interval, stop_event.wait, should_stop=stop_event.is_set, on_retry=reconnect)
+
         except Exception as e:
             add_log(f"Kritik Hata: {str(e)}\n{traceback.format_exc()}", logging.ERROR)
         finally:
