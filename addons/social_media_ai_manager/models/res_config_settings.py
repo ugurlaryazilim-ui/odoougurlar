@@ -74,13 +74,16 @@ class ResConfigSettings(models.TransientModel):
     @api.model
     def get_values(self):
         res = super(ResConfigSettings, self).get_values()
+        # NEDEN: ayar ekranına erişen ama ir.cron okuma hakkı olmayan kullanıcıda get_values AccessError veriyordu
+        # (sms_system ayar testleri de bu zincirden kırılıyordu). Yalnız aralık sayısı okunur, sır değildir;
+        # set_values zaten sudo yazıyor, yazma yetkisi burada gevşetilmedi.
         cron = self.env.ref('social_media_ai_manager.ir_cron_publish_social_posts', raise_if_not_found=False)
         if cron:
-            res.update(social_post_cron_interval=cron.interval_number)
-            
+            res.update(social_post_cron_interval=cron.sudo().interval_number)
+
         yt_cron = self.env.ref('social_media_ai_manager.ir_cron_sync_youtube_comments', raise_if_not_found=False)
         if yt_cron:
-            res.update(social_youtube_cron_interval=yt_cron.interval_number)
+            res.update(social_youtube_cron_interval=yt_cron.sudo().interval_number)
             
         handoff_users = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.handoff_user_ids')
         if handoff_users:
