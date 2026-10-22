@@ -279,3 +279,16 @@ class TestAccountTokenAccess(TransactionCase):
         with patch('requests.post', return_value=_resp({'access_token': 'NEWTT', 'refresh_token': 'RT3'})):
             self.assertTrue(tt.with_user(self.user)._refresh_tiktok_token())
         self.assertEqual((tt.api_token, tt.tiktok_refresh_token), ('NEWTT', 'RT3'))
+
+
+@tagged('post_install', '-at_install', 'social_media_ai_manager')
+class TestSettingsCronRead(TransactionCase):
+    """Ayar ekranı get_values: ir.cron okuma hakkı olmayan kullanıcıda AccessError vermemeli."""
+
+    def test_get_values_without_cron_access(self):
+        user = new_test_user(self.env, login='k4_plain', groups='base.group_user')
+        with self.assertRaises(AccessError):   # önkoşul: kullanıcı gerçekten ir.cron okuyamaz
+            self.env['ir.cron'].with_user(user).search_read([], ['interval_number'], limit=1)
+        values = self.env['res.config.settings'].with_user(user).get_values()
+        cron = self.env.ref('social_media_ai_manager.ir_cron_publish_social_posts')
+        self.assertEqual(values['social_post_cron_interval'], cron.interval_number)
