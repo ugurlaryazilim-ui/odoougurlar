@@ -813,7 +813,7 @@ async function _openReviewPopup(initialSessionId) {
             Math.round((b.y + b.h) * 1000), Math.round((b.x + b.w) * 1000),
         ]);
         try {
-            const res = await _jsonRpc('/ai_studio/erase_regions', { generation_id: item.id, boxes });
+            const res = await _jsonRpc('/ai_studio/erase_regions', { generation_id: item.id, boxes, lock_token: lockToken });
             if (!res || res.error) {
                 showToast('Silinemedi: ' + ((res && res.error) || 'Sunucu yanıt vermedi'));
             } else {
@@ -857,6 +857,8 @@ async function _openReviewPopup(initialSessionId) {
             const res = await _jsonRpc('/ai_studio/approve_generation', {
                 generation_id: item.id,
                 is_primary: item.is_primary,
+                // Sunucu, bu ekranın oturumun güncel inceleme kilidini tuttuğunu doğrular (J10 D-J10-3)
+                lock_token: lockToken,
             });
             if (!res || res.error) {
                 showToast('Onay hatası: ' + ((res && res.error) || 'Sunucu yanıt vermedi'));
@@ -874,7 +876,7 @@ async function _openReviewPopup(initialSessionId) {
     async function selectCandidate(candidateId) {
         overlay.querySelectorAll('.ais-rp-candidate').forEach(b => { b.disabled = true; });
         try {
-            const res = await _jsonRpc('/ai_studio/select_candidate', { candidate_id: candidateId });
+            const res = await _jsonRpc('/ai_studio/select_candidate', { candidate_id: candidateId, lock_token: lockToken });
             if (!res || res.error) {
                 showToast('Aday seçilemedi: ' + ((res && res.error) || 'Sunucu yanıt vermedi'));
             } else {
@@ -1179,7 +1181,8 @@ async function _openReviewPopup(initialSessionId) {
         const previousSessionName = data.session_name;
         const payload = {
             session_id: data.session_id,
-            approved_items: approvedItems.map(i => ({ id: i.id, is_primary: i.is_primary }))
+            approved_items: approvedItems.map(i => ({ id: i.id, is_primary: i.is_primary })),
+            lock_token: lockToken,
         };
 
         try {

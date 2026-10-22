@@ -3,11 +3,16 @@ import time
 from collections import OrderedDict
 
 from odoo import models, fields, api, _
-from odoo.exceptions import UserError, ValidationError
+from odoo.exceptions import AccessError, UserError, ValidationError
 
 from ..services.garment_analyzer import report_gemini_usage
 
 _logger = logging.getLogger(__name__)
+
+# Yalnız onaycı/yönetici/sunucu kodu yazar (J10): kuyruk bunlara göre ürüne yazar.
+APPROVAL_FIELDS = frozenset({'is_approved', 'is_excluded', 'is_primary'})
+# Bu durumlardaki oturumun üretimleri operatöre kapalı (J10 Y4); asıl kilit rule_generation_operator_edit.
+OPERATOR_LOCKED_STATES = ('review', 'saving', 'done')
 
 # Aynı metin (red formunda yazılıp silinen, revizyonda tekrar çevrilen) ikinci kez API'ye gitmesin
 _TRANSLATION_CACHE = OrderedDict()
@@ -452,9 +457,9 @@ class AiStudioGeneration(models.Model):
         self.revision_prompt_en = self._translate_prompt(self.revision_prompt)
 
 
-    # Onay sonrası ('saving'/'done') değişirse onaylanandan farklı görsel/ürün yazılır (A4 O1).
-    # Kilit kayıt kuralında (rule_generation_operator_edit); burada yalnız kuralın göremediği taşıma
-    # ve yerel klasöre aktarım işareti.
+    # İnceleme/onay sonrası ('review'/'saving'/'done') değişirse onaycının görmediği görsel yazılır (A4 O1, J10 Y4).
+    # Kilit kayıt kuralında (rule_generation_operator_edit); burada kuralın göremediği taşıma, onay alanları,
+    # Türkçe ret nedeni ve yerel klasöre aktarım işareti.
     def write(self, vals):
         if set(vals) == {'is_exported_to_local'} and not self.env.su:
             # NEDEN: senkron ajanı 'done' üretimleri klasöre aktarınca işaretler; kilit kuralı engellerdi.
@@ -462,8 +467,47 @@ class AiStudioGeneration(models.Model):
             self.check_access('read')
             self.browse().check_access('write')
             return super(AiStudioGeneration, self.sudo()).write(vals)
-        self.env['ai.studio.session']._check_target_session_unlocked(vals, _('üretim'))
+        Session = self.env['ai.studio.session']
+        # DIKKAT (J10/Y3): onay alanları kuyruğun ürüne ne yazacağını belirler (onaylı küme, ana görsel).
+        # Kural onaylı kaydı korur ama onaysızı onaylamayı göremez (yazım öncesi kaydı denetler).
+        if APPROVAL_FIELDS & set(vals) and not Session._is_approval_authority():
+            raise AccessError(_('Onay, hariç tutma ve ana görsel yalnız onaycı veya yönetici tarafından değiştirilebilir.'))
+        # NEDEN: hedef oturum da denetlenir; kural yazım ÖNCESİ kaydı gördüğünden kilitli oturuma taşımayı yakalamaz.
+        self._check_operator_lock(Session.browse(vals.get('session_id') or []))
         return super().write(vals)
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        default_session = self.env.context.get('default_session_id')
+        session_ids = [vals.get('session_id') or default_session for vals in vals_list]
+        self.browse()._check_operator_lock(self.env['ai.studio.session'].browse([i for i in session_ids if i]))
+        records = super().create(vals_list)
+        # NEDEN: create SONRASI denetim; default_is_excluded bağlamı, copy ve o2m da yakalanır.
+        # is_approved kısmını kural da yakalar; burada kalması operatöre Türkçe neden göstermek için.
+        # is_primary hariç: action_start_processing operatörle ön görseli varsayılan ana görsel yaratır;
+        # onaysız üretimde ana görsel ürüne yazılmaz (kuyruk yalnız onaylıları alır).
+        if records.filtered(lambda g: g.is_approved or g.is_excluded) \
+                and not self.env['ai.studio.session']._is_approval_authority():
+            raise AccessError(_('Onaylı veya hariç tutulmuş üretimi yalnız onaycı veya yönetici oluşturabilir.'))
+        return records
+
+    def _check_operator_lock(self, target_sessions=None):
+        """Operatörün reddedilecek yazımını Türkçe ve nedeniyle bildir (J10).
+
+        DIKKAT: asıl koruma kayıt kuralı (rule_generation_operator_edit; ek dosyası ve o2m yolları dahil).
+        Kayıt denetimi kuralı yineler (açıklama için); target_sessions ise kuralın göremediği TAŞIMA yoludur,
+        o kısım kaldırılırsa onaysız üretim inceleme/kilitli oturuma taşınabilir.
+        """
+        Session = self.env['ai.studio.session']
+        if Session._is_approval_authority():
+            return
+        # NEDEN: sudo yalnız durum okumak için; operatör başkasının oturumunu okuyamasa da kural reddeder
+        sessions = self.sudo().session_id | (target_sessions or Session).sudo()
+        if sessions.filtered(lambda s: s.state in OPERATOR_LOCKED_STATES):
+            raise AccessError(_('Oturum incelemede ya da ürüne kaydediliyor/kaydedildi; görselleri yalnız onaycı '
+                                'değiştirebilir.'))
+        if self.sudo().filtered('is_approved'):
+            raise AccessError(_('Onaylanmış görseli yalnız onaycı veya yönetici değiştirebilir.'))
 
     def action_reject(self):
         """Red dialog'u aç — revize için."""
@@ -793,6 +837,7 @@ class AiStudioGeneration(models.Model):
             })
 
     def unlink(self):
+        self._check_operator_lock()
         # Silinen üretimin harcaması maliyet raporundan kaybolmasın ("Yeniden AI Gönder" üretimleri siler)
         self.env['ai.studio.usage']._keep_deleted_generation_costs(self)
         return super().unlink()

@@ -107,3 +107,8 @@ class AiStudioPhoto(models.Model):
                     raise ValidationError(
                         _("Bu oturumda zaten 1 adet '%s' fotoğrafı mevcut! Her açıdan en fazla 1 adet fotoğraf eklenebilir.") % type_label
                     )
+
+    # Kilit kayıt kuralında (rule_photo_operator_edit, J10 KK6); burada yalnız kuralın göremediği taşıma.
+    def write(self, vals):
+        self.env['ai.studio.session']._check_target_session_unlocked(vals, _('fotoğraf'))
+        return super().write(vals)

@@ -188,6 +188,12 @@ def _start_usage_recording(env, session, generation=None):
 # üretim için ÖNCEKİ isteğin sonucunu "kurtarır".
 CLEAR_FAL_REQUEST = {'fal_request_id': False, 'fal_app': False, 'submitted_at': False}
 
+# Kuyruğun hangi ürün(ler)e yazacağını belirler; yetkisiz değişim onayları düşürür (J10 KK2).
+APPROVAL_TARGET_FIELDS = frozenset({'product_id', 'apply_to_siblings', 'session_type'})
+# İnceleme kilidi: jeton onaycı uçlarında "bu ekran güncel" kanıtıdır (J10 D-J10-3/D-J10-5); yalnız controller
+# (sudo) ve durum değişimi temizliği yazar.
+REVIEW_LOCK_FIELDS = frozenset({'review_locked_by', 'review_lock_time', 'review_lock_token'})
+
 
 def _is_client_timeout(exc):
     """fal SDK istemci zaman aşımı mı? (iş fal tarafında sürmeye ve ücretlenmeye devam eder)"""
@@ -270,6 +276,14 @@ def _is_db_conflict(exc):
         seen.add(id(exc))
         exc = getattr(exc, 'orig', None) or exc.__cause__ or exc.__context__
     return False
+
+
+# J10 Ö-3: ürüne kaydetme işinin ardışık DB çakışması sayacı {session_id: sayı}.
+# NEDEN bellek içi: yeni stored alan istenmedi (deploy riski); sayaç süreç başınadır, yani üst sınır
+# en fazla SINIR x cron süreci olur ve yeniden başlatmada sıfırlanır. Sonsuz döngüyü kesmek için bu yeterli.
+# EKIP-BORC: kesin sayaç gerekirse oturuma save_conflict_count alanı eklenmeli.
+SAVE_CONFLICT_RETRY_LIMIT = 5
+_SAVE_CONFLICTS = {}
 
 
 def _get_seedream_image_size(env):
@@ -937,10 +951,13 @@ class AiStudioSession(models.Model):
         readonly=True,
         copy=False,
     )
+    # DIKKAT: operatör jetonu okuyamamalı (D-J10-5); kodda okuma sudo() ile yapılır, yoksa operatör yolunda
+    # alan erişimi AccessError verir.
     review_lock_token = fields.Char(
         string='Kilit Jetonu',
         readonly=True,
         copy=False,
+        groups='ugurlar_ai_studio.group_ai_studio_reviewer',
     )
 
     # --- AI Ayarları ---
@@ -1005,7 +1022,9 @@ class AiStudioSession(models.Model):
         """Profesyonel inceleme popup'ini acar."""
         self.ensure_one()
         # Eğer oturum işleniyor durumunda kalmış ama tüm generation'lar bittiyse otomatik onaya geçir
-        if self.state in ('preprocessing', 'processing') and self.generation_ids and all(g.state == 'done' for g in self.generation_ids):
+        # NEDEN (J10 B-J10-1): yalnız onay yetkilisi; operatör kendi 'done' yaptığı üretimle AI'sız review'a girerdi.
+        if self.state in ('preprocessing', 'processing') and self.generation_ids \
+                and all(g.state == 'done' for g in self.generation_ids) and self._is_approval_authority():
             self.sudo().write({
                 'state': 'review',
                 'date_review_start': fields.Datetime.now(),
@@ -1014,7 +1033,8 @@ class AiStudioSession(models.Model):
         from datetime import timedelta
         if self.review_locked_by and self.review_lock_time:
             lock_age = now - self.review_lock_time
-            if lock_age < timedelta(minutes=5) and self.review_locked_by.id != self.env.uid:
+            # NEDEN: gelecekteki kilit zamanı hiç dolmaz (D-J10-5); geçersiz say
+            if timedelta(0) <= lock_age < timedelta(minutes=5) and self.review_locked_by.id != self.env.uid:
                 lock_minutes = int(lock_age.total_seconds() // 60)
                 lock_seconds = int(lock_age.total_seconds() % 60)
                 raise UserError(_(
@@ -2183,12 +2203,10 @@ class AiStudioSession(models.Model):
 
         gen_vals_list = []
         for session in valid_sessions:
+            # NEDEN: kilit alanları burada yazılmaz (operatöre kapalı, D-J10-5); durum değişimi write()'ta temizler
             session.write({
                 'state': 'preprocessing',
                 'date_processing_start': fields.Datetime.now(),
-                'review_locked_by': False,
-                'review_lock_time': False,
-                'review_lock_token': False,
             })
             session.generation_ids.unlink()
 
@@ -2411,8 +2429,22 @@ class AiStudioSession(models.Model):
                 self._run_save_job(res_id)
                 # NEDEN: commit burada (testte cr.commit yasak olduğundan _run_save_job içinde değil)
                 self.env.cr.commit()
-            except Exception:
-                _logger.exception('AI kuyruğu: ürüne kaydetme beklenmeyen hata (session=%s)', res_id)
+                _SAVE_CONFLICTS.pop(res_id, None)
+            except Exception as err:
+                # DIKKAT: geri alınmazsa yarım yazım (ve bozulmuş transaction) cron cursor'ında kalır
+                self.env.cr.rollback()
+                if not _is_db_conflict(err):
+                    # NEDEN (Ö-8): çakışma serisi bitti; bayat sayaç sonraki "Tamamla"yı erken vazgeçirirdi.
+                    # EKIP-BORC: başka süreçte kalan sayaç temizlenmez (bellek içi); kesin çözüm stored sayaç.
+                    _SAVE_CONFLICTS.pop(res_id, None)
+                    _logger.exception('AI kuyruğu: ürüne kaydetme beklenmeyen hata (session=%s)', res_id)
+                elif _SAVE_CONFLICTS.get(res_id, 0) + 1 < SAVE_CONFLICT_RETRY_LIMIT:
+                    _SAVE_CONFLICTS[res_id] = _SAVE_CONFLICTS.get(res_id, 0) + 1
+                    _logger.info('AI kuyruğu: ürüne kaydetme DB çakışması (%s. kez), yeniden denenecek (session=%s)',
+                                 _SAVE_CONFLICTS[res_id], res_id)
+                    self._trigger_ai_queue()
+                else:
+                    self._give_up_save_after_conflicts(res_id)
             finally:
                 _release_session_lease(self.pool, res_id, owner)
             return
@@ -2432,6 +2464,31 @@ class AiStudioSession(models.Model):
         finally:
             clear_usage_recorder()
             _release_session_lease(self.pool, res_id, owner)
+
+    @api.model
+    def _give_up_save_after_conflicts(self, session_id):
+        """Ardışık çakışma sınırında oturumu onaycıya geri ver (J10 Ö-3).
+
+        NEDEN: her deneme ağır resize/product.image işini baştan yapar; kalıcı çakışmada sessiz sonsuz döngü olurdu.
+        """
+        _SAVE_CONFLICTS.pop(session_id, None)
+        _logger.warning('AI kuyruğu: ürüne kaydetme %d kez DB çakışmasına takıldı, incelemeye döndü (session=%s)',
+                        SAVE_CONFLICT_RETRY_LIMIT, session_id)
+        try:
+            session = self.browse(session_id)
+            if session.state == 'saving':
+                session.write({'state': 'review'})
+                session._notify_save_problem(
+                    _('Ürüne kaydetme %d kez eşzamanlı bir yazımla çakıştı; oturum incelemeye döndü. '
+                      'Bir süre sonra tekrar "Tamamla" deneyin.') % SAVE_CONFLICT_RETRY_LIMIT)
+            self.env.cr.commit()
+        except Exception:
+            # DIKKAT: geri dönüş de çakıştıysa oturum 'saving'de kalır; sonraki çakışmada hemen yeniden denensin
+            self.env.cr.rollback()
+            _SAVE_CONFLICTS[session_id] = SAVE_CONFLICT_RETRY_LIMIT - 1
+            _logger.warning('AI kuyruğu: çakışma sonrası incelemeye döndürülemedi (session=%s)', session_id,
+                            exc_info=True)
+            self._trigger_ai_queue()
 
     @api.model
     def _run_save_job(self, session_id):
@@ -2476,6 +2533,11 @@ class AiStudioSession(models.Model):
                 session.message_post(body=_('%d onaylı görsel ürüne başarıyla kaydedildi.') % len(approved))
             _logger.info('Ürüne kaydetme: %s (%s) tamamlandı, %d görsel.', session.name, session.id, len(approved))
         except Exception as err:
+            if _is_db_conflict(err):
+                # NEDEN (D2): eşzamanlı yazım (ör. inceleme kilidi bırakma) oturum satırıyla çakıştı; aynı
+                # snapshot'ta 'review' yazmak da çakışır. Oturum 'saving'de kalır, _queue_run_job geri alıp
+                # kuyruğu yeniden tetikler (kaydetme idempotent).
+                raise
             _logger.exception('Ürüne kaydetme hatası (session=%s)', session_id)
             session.write({'state': 'review'})
             # NEDEN (D1): beklenmeyen hatanın ham metni (SQL, dosya yolu) chatter'a yazılmaz; ayrıntı log'da.
@@ -2491,12 +2553,14 @@ class AiStudioSession(models.Model):
         """
         self.ensure_one()
         partner = self.reviewer_id.sudo().partner_id
-        try:
-            with self.env.cr.savepoint():
-                self.message_post(body=text, partner_ids=partner.ids, subtype_xmlid='mail.mt_comment')
-        except Exception:
-            _logger.warning('Kaydetme bildirimi gönderilemedi (session=%s)', self.id, exc_info=True)
-            self.message_post(body=text)
+        # NEDEN (D2): yedek not da savepoint içinde; ilk deneme transaction'ı bozduysa ikinci hata akışı kırmaz.
+        for kwargs in ({'partner_ids': partner.ids, 'subtype_xmlid': 'mail.mt_comment'}, {}):
+            try:
+                with self.env.cr.savepoint():
+                    self.message_post(body=text, **kwargs)
+                return
+            except Exception:
+                _logger.warning('Kaydetme bildirimi gönderilemedi (session=%s)', self.id, exc_info=True)
 
     @api.model
     def _queue_mark_job_failed(self, kind, session_id, gen_id, err, uid):
@@ -4084,6 +4148,54 @@ class AiStudioSession(models.Model):
             raise AccessError(_('Oturumu ürüne kaydetmeye yalnız onaycı veya yönetici alabilir.'))
         if 'reviewer_id' in vals:
             raise AccessError(_('Onayıcı alanını yalnız onaycı veya yönetici değiştirebilir.'))
+        # NEDEN (J10 D-J10-5): kilit yazılabilseydi operatör onaycıyı kalıcı kilitler ya da sızan jetonu geri
+        # yazıp onaycının eski ekranını yeniden "güncel" yapardı.
+        if REVIEW_LOCK_FIELDS & set(vals):
+            raise AccessError(_('İnceleme kilidini yalnız onaycı veya yönetici değiştirebilir.'))
+        # NEDEN (J10 KK4): 'done' onaycının kararıdır (D1-kalan: operatör review→done yazabiliyordu).
+        # 'review'dan çıkış da kapalı: review→draft→içerik değiştir→review döngüsü onayı atlatırdı.
+        if 'state' in vals and (vals['state'] == 'done'
+                                or self.filtered(lambda s: s.state == 'review' and s.state != vals['state'])):
+            raise AccessError(_('İncelemedeki oturumun durumunu yalnız onaycı veya yönetici değiştirebilir.'))
+        # NEDEN (J10 D-J10-3): review'a giriş sistemin (işleme bitince, su) ya da onaycının işi. Operatör
+        # taslakta değiştirdiği içeriği AI'sız doğrudan review'a alırsa onaycının eski ekranı onu onaylatırdı.
+        if vals.get('state') == 'review' and self.filtered(lambda s: s.state != 'review'):
+            raise AccessError(_('Oturumu incelemeye yalnız sistem (işleme bitince) veya onaycı alabilir.'))
+        # NEDEN (J10 O-J10-2): review'da onay HENÜZ yokken hedef değişirse düşecek onay yoktur; onaycı A ürünü
+        # diye gördüğü görselleri onaylar, kuyruk operatörün seçtiği B ürününe yazar. Aynı değer serbest.
+        if self._changed_target(vals).filtered(lambda s: s.state == 'review'):
+            raise AccessError(_('İncelemedeki oturumun hedefini (ürün, kardeş varyantlar, çekim tipi) yalnız '
+                                'onaycı veya yönetici değiştirebilir.'))
+
+    def _changed_target(self, vals):
+        """APPROVAL_TARGET_FIELDS değerini gerçekten değiştiren kayıtlar (aynı değer yazımı sayılmaz)."""
+        changed = self.browse()
+        for field_name in APPROVAL_TARGET_FIELDS & set(vals):
+            field = self._fields[field_name]
+            changed |= self.filtered(
+                lambda s: field.convert_to_write(s[field_name], s) != (vals[field_name] or False))
+        return changed
+
+    def _drop_approvals_on_change(self, vals):
+        """Yetkisiz kullanıcı ürüne yazılacak hedefi değiştirince oturumun onaylarını düşür (J10 KK2).
+
+        Döndürür: onayı düşürülecek oturumlar (super().write SONRASI _drop_approvals ile).
+        NEDEN: product_id / apply_to_siblings / session_type kuyruğun HANGİ ürünlere yazacağını belirler;
+        onaycı başka bir hedefi onaylamıştı. review'da bu yazım zaten reddedilir; burası taslak vb. içindir.
+        """
+        if self._is_approval_authority():
+            return self.browse()
+        return self._changed_target(vals)
+
+    def _drop_approvals(self, reason):
+        gens = self.sudo().generation_ids
+        approved = gens.filtered('is_approved')
+        if not approved:
+            return
+        gens.filtered(lambda g: g.is_approved or g.is_primary).write({'is_approved': False, 'is_primary': False})
+        for session in approved.session_id:
+            session.message_post(body=_('Onaydan sonra %s değişti; onaylar kaldırıldı, yeniden inceleme gerekir.')
+                                 % reason)
 
     def _check_approval_gate_created(self):
         """create sonrası denetim: default_* bağlamıyla gelen 'saving' / reviewer_id da yakalanır."""
@@ -4091,23 +4203,42 @@ class AiStudioSession(models.Model):
             return
         if self.filtered(lambda r: r.state == 'saving' or r.reviewer_id):
             raise AccessError(_('Oturumu ürüne kaydetmeye ve onayıcı atamaya yalnız onaycı veya yönetici yetkilidir.'))
+        # NEDEN (J10 D-J10-5, B-J10-1): kilit alanları ve 'draft' dışı başlangıç (create/default_state/copy ile
+        # doğrudan review) write'taki denetimlerin create kapısı. sudo: jeton alanı operatöre okunmaz.
+        if self.sudo().filtered(lambda r: r.state != 'draft' or any(r[f] for f in REVIEW_LOCK_FIELDS)):
+            raise AccessError(_('Oturum yalnız taslak olarak ve inceleme kilidi olmadan oluşturulabilir.'))
 
     # Onaydan sonra ('saving'/'done') içerik değişmesin (A4 O1/Y2/O2): kilit kayıt kuralında
     # (security/ai_studio_security.xml, *_operator_edit) — create/o2m/context default/ek yollarının hepsinde
     # geçerli olduğu için model override'ı DEĞİL. Kuralın göremediği tek yol aşağıda.
     @api.model
-    def _check_target_session_unlocked(self, vals, label):
-        """Açık oturumdaki satırı session_id ile 'saving'/'done' oturuma TAŞIMA engeli.
+    def _check_target_session_unlocked(self, vals, label, states=('saving', 'done')):
+        """Açık oturumdaki satırı session_id ile kilitli (states) oturuma TAŞIMA engeli.
 
         NEDEN: kayıt kuralı yazım ÖNCESİ kaydı denetler (o an açık oturumda) → taşımayı yakalamaz.
+        states, satırın operatör kuralındaki durum listesiyle aynı olmalı (fotoğraf: saving/done; set satırı:
+        review dahil).
         """
         target = self.browse(vals.get('session_id') or [])
-        if target.state in ('saving', 'done') and not self._is_approval_authority():
-            raise AccessError(_('Onaylanan oturuma (%s) yalnız onaycı veya yönetici ekleme yapabilir.') % label)
+        if target.state in states and not self._is_approval_authority():
+            raise AccessError(_('İncelemedeki veya onaylanan oturuma (%s) yalnız onaycı veya yönetici ekleme '
+                                'yapabilir.') % label)
 
     def write(self, vals):
         self._check_saving_transition(vals)
+        drop = self._drop_approvals_on_change(vals)
+        # NEDEN (J10 D-J10-3): inceleme kilidinin jetonu onaycı uçlarında "bu ekran güncel" kanıtıdır
+        # (controller _stale_review_screen). Durum değişince (review'a giriş/çıkış) eski ekranın jetonu geçersiz
+        # olmalı; yoksa iptal → taslak → yeniden review sonrası açık kalan eski ekran onay verebilir.
+        unlock = self.browse()
+        if 'state' in vals and 'review_lock_token' not in vals:
+            unlock = self.sudo().filtered(
+                lambda s: s.state != vals['state'] and (s.review_locked_by or s.review_lock_token))
         res = super(AiStudioSession, self).write(vals)
+        if unlock:
+            unlock.sudo().write({'review_locked_by': False, 'review_lock_time': False, 'review_lock_token': False})
+        if drop:
+            drop._drop_approvals(_('ürün / kardeş / oturum türü'))
         if 'state' in vals:
             for record in self:
                 if record.state in ('review', 'failed'):
