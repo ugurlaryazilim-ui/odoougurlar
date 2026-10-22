@@ -1,19 +1,198 @@
-/* Mail Order kart sayfası (K-13): yalnız stil; bu sayfada script yoktur. */
-body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #222; background: #f4f5f7; }
-.mo-page { max-width: 34rem; margin: 2rem auto; padding: 1.5rem; background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0, 0, 0, .12); }
-h1 { font-size: 1.35rem; margin: 0 0 1rem; }
-h2 { font-size: 1.1rem; margin: 1.5rem 0 .5rem; }
-.mo-test-band { margin: -1.5rem -1.5rem 1rem; padding: .5rem 1rem; background: #f0ad4e; color: #000; font-weight: 700; text-align: center; border-radius: 8px 8px 0 0; }
-.mo-summary { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; margin: 0 0 1rem; }
-.mo-summary dt { font-weight: 600; }
-.mo-summary dd { margin: 0; }
-.mo-warning { padding: .75rem; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 6px; font-size: .95rem; }
-.mo-form label { display: block; margin: .75rem 0 .25rem; font-weight: 600; }
-.mo-form input, .mo-form select { width: 100%; box-sizing: border-box; padding: .5rem; font-size: 1rem; border: 1px solid #bbb; border-radius: 4px; }
+/*
+ * Mail Order kart sayfası (K-13): yalnız stil; bu sayfada script yoktur.
+ * Görünüm Odoo 19 arka ucunu izler (mor üst bar, kontrol paneli/breadcrumb, kart gövdeleri,
+ * btn-primary/alert/list kalıpları) ama arka uç varlığı (web.assets) YÜKLENMEZ: tek stil kaynağı bu
+ * dosyadır (CSP: style-src 'self'; satır içi stil yok).
+ */
+:root {
+    --mo-brand: #714b67;
+    --mo-brand-dark: #5d3d54;
+    --mo-accent: #017e84;
+    --mo-text: #212529;
+    --mo-muted: #5f636a;
+    --mo-border: #d8dadd;
+    --mo-input-border: #8b9199;
+    --mo-bg: #f9fafb;
+    --mo-radius: .375rem;
+}
+
+*, *::before, *::after { box-sizing: border-box; }
+html { font-size: 16px; }
+body {
+    margin: 0; min-height: 100vh; display: flex; flex-direction: column;
+    font-family: -apple-system, "Segoe UI", Roboto, "Noto Sans", Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
+    font-size: .9375rem; line-height: 1.5; color: var(--mo-text); background: var(--mo-bg);
+}
+a { color: var(--mo-accent); text-decoration: none; }
+a:hover { text-decoration: underline; }
+h1 { font-size: 1.375rem; font-weight: 700; margin: 0; }
+h2 { font-size: 1rem; font-weight: 700; margin: 0; }
+:focus-visible { outline: 2px solid var(--mo-accent); outline-offset: 2px; }
+
+.mo-sr-only {
+    position: absolute; width: 1px; height: 1px; margin: -1px; padding: 0; border: 0;
+    overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap;
+}
+.mo-icon { width: 1em; height: 1em; flex: none; vertical-align: -.125em; }
+
+/* ---------------------------------------------------------------- üst bar (Odoo navbar) */
+.mo-navbar {
+    display: flex; flex-wrap: wrap; align-items: center; gap: .125rem; min-height: 46px;
+    padding: 0 .5rem; background: var(--mo-brand); color: #fff;
+}
+.mo-navbar a { color: #fff; text-decoration: none; }
+.mo-navbar :focus-visible { outline-color: #fff; outline-offset: -2px; }
+.mo-nav-apps { display: inline-flex; align-items: center; padding: 0 .5rem; font-size: 1.25rem; opacity: .9; }
+.mo-nav-brand {
+    display: inline-flex; align-items: center; gap: .5rem; height: 46px; padding: 0 .75rem;
+    font-weight: 700; font-size: 1rem;
+}
+.mo-nav-brand img, .mo-nav-brand .mo-icon { width: 24px; height: 24px; border-radius: 5px; }
+.mo-nav-menu { display: flex; flex: 1; min-width: 0; overflow-x: auto; scrollbar-width: none; }
+.mo-nav-link { display: inline-flex; align-items: center; height: 46px; padding: 0 .75rem; white-space: nowrap; opacity: .9; }
+.mo-nav-link:hover { background: rgba(255, 255, 255, .15); opacity: 1; text-decoration: none; }
+.mo-nav-link.mo-active { font-weight: 700; opacity: 1; box-shadow: inset 0 -3px 0 #fff; }
+.mo-nav-user { display: flex; align-items: center; gap: .5rem; margin-left: auto; padding: 0 .5rem; font-size: .875rem; }
+.mo-nav-company { opacity: .85; }
+.mo-nav-company::after { content: "\00b7"; margin-left: .5rem; }
+.mo-nav-avatar { width: 28px; height: 28px; border-radius: 50%; background: #fff; object-fit: cover; }
+
+/* ---------------------------------------------------------------- kontrol paneli (breadcrumb) */
+.mo-controlpanel { background: #fff; border-bottom: 1px solid var(--mo-border); }
+.mo-breadcrumb { max-width: 72rem; margin: 0 auto; padding: .625rem 1rem; }
+.mo-breadcrumb ol { display: flex; flex-wrap: wrap; gap: .25rem; margin: 0; padding: 0; list-style: none; font-size: 1rem; }
+.mo-breadcrumb li + li::before { content: "/"; margin-right: .25rem; color: var(--mo-muted); }
+.mo-breadcrumb li[aria-current="page"] { font-weight: 700; color: var(--mo-text); }
+
+.mo-test-band {
+    padding: .375rem 1rem; text-align: center; font-weight: 700; font-size: .875rem;
+    color: #664d03; background: #fff3cd; border-bottom: 1px solid #ffe69c;
+}
+
+/* ---------------------------------------------------------------- içerik */
+.mo-main { flex: 1; width: 100%; max-width: 72rem; margin: 0 auto; padding: 1.25rem 1rem 2rem; }
+.mo-title { margin-bottom: 1rem; }
+.mo-title p { margin: .125rem 0 0; color: var(--mo-muted); }
+.mo-grid { display: grid; grid-template-columns: minmax(17rem, 22rem) minmax(0, 1fr); gap: 1rem; align-items: start; }
+.mo-span { grid-column: 1 / -1; }
+.mo-stack { display: grid; gap: 1rem; }
+
+.mo-card { background: #fff; border: 1px solid var(--mo-border); border-radius: var(--mo-radius); }
+.mo-card-head {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: .5rem;
+    padding: .75rem 1rem; border-bottom: 1px solid var(--mo-border);
+}
+.mo-card-body { padding: 1rem; }
+
+/* ödeme özeti */
+.mo-amount-label { margin: 0; font-size: .8125rem; color: var(--mo-muted); }
+.mo-amount { margin: 0 0 1rem; font-size: 1.875rem; font-weight: 700; line-height: 1.2; font-variant-numeric: tabular-nums; }
+.mo-summary { display: grid; grid-template-columns: max-content minmax(0, 1fr); gap: .5rem 1rem; margin: 0 0 1rem; }
+.mo-summary dt { color: var(--mo-muted); }
+.mo-summary dd { margin: 0; font-weight: 500; overflow-wrap: anywhere; }
+.mo-note { margin: 0; font-size: .8125rem; color: var(--mo-muted); }
+
+/* Odoo alert-warning / alert-danger */
+.mo-alert { margin: 0 0 1rem; padding: .75rem 1rem; border: 1px solid; border-radius: var(--mo-radius); font-size: .875rem; }
+.mo-alert-title { display: flex; align-items: center; gap: .375rem; margin: 0 0 .25rem; font-weight: 700; }
+.mo-alert p { margin: 0; }
+.mo-alert-warning { color: #664d03; background: #fff3cd; border-color: #ffe69c; }
+.mo-alert-danger { color: #842029; background: #f8d7da; border-color: #f1aeb5; }
+
+/* kart formu (o_form görünümü) */
+.mo-cards { display: inline-flex; align-items: center; gap: .375rem; }
+.mo-cards img { display: block; width: 38px; height: 24px; }
+.mo-field { margin: 0 0 1rem; padding: 0; border: 0; min-width: 0; }
+.mo-field > label, .mo-field > legend { display: block; margin: 0 0 .25rem; padding: 0; font-weight: 500; }
+.mo-input {
+    display: block; width: 100%; height: 2.5rem; padding: .375rem .75rem; font: inherit; color: var(--mo-text);
+    background: #fff; border: 1px solid var(--mo-input-border); border-radius: var(--mo-radius);
+}
+.mo-input::placeholder { color: #767b82; opacity: 1; }
+.mo-input:hover { border-color: #5f636a; }
+.mo-input:focus { outline: 0; border-color: var(--mo-accent); box-shadow: 0 0 0 .2rem rgba(1, 126, 132, .25); }
+.mo-input:user-invalid { border-color: #dc3545; }
+.mo-input:user-invalid:focus { box-shadow: 0 0 0 .2rem rgba(220, 53, 69, .25); }
+.mo-pan { font-variant-numeric: tabular-nums; letter-spacing: .06em; }
+.mo-hint { margin: .25rem 0 0; font-size: .8125rem; color: var(--mo-muted); }
+.mo-hint-gap { margin: .5rem 0 1rem; }
 .mo-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .75rem; }
-.mo-submit { margin-top: 1.25rem; width: 100%; padding: .75rem; font-size: 1.05rem; font-weight: 700; color: #fff; background: #1f6feb; border: 0; border-radius: 6px; cursor: pointer; }
-.mo-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
-.mo-table th, .mo-table td { padding: .35rem .5rem; border-bottom: 1px solid #ddd; text-align: left; }
-.mo-hint { font-size: .9rem; color: #555; }
-.mo-error { padding: .75rem; background: #f8d7da; border: 1px solid #f1aeb5; border-radius: 6px; }
-.mo-back { margin-top: 1.25rem; }
+.mo-row .mo-field { margin-bottom: 0; }
+
+.mo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--mo-border); }
+.mo-btn {
+    display: inline-flex; align-items: center; justify-content: center; gap: .5rem; min-height: 2.5rem;
+    padding: .375rem 1rem; font: inherit; font-weight: 500; line-height: 1.5; text-decoration: none;
+    border: 1px solid transparent; border-radius: var(--mo-radius); cursor: pointer;
+}
+.mo-btn:hover { text-decoration: none; }
+.mo-btn-primary { color: #fff; background: var(--mo-brand); border-color: var(--mo-brand); }
+.mo-btn-primary:hover { background: var(--mo-brand-dark); border-color: var(--mo-brand-dark); }
+.mo-btn-secondary { color: var(--mo-text); background: #e7e9ed; border-color: #e7e9ed; }
+.mo-btn-secondary:hover { background: #d8dadd; border-color: #d8dadd; }
+
+/* taksit tablosu (o_list_view görünümü) */
+.mo-details { padding: 0; }
+.mo-details > summary {
+    display: flex; align-items: center; gap: .5rem; padding: .75rem 1rem; font-weight: 700; cursor: pointer; list-style: none;
+}
+.mo-details > summary::-webkit-details-marker { display: none; }
+.mo-details > summary::before {
+    content: ""; width: .5rem; height: .5rem; border-right: 2px solid var(--mo-muted); border-bottom: 2px solid var(--mo-muted);
+    transform: rotate(-45deg); transition: transform .15s;
+}
+.mo-details[open] > summary { border-bottom: 1px solid var(--mo-border); }
+.mo-details[open] > summary::before { transform: rotate(45deg); }
+.mo-details > summary:hover { background: var(--mo-bg); }
+.mo-details > summary:focus-visible { outline-offset: -2px; }
+.mo-details-body { padding: 1rem; }
+.mo-details-body .mo-hint { margin: 0 0 .5rem; }
+.mo-table-wrap { margin-top: .75rem; overflow-x: auto; }
+.mo-table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+.mo-table th, .mo-table td { padding: .5rem .75rem; border-bottom: 1px solid var(--mo-border); text-align: left; white-space: nowrap; }
+.mo-table thead th { font-weight: 700; border-bottom: 2px solid var(--mo-border); background: var(--mo-bg); }
+.mo-table tbody tr:hover { background: var(--mo-bg); }
+.mo-table .mo-num { text-align: right; font-variant-numeric: tabular-nums; }
+
+/* hata / dönüş sayfaları */
+.mo-narrow { max-width: 36rem; margin: 1.5rem auto 0; }
+.mo-center { text-align: center; }
+.mo-spinner {
+    width: 2.25rem; height: 2.25rem; margin: .5rem auto 1rem; border: 3px solid var(--mo-border);
+    border-top-color: var(--mo-brand); border-radius: 50%; animation: mo-spin .9s linear infinite;
+}
+@keyframes mo-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+    .mo-spinner { animation: none; }
+    .mo-details > summary::before { transition: none; }
+}
+
+/* ---------------------------------------------------------------- alt bilgi */
+.mo-footer {
+    display: flex; flex-wrap: wrap; align-items: center; justify-content: center; gap: .25rem 1rem;
+    padding: .875rem 1rem; font-size: .8125rem; color: var(--mo-muted); background: #fff; border-top: 1px solid var(--mo-border);
+}
+.mo-trust { display: inline-flex; align-items: center; gap: .375rem; }
+
+/* ---------------------------------------------------------------- dar ekran */
+@media (max-width: 52rem) {
+    .mo-grid { grid-template-columns: minmax(0, 1fr); }
+    .mo-nav-menu { order: 3; flex-basis: 100%; }
+    .mo-nav-link { height: 40px; }
+}
+@media (max-width: 30rem) {
+    .mo-nav-company { display: none; }
+    .mo-row { grid-template-columns: 1fr 1fr; }
+    .mo-row .mo-field-cvv { grid-column: 1 / -1; }
+    .mo-btn-primary { width: 100%; }
+    .mo-actions { flex-direction: column-reverse; align-items: stretch; }
+    .mo-actions .mo-btn { width: 100%; }
+}
+
+/* ---------------------------------------------------------------- yazdırma */
+@media print {
+    .mo-navbar, .mo-controlpanel, .mo-footer, .mo-card-form, .mo-test-band { display: none !important; }
+    body { background: #fff; }
+    .mo-grid { display: block; }
+    .mo-card { border-color: #999; }
+}

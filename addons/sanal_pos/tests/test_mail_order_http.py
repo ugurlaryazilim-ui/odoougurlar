@@ -160,6 +160,130 @@ class TestCardPage(MoHttpCase):
         self.assertEqual(links, ['/sanal_pos/static/src/css/mail_order.css'])
         self.assertFalse(doc.xpath('//img[not(starts-with(@src,"/"))]'))
 
+    # ---- Odoo 19 görünümü (feat/mail-order-card-page-design): kritik öğeler
+    def test_ust_bar_menu_kullanici_ve_sirket(self):
+        payment = self.make_mail_order()
+        doc = self.doc(self.page(payment))
+        links = {a.text_content().strip(): a.get('href')
+                 for a in doc.xpath('//header[contains(@class,"mo-navbar")]//nav//a')}
+        self.assertEqual(links, {
+            'Ödeme Talepleri': '/odoo/action-sanal_pos.action_sanal_pos_payment',
+            'Yeni Ödeme Linki': '/odoo/action-sanal_pos.action_sanal_pos_payment_create_wizard',
+            'Mail Order': '/odoo/action-sanal_pos.action_sanal_pos_mail_order_wizard',
+        })       # İşlem Kayıtları yalnız yöneticide
+        navbar = ' '.join(doc.xpath('//header[contains(@class,"mo-navbar")]')[0].text_content().split())
+        self.assertIn('Sanal POS', navbar)
+        self.assertIn(self.user_sp.name, navbar)
+        self.assertIn(self.user_sp.company_id.name, navbar)
+        avatar = doc.xpath('//header//img[contains(@class,"mo-nav-avatar")]/@src')
+        self.assertEqual(avatar, ['/web/image/res.users/%d/avatar_128' % self.user_sp.id])
+
+    def test_ust_bar_islem_kayitlari_yalniz_yoneticide(self):
+        payment = self.make_mail_order()
+        doc = self.doc(self.page(payment, self.user_mgr))
+        hrefs = doc.xpath('//header//nav//a/@href')
+        self.assertIn('/odoo/action-sanal_pos.action_sanal_pos_log', hrefs)
+        self.assertEqual(len(hrefs), 4)
+
+    def test_ust_bar_adlari_kacislanir(self):
+        self.user_sp.sudo().write({'name': 'Ali <b>X</b> & "Y"'})
+        text = self.page(self.make_mail_order()).text
+        self.assertNotIn('<b>X</b>', text)
+        self.assertIn('Ali &lt;b&gt;X&lt;/b&gt;', text)
+
+    def test_breadcrumb_kayda_ve_listeye_baglanir(self):
+        payment = self.make_mail_order()
+        doc = self.doc(self.page(payment))
+        crumbs = doc.xpath('//nav[@aria-label="Sayfa konumu"]//li')
+        self.assertEqual([c.text_content().strip() for c in crumbs],
+                         ['Ödeme Talepleri', payment.name, 'Kart Bilgisi'])
+        self.assertEqual(crumbs[0].xpath('a/@href'), [PAYMENT_LIST])
+        self.assertEqual(crumbs[1].xpath('a/@href'), ['%s/%d' % (PAYMENT_LIST, payment.id)])
+        self.assertEqual(crumbs[2].get('aria-current'), 'page')
+
+    def test_iki_kart_ozet_formu_logolar_ve_alt_bilgi(self):
+        payment = self.make_mail_order()
+        doc = self.doc(self.page(payment))
+        main = doc.xpath('//main')[0]
+        self.assertEqual(len(main.xpath('.//section[contains(@class,"mo-card")]')), 2)
+        summary = ' '.join(main.xpath('.//section')[0].text_content().split())
+        for needle in (INV_NO, CUSTOMER_NAME, 'Ödeme özeti', 'Güvenlik uyarısı'):
+            self.assertIn(needle, summary)
+        self.assertEqual(sorted(main.xpath('.//span[contains(@class,"mo-cards")]/img/@alt')),
+                         ['Mastercard', 'Troy', 'Visa'])
+        for src in main.xpath('.//span[contains(@class,"mo-cards")]/img/@src'):
+            self.assertTrue(src.startswith('/sanal_pos/static/src/img/card-'), src)
+            self.assertEqual(self.url_open(src).status_code, 200, src)
+        pan = main.xpath('.//input[@name="pan"]')[0]
+        self.assertEqual(pan.get('pattern'), '[0-9]{13,19}')
+        self.assertEqual(pan.get('maxlength'), '19')
+        self.assertEqual(pan.get('autocomplete'), 'off')
+        self.assertEqual(pan.get('placeholder'), '0000 0000 0000 0000')
+        for field_id in ('cardOwner', 'pan', 'expiryMonth', 'expiryYear', 'cvv', 'installmentCount'):
+            self.assertTrue(main.xpath('.//label[@for="%s"]' % field_id), field_id)
+        cvv = main.xpath('.//input[@name="cvv"]')[0]
+        self.assertEqual(cvv.get('maxlength'), '4')
+        self.assertEqual(cvv.get('autocomplete'), 'off')
+        self.assertEqual(pan.get('aria-describedby'), 'pan-hint')
+        self.assertTrue(main.xpath('.//*[@id="pan-hint"]'))
+        footer = ' '.join(doc.xpath('//footer')[0].text_content().split())
+        self.assertIn("Kart bilgisi doğrudan Paratika'ya iletilir, Odoo'da saklanmaz.", footer)
+        self.assertIn(self.user_sp.company_id.name, footer)
+
+    def test_taksit_tablosu_katlanabilir_details_icinde(self):
+        self.mock.queue('QUERYINSTALLMENT', installment_body(('A', 'PARAF', [(2, 0), (3, 1.5)])))
+        doc = self.doc(self.page(self.make_mail_order()))
+        details = doc.xpath('//main//details')
+        self.assertEqual(len(details), 1)
+        self.assertIsNone(details[0].get('open'))          # varsayılan kapalı (JS'siz katlanır)
+        self.assertEqual(details[0].xpath('./summary')[0].text_content().strip(),
+                         'Taksit seçenekleri ve vade farkı')
+        self.assertEqual(len(details[0].xpath('.//table/tbody/tr')), 3)
+        self.assertFalse(doc.xpath('//form//table'))
+        # tablo yoksa (sorgu hatası) katlanabilir alan da yok
+        self.mock.queue('QUERYINSTALLMENT', timeout_exc())
+        self.assertFalse(self.doc(self.page(self.make_mail_order(invoice_no='D-2'))).xpath('//details'))
+
+    def test_satir_ici_stil_ve_betik_yok_tum_sayfalarda(self):
+        pages = [self.page(self.make_mail_order()).text,
+                 self.page(self.make_mail_order(invoice_no='E-1', state='paid')).text,       # hata sayfası
+                 self.page(self.make_mail_order(invoice_no='E-2'), self.user_plain).text,        # 403
+                 self.url_open(MAIL_ORDER_RETURN_PATH, data={'MERCHANTPAYMENTID': 'X-1-1'}, method='POST').text]
+        for text in pages:
+            lowered = text.lower()
+            self.assertNotIn('<script', lowered)
+            self.assertNotIn(' style=', lowered)
+            self.assertNotIn('<iframe', lowered)
+            self.assertNotIn('/web/assets', lowered)
+            self.assertIsNone(re.search(r'\son[a-z]+\s*=', lowered))
+            self.assertEqual(lxml_html.fromstring(text).xpath('//link/@href'),
+                             ['/sanal_pos/static/src/css/mail_order.css'])
+
+    def test_hata_sayfasi_ayni_tasarim_dili_ve_geri_baglantisi(self):
+        payment = self.make_mail_order(state='expired')
+        response = self.page(payment)
+        self.assertEqual(response.status_code, 409)
+        doc = self.doc(response)
+        self.assertTrue(doc.xpath('//header[contains(@class,"mo-navbar")]'))
+        self.assertTrue(doc.xpath('//div[contains(@class,"mo-alert-danger")]'))
+        back = doc.xpath('//main//a[contains(@class,"mo-btn")]/@href')
+        self.assertEqual(back, ['%s/%d' % (PAYMENT_LIST, payment.id)])
+        crumbs = [c.text_content().strip() for c in doc.xpath('//nav[@aria-label="Sayfa konumu"]//li')]
+        self.assertEqual(crumbs, ['Ödeme Talepleri', 'Ödeme kaydı', 'Kart Bilgisi'])
+        # yetkisiz kullanıcıda menü bağlantısı yok
+        denied = self.doc(self.page(payment, self.user_plain))
+        self.assertFalse(denied.xpath('//header//nav//a'))
+
+    def test_donus_sayfasinda_kullanici_sirket_ve_gorsel_yok(self):
+        payment = self.make_mail_order()
+        response = self.url_open(MAIL_ORDER_RETURN_PATH, data={'MERCHANTPAYMENTID': payment.merchant_payment_id},
+                                 method='POST', allow_redirects=False)
+        self.assertEqual(response.status_code, 200)
+        doc = lxml_html.fromstring(response.text)
+        self.assertFalse(doc.xpath('//img'))            # CSP bu sayfada img-src vermez
+        self.assertFalse(doc.xpath('//nav'))
+        self.assertNotIn(self.user_sp.company_id.name, response.text)
+
     def test_css_servisi_calisir(self):
         response = self.url_open('/sanal_pos/static/src/css/mail_order.css')
         self.assertEqual(response.status_code, 200)

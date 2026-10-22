@@ -33,6 +33,16 @@ EXPIRY_YEAR_SPAN = 15
 # form-action'ı yönlendirmede de uygular; o durumda buraya ('https:',) yazılır (tek değişim yeri).
 FORM_ACTION_EXTRA_SOURCES = ()
 
+# Üst bar menüsü: (etiket, eylem xmlid'i, gereken grup). Adresler sabit eylem adresleridir
+# (/odoo/action-<xmlid>); menüler.xml'deki grup kısıtlarıyla aynı: gizlemek yetki değil, yalnız
+# kullanıcının tıklayıp "erişim yok" görmemesi içindir (asıl yetki eylem/model erişimidir).
+NAV_ITEMS = (
+    ('Ödeme Talepleri', 'sanal_pos.action_sanal_pos_payment', None),
+    ('Yeni Ödeme Linki', 'sanal_pos.action_sanal_pos_payment_create_wizard', None),
+    ('Mail Order', 'sanal_pos.action_sanal_pos_mail_order_wizard', None),
+    ('İşlem Kayıtları', 'sanal_pos.action_sanal_pos_log', 'sanal_pos.group_sanal_pos_manager'),
+)
+
 PAGE_HEADERS = [
     # G-3: arka uç sekmesi (aynı köken) window.open ile açıp kart alanlarının DOM'una erişemesin
     ('Cross-Origin-Opener-Policy', 'same-origin'),
@@ -82,6 +92,7 @@ class SanalPosMailOrderController(http.Controller):
             values.get('amount'), values.get('installments'))
         values.update({
             'record_url': RECORD_PATH % payment.id,
+            'nav': self._nav_values(),
             'expiry_months': ['%02d' % m for m in range(1, 13)],
             'expiry_years': [str(y) for y in range(this_year, this_year + EXPIRY_YEAR_SPAN + 1)],
         })
@@ -117,6 +128,24 @@ class SanalPosMailOrderController(http.Controller):
         return 'https://%s' % parts.hostname
 
     @staticmethod
+    def _nav_values():
+        """Üst bar değerleri (yalnız sunucu tarafı, şablonda kaçışlanır). Oturumlu rotalar içindir."""
+        user = request.env.user
+        is_sp_user = user.has_group('sanal_pos.group_sanal_pos_user')
+        items = [{'label': label, 'url': '/odoo/action-%s' % xmlid, 'active': xmlid == NAV_ITEMS[0][1]}
+                 for label, xmlid, group in NAV_ITEMS
+                 if is_sp_user and (not group or user.has_group(group))]
+        return {
+            'brand_url': PAYMENT_LIST_PATH,
+            'list_url': PAYMENT_LIST_PATH,
+            'items': items,
+            'user_name': user.name or '',
+            'company_name': user.company_id.sudo().name or '',
+            # NEDEN: /web/image (aynı köken, CSP img-src 'self'); id sunucudan gelir, girdi değildir.
+            'avatar_url': '/web/image/res.users/%d/avatar_128' % user.id,
+        }
+
+    @staticmethod
     def _render(template, values, csp, status=200):
         # NEDEN: ir.qweb doğrudan; request.render/web.layout arka uç varlıklarını eklerdi.
         body = request.env['ir.qweb']._render(template, values)
@@ -130,4 +159,6 @@ class SanalPosMailOrderController(http.Controller):
     def _error_page(self, message, status, payment_id=None):
         back = RECORD_PATH % payment_id if payment_id else PAYMENT_LIST_PATH
         return self._render('sanal_pos.mail_order_error_page',
-                            {'message': message, 'back_url': back}, card_page_csp(), status=status)
+                            {'message': message, 'back_url': back, 'nav': self._nav_values(),
+                             'payment_url': RECORD_PATH % payment_id if payment_id else None},
+                            card_page_csp(), status=status)

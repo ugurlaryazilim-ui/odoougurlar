@@ -5,12 +5,80 @@
       * <script>, satır içi olay işleyicisi (on...=), iframe/object/embed,
       * web.layout / t-call ile arka uç şablonu ya da /web/assets varlığı,
       * kart alanlarına value / t-att-value,
-      * Odoo'ya POST eden form ya da csrf_token
+      * Odoo'ya POST eden form ya da csrf_token,
+      * style="" (CSP style-src 'self' satır içi stili zaten engeller)
     EKLEMEYİN: kart verisi Odoo koduna/sunucusuna açılır, CSP (default-src 'none') sayfayı bozar.
     Formun action'ı yalnız provider.direct_post_url (Paratika sale3d); alan adları yalnız
     Paratika'nın Direct POST alan adlarıdır (cardOwner, pan, expiryMonth, expiryYear, cvv,
-    installmentCount). Tek stil kaynağı /sanal_pos/static/src/css/mail_order.css.
+    installmentCount). Tek stil kaynağı /sanal_pos/static/src/css/mail_order.css; görseller
+    yalnız /sanal_pos/static/... ve /web/image/res.users/... (CSP img-src 'self').
+    t-call yalnız bu dosyadaki mail_order_* parçalarına yapılır.
     -->
+
+    <!-- Üst bar: kullanıcı/şirket adı yalnız sunucuda kaçışlanarak basılır; bağlantılar sabit eylem adresleridir. -->
+    <template id="mail_order_navbar" name="Sanal POS: Mail Order üst bar">
+        <header class="mo-navbar">
+            <span class="mo-nav-apps" aria-hidden="true">
+                <svg class="mo-icon" viewBox="0 0 24 24" fill="currentColor" focusable="false">
+                    <circle cx="5" cy="5" r="2"/><circle cx="12" cy="5" r="2"/><circle cx="19" cy="5" r="2"/>
+                    <circle cx="5" cy="12" r="2"/><circle cx="12" cy="12" r="2"/><circle cx="19" cy="12" r="2"/>
+                    <circle cx="5" cy="19" r="2"/><circle cx="12" cy="19" r="2"/><circle cx="19" cy="19" r="2"/>
+                </svg>
+            </span>
+            <a class="mo-nav-brand" t-att-href="nav['brand_url']">
+                <img src="/sanal_pos/static/description/icon.svg" width="24" height="24" alt=""/>
+                <span>Sanal POS</span>
+            </a>
+            <nav t-if="nav['items']" class="mo-nav-menu" aria-label="Sanal POS menüsü">
+                <a t-foreach="nav['items']" t-as="item"
+                   t-att-class="'mo-nav-link mo-active' if item['active'] else 'mo-nav-link'"
+                   t-att-href="item['url']" t-att-aria-current="'true' if item['active'] else None"
+                   t-out="item['label']"/>
+            </nav>
+            <div class="mo-nav-user">
+                <span t-if="nav['company_name']" class="mo-nav-company" t-out="nav['company_name']"/>
+                <img class="mo-nav-avatar" t-att-src="nav['avatar_url']" width="28" height="28" alt=""/>
+                <span t-out="nav['user_name']"/>
+            </div>
+        </header>
+    </template>
+
+    <!-- Herkese açık dönüş sayfası: kullanıcı/şirket bilgisi YOK, yalnız marka çubuğu (satır içi SVG, görsel isteği yok). -->
+    <template id="mail_order_brandbar" name="Sanal POS: Mail Order marka çubuğu">
+        <header class="mo-navbar">
+            <span class="mo-nav-brand">
+                <svg class="mo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8" focusable="false" aria-hidden="true">
+                    <rect x="2.5" y="5" width="19" height="14" rx="2.5"/><path d="M2.5 10h19"/>
+                </svg>
+                <span>Sanal POS</span>
+            </span>
+        </header>
+    </template>
+
+    <template id="mail_order_breadcrumb" name="Sanal POS: Mail Order breadcrumb">
+        <div class="mo-controlpanel">
+            <nav class="mo-breadcrumb" aria-label="Sayfa konumu">
+                <ol>
+                    <li><a t-att-href="crumb_list_url">Ödeme Talepleri</a></li>
+                    <li t-if="crumb_record_url"><a t-att-href="crumb_record_url" t-out="crumb_record_label or 'Ödeme kaydı'"/></li>
+                    <li aria-current="page" t-out="crumb_current"/>
+                </ol>
+            </nav>
+        </div>
+    </template>
+
+    <template id="mail_order_footer" name="Sanal POS: Mail Order alt bilgi">
+        <footer class="mo-footer">
+            <span t-if="company_name" t-out="company_name"/>
+            <span class="mo-trust">
+                <svg class="mo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true">
+                    <rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>
+                </svg>
+                Kart bilgisi doğrudan Paratika'ya iletilir, Odoo'da saklanmaz.
+            </span>
+        </footer>
+    </template>
+
     <template id="mail_order_card_page" name="Sanal POS: Mail Order kart sayfası">
         <html lang="tr">
             <head>
@@ -21,87 +89,153 @@
                 <link rel="stylesheet" href="/sanal_pos/static/src/css/mail_order.css"/>
             </head>
             <body>
-                <main class="mo-page">
-                    <div t-if="is_test" class="mo-test-band">TEST ORTAMI: gerçek tahsilat yapılmaz</div>
-                    <h1>Mail Order ile ödeme</h1>
-                    <dl class="mo-summary">
-                        <dt>Fatura</dt><dd t-out="invoice_no"/>
-                        <dt>Müşteri</dt><dd t-out="customer_name"/>
-                        <dt>Tutar</dt><dd t-out="amount_text"/>
-                        <dt>Son geçerlilik</dt><dd t-out="expires_local"/>
-                    </dl>
-                    <p class="mo-warning">Kart bilgisini yalnız bu ekrandan açılan kart sayfasına girin; not almayın, e-posta/mesajla almayın, tarayıcıya kaydettirmeyin. Banka doğrulama (SMS) kodunu müşteriden alıp yalnız banka sayfasına girin.</p>
-                    <!-- Form doğrudan Paratika'ya gider; Odoo bu alanları hiçbir yolla almaz (K-13). -->
-                    <form class="mo-form" method="post" t-att-action="form_action" autocomplete="off">
-                        <label for="cardOwner">Kart sahibinin adı</label>
-                        <input id="cardOwner" name="cardOwner" type="text" maxlength="32"
-                               autocomplete="off" required="required"/>
-                        <label for="pan">Kart numarası (yalnız rakam)</label>
-                        <input id="pan" name="pan" type="text" inputmode="numeric" pattern="[0-9]{12,19}"
-                               maxlength="19" autocomplete="off" required="required"/>
-                        <div class="mo-row">
-                            <div>
-                                <label for="expiryMonth">Son kullanma ayı</label>
-                                <select id="expiryMonth" name="expiryMonth" autocomplete="off" required="required">
-                                    <option value="">Ay</option>
-                                    <t t-foreach="expiry_months" t-as="month">
-                                        <option t-att-value="month" t-out="month"/>
-                                    </t>
-                                </select>
+                <t t-call="sanal_pos.mail_order_navbar"/>
+                <t t-set="crumb_list_url" t-value="nav['list_url']"/>
+                <t t-set="crumb_record_url" t-value="record_url"/>
+                <t t-set="crumb_record_label" t-value="payment_name"/>
+                <t t-set="crumb_current" t-value="'Kart Bilgisi'"/>
+                <t t-call="sanal_pos.mail_order_breadcrumb"/>
+                <div t-if="is_test" class="mo-test-band">TEST ORTAMI: gerçek tahsilat yapılmaz</div>
+                <main class="mo-main">
+                    <div class="mo-title">
+                        <h1>Mail Order ile ödeme</h1>
+                        <p>Müşterinin telefonla bildirdiği kart bilgisini girin; ödeme banka 3D Secure doğrulamasıyla tamamlanır.</p>
+                    </div>
+                    <div class="mo-grid">
+                        <section class="mo-card" aria-labelledby="mo-summary-title">
+                            <div class="mo-card-head"><h2 id="mo-summary-title">Ödeme özeti</h2></div>
+                            <div class="mo-card-body">
+                                <p class="mo-amount-label">Ödenecek tutar</p>
+                                <p class="mo-amount" t-out="amount_text"/>
+                                <dl class="mo-summary">
+                                    <dt>Fatura</dt><dd t-out="invoice_no"/>
+                                    <dt>Müşteri</dt><dd t-out="customer_name"/>
+                                    <dt>Son geçerlilik</dt><dd t-out="expires_local"/>
+                                </dl>
+                                <div class="mo-alert mo-alert-warning" role="note">
+                                    <p class="mo-alert-title">
+                                        <svg class="mo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true">
+                                            <path d="M12 3.5 2.5 20h19z"/><path d="M12 10v4.5M12 17.5v.01"/>
+                                        </svg>
+                                        Güvenlik uyarısı
+                                    </p>
+                                    <p>Kart bilgisini yalnız bu ekrandan açılan kart sayfasına girin; not almayın, e-posta/mesajla almayın, tarayıcıya kaydettirmeyin. Banka doğrulama (SMS) kodunu müşteriden alıp yalnız banka sayfasına girin.</p>
+                                </div>
+                                <p class="mo-note">Taksit seçimi sağdaki formdan yapılır; vade farkı çekim tutarına eklenir ve kesin tutar banka sayfasında görünür.</p>
                             </div>
-                            <div>
-                                <label for="expiryYear">Son kullanma yılı</label>
-                                <select id="expiryYear" name="expiryYear" autocomplete="off" required="required">
-                                    <option value="">Yıl</option>
-                                    <t t-foreach="expiry_years" t-as="year">
-                                        <option t-att-value="year" t-out="year"/>
-                                    </t>
-                                </select>
+                        </section>
+
+                        <section class="mo-card mo-card-form" aria-labelledby="mo-card-title">
+                            <div class="mo-card-head">
+                                <h2 id="mo-card-title">Kart bilgileri</h2>
+                                <span class="mo-cards" role="group" aria-label="Kabul edilen kartlar">
+                                    <img src="/sanal_pos/static/src/img/card-visa.svg" width="38" height="24" alt="Visa"/>
+                                    <img src="/sanal_pos/static/src/img/card-mastercard.svg" width="38" height="24" alt="Mastercard"/>
+                                    <img src="/sanal_pos/static/src/img/card-troy.svg" width="38" height="24" alt="Troy"/>
+                                </span>
                             </div>
-                            <div>
-                                <label for="cvv">Güvenlik kodu (CVV)</label>
-                                <input id="cvv" name="cvv" type="password" inputmode="numeric"
-                                       pattern="[0-9]{3,4}" maxlength="4" autocomplete="off" required="required"/>
+                            <div class="mo-card-body">
+                                <!-- Form doğrudan Paratika'ya gider; Odoo bu alanları hiçbir yolla almaz (K-13). -->
+                                <form class="mo-form" method="post" t-att-action="form_action" autocomplete="off">
+                                    <div class="mo-field">
+                                        <label for="cardOwner">Kart sahibinin adı</label>
+                                        <input id="cardOwner" name="cardOwner" class="mo-input" type="text" maxlength="32"
+                                               autocomplete="off" autocapitalize="characters" spellcheck="false"
+                                               required="required"/>
+                                    </div>
+                                    <div class="mo-field">
+                                        <label for="pan">Kart numarası</label>
+                                        <input id="pan" name="pan" class="mo-input mo-pan" type="text" inputmode="numeric"
+                                               pattern="[0-9]{13,19}" maxlength="19" autocomplete="off"
+                                               placeholder="0000 0000 0000 0000" aria-describedby="pan-hint"
+                                               required="required"/>
+                                        <p id="pan-hint" class="mo-hint">Yalnız rakam, boşluksuz (13-19 hane).</p>
+                                    </div>
+                                    <div class="mo-row">
+                                        <div class="mo-field">
+                                            <label for="expiryMonth">Son kullanma ayı</label>
+                                            <select id="expiryMonth" name="expiryMonth" class="mo-input" autocomplete="off" required="required">
+                                                <option value="">Ay</option>
+                                                <t t-foreach="expiry_months" t-as="month">
+                                                    <option t-att-value="month" t-out="month"/>
+                                                </t>
+                                            </select>
+                                        </div>
+                                        <div class="mo-field">
+                                            <label for="expiryYear">Son kullanma yılı</label>
+                                            <select id="expiryYear" name="expiryYear" class="mo-input" autocomplete="off" required="required">
+                                                <option value="">Yıl</option>
+                                                <t t-foreach="expiry_years" t-as="year">
+                                                    <option t-att-value="year" t-out="year"/>
+                                                </t>
+                                            </select>
+                                        </div>
+                                        <div class="mo-field mo-field-cvv">
+                                            <label for="cvv">Güvenlik kodu (CVV)</label>
+                                            <input id="cvv" name="cvv" class="mo-input" type="password" inputmode="numeric"
+                                                   pattern="[0-9]{3,4}" maxlength="4" autocomplete="off"
+                                                   aria-describedby="cvv-hint" required="required"/>
+                                        </div>
+                                    </div>
+                                    <p id="cvv-hint" class="mo-hint mo-hint-gap">Kartın arkasındaki 3 haneli kod (Amex: ön yüzdeki 4 hane).</p>
+                                    <div class="mo-field">
+                                        <label for="installmentCount">Taksit</label>
+                                        <!-- G0-Q7: tek çekim değeri '1' varsayımı (spike sonrası tek değişim yeri). -->
+                                        <select id="installmentCount" name="installmentCount" class="mo-input">
+                                            <t t-foreach="installment_table['rows']" t-as="row">
+                                                <option t-att-value="row['count']" t-out="row['select_text']"/>
+                                            </t>
+                                        </select>
+                                    </div>
+                                    <div class="mo-actions">
+                                        <button type="submit" class="mo-btn mo-btn-primary">
+                                            <svg class="mo-icon" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true">
+                                                <rect x="4.5" y="10.5" width="15" height="10" rx="2"/><path d="M8 10.5V7.5a4 4 0 0 1 8 0v3"/>
+                                            </svg>
+                                            Öde (3D Secure)
+                                        </button>
+                                        <a class="mo-btn mo-btn-secondary" t-att-href="record_url">Vazgeç</a>
+                                    </div>
+                                </form>
                             </div>
-                        </div>
-                        <label for="installmentCount">Taksit</label>
-                        <!-- G0-Q7: tek çekim değeri '1' varsayımı (spike sonrası tek değişim yeri). -->
-                        <select id="installmentCount" name="installmentCount">
-                            <t t-foreach="installment_table['rows']" t-as="row">
-                                <option t-att-value="row['count']" t-out="row['select_text']"/>
-                            </t>
-                        </select>
-                        <button type="submit" class="mo-submit">Öde (3D)</button>
-                    </form>
-                    <t t-if="installments">
-                        <h2>Kart programına göre taksitler</h2>
-                        <p t-if="installment_table['common_networks']" class="mo-hint"
-                           t-out="'Taksit yapılabilen kartlar: %s' % ', '.join(installment_table['common_networks'])"/>
-                        <p class="mo-hint">Kartın desteklemediği taksit banka tarafından reddedilir. Vade farkı banka/Paratika tarafından çekim tutarına eklenir; kesin tutar banka sayfasında görünür.</p>
-                        <table class="mo-table">
-                            <thead>
-                                <tr>
-                                    <th>Taksit</th>
-                                    <th t-if="installment_table['per_row']">Kart programı</th>
-                                    <th>Vade farkı (%)</th>
-                                    <th>Çekilecek toplam (TL)</th>
-                                    <th>Aylık taksit (TL)</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <tr t-foreach="installment_table['rows']" t-as="row">
-                                    <td t-out="'Tek çekim' if row['count'] == 1 else row['count']"/>
-                                    <td t-if="installment_table['per_row']"
-                                        t-out="', '.join(row['networks']) or '-'"/>
-                                    <td t-out="row['rate_text']"/>
-                                    <td t-out="row['total_text']"/>
-                                    <td t-out="row['monthly_text']"/>
-                                </tr>
-                            </tbody>
-                        </table>
-                    </t>
-                    <p class="mo-back"><a t-att-href="record_url">Vazgeç, ödeme kaydına dön</a></p>
+                        </section>
+
+                        <t t-if="installments">
+                            <details class="mo-card mo-details mo-span">
+                                <summary>Taksit seçenekleri ve vade farkı</summary>
+                                <div class="mo-details-body">
+                                    <p t-if="installment_table['common_networks']" class="mo-hint"
+                                       t-out="'Taksit yapılabilen kartlar: %s' % ', '.join(installment_table['common_networks'])"/>
+                                    <p class="mo-hint">Kartın desteklemediği taksit banka tarafından reddedilir. Vade farkı banka/Paratika tarafından çekim tutarına eklenir; kesin tutar banka sayfasında görünür.</p>
+                                    <div class="mo-table-wrap">
+                                        <table class="mo-table">
+                                            <thead>
+                                                <tr>
+                                                    <th>Taksit</th>
+                                                    <th t-if="installment_table['per_row']">Kart programı</th>
+                                                    <th>Vade farkı (%)</th>
+                                                    <th class="mo-num">Çekilecek toplam (TL)</th>
+                                                    <th class="mo-num">Aylık taksit (TL)</th>
+                                                </tr>
+                                            </thead>
+                                            <tbody>
+                                                <tr t-foreach="installment_table['rows']" t-as="row">
+                                                    <td t-out="'Tek çekim' if row['count'] == 1 else row['count']"/>
+                                                    <td t-if="installment_table['per_row']"
+                                                        t-out="', '.join(row['networks']) or '-'"/>
+                                                    <td t-out="row['rate_text']"/>
+                                                    <td class="mo-num" t-out="row['total_text']"/>
+                                                    <td class="mo-num" t-out="row['monthly_text']"/>
+                                                </tr>
+                                            </tbody>
+                                        </table>
+                                    </div>
+                                </div>
+                            </details>
+                        </t>
+                    </div>
                 </main>
+                <t t-call="sanal_pos.mail_order_footer"><t t-set="company_name" t-value="nav['company_name']"/></t>
             </body>
         </html>
     </template>
@@ -116,30 +250,55 @@
                 <link rel="stylesheet" href="/sanal_pos/static/src/css/mail_order.css"/>
             </head>
             <body>
-                <main class="mo-page">
-                    <h1>Kart sayfası açılamadı</h1>
-                    <p class="mo-error" t-out="message"/>
-                    <p class="mo-back"><a t-att-href="back_url">Geri dön</a></p>
+                <t t-call="sanal_pos.mail_order_navbar"/>
+                <t t-set="crumb_list_url" t-value="nav['list_url']"/>
+                <t t-set="crumb_record_url" t-value="payment_url"/>
+                <t t-set="crumb_record_label" t-value="None"/>
+                <t t-set="crumb_current" t-value="'Kart Bilgisi'"/>
+                <t t-call="sanal_pos.mail_order_breadcrumb"/>
+                <main class="mo-main">
+                    <section class="mo-card mo-narrow" aria-labelledby="mo-error-title">
+                        <div class="mo-card-head"><h1 id="mo-error-title">Kart sayfası açılamadı</h1></div>
+                        <div class="mo-card-body">
+                            <div class="mo-alert mo-alert-danger" role="alert">
+                                <p t-out="message"/>
+                            </div>
+                            <div class="mo-actions">
+                                <a class="mo-btn mo-btn-primary" t-att-href="back_url">Geri dön</a>
+                            </div>
+                        </div>
+                    </section>
                 </main>
+                <t t-call="sanal_pos.mail_order_footer"><t t-set="company_name" t-value="nav['company_name']"/></t>
             </body>
         </html>
     </template>
 
-    <!-- mo_return (public): sabit metin + Odoo kökenli geçiş; target yalnız MPID_RE'ye uyan değer. -->
+    <!-- mo_return (public): sabit metin + Odoo kökenli geçiş; target yalnız MPID_RE'ye uyan değer.
+         Kullanıcı/şirket bilgisi ve görsel isteği YOK (CSP bu sayfada img-src içermez). -->
     <template id="mail_order_return_page" name="Sanal POS: Mail Order dönüş sayfası">
         <html lang="tr">
             <head>
                 <meta charset="utf-8"/>
                 <meta http-equiv="refresh" t-attf-content="0;url={{ target }}"/>
+                <meta name="viewport" content="width=device-width, initial-scale=1"/>
                 <meta name="robots" content="noindex, nofollow"/>
                 <title>Ödeme sonucu alınıyor</title>
                 <link rel="stylesheet" href="/sanal_pos/static/src/css/mail_order.css"/>
             </head>
             <body>
-                <main class="mo-page">
-                    <p>Ödeme sonucu alınıyor…</p>
-                    <p class="mo-back"><a t-att-href="target">Sayfa açılmazsa buraya tıklayın</a></p>
+                <t t-call="sanal_pos.mail_order_brandbar"/>
+                <main class="mo-main">
+                    <section class="mo-card mo-narrow mo-center" aria-live="polite">
+                        <div class="mo-card-body">
+                            <div class="mo-spinner" aria-hidden="true"/>
+                            <h1>Ödeme sonucu alınıyor…</h1>
+                            <p class="mo-note">Banka doğrulaması tamamlandı; sonuç Odoo'da sorgulanıyor.</p>
+                            <p><a t-att-href="target">Sayfa açılmazsa buraya tıklayın</a></p>
+                        </div>
+                    </section>
                 </main>
+                <t t-call="sanal_pos.mail_order_footer"/>
             </body>
         </html>
     </template>
