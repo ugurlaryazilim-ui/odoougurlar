@@ -13,9 +13,13 @@ NEBIM_COST_SYNC_LOCK = 812345002
 
 # NEDEN (A5 Ö-5): stok kilidi başka çalışma tarafından tutulduğunda her cron turu atlar; kısa
 # çakışma olağandır (DEBUG), ama kilit uzun süre bırakılmıyorsa (takılan iş) görünür olmalı.
-# {dbname: ilk atlamanın time.monotonic() değeri}; kilit alınınca sıfırlanır. Süreç belleği.
+# {dbname: (art arda atlamanın ilk, son time.monotonic() değeri)}; kilit alınınca sıfırlanır. Süreç belleği.
+# NEDEN (A5 Ö-2): kilidi başka worker alınca bu sürecin kaydı silinemez; bayat kayıt günler sonra yanlış büyük
+# "N dk" WARNING'i üretirdi. DB'ye yazmak yerine (her 1 dk'lık atlamada yazma maliyeti) seri kuralı: iki atlama
+# arası STOCK_SKIP_RESET_SECONDS'tan uzunsa seri kopmuştur, sayaç yeniden başlar. Mesaj da "bu süreçte" der.
 _STOCK_SKIP_SINCE = {}
 STOCK_SKIP_WARN_SECONDS = 30 * 60
+STOCK_SKIP_RESET_SECONDS = 5 * 60   # cron 1 dk'da bir; 5 dk atlamasız geçtiyse seri bitmiştir
 
 # Maliyet tam taramasında her commit'te işlenen varyant sayısı
 COST_BATCH_SIZE = 500
@@ -85,11 +89,15 @@ class NebimService(models.AbstractModel):
         self.env.cr.execute("SELECT pg_try_advisory_lock(%s)", [NEBIM_STOCK_SYNC_LOCK])
         dbname = self.env.cr.dbname
         if not self.env.cr.fetchone()[0]:
-            since = _STOCK_SKIP_SINCE.setdefault(dbname, time.monotonic())
-            waited = time.monotonic() - since
+            now = time.monotonic()
+            first, last = _STOCK_SKIP_SINCE.get(dbname, (now, now))
+            if now - last > STOCK_SKIP_RESET_SECONDS:
+                first = now
+            _STOCK_SKIP_SINCE[dbname] = (first, now)
+            waited = now - first
             level = logging.WARNING if waited >= STOCK_SKIP_WARN_SECONDS else logging.DEBUG
             _logger.log(level, "Stok güncelleme atlandı: başka bir stok senkronizasyonu çalışıyor "
-                               "(%d dk'dır kilit alınamıyor).", waited // 60)
+                               "(bu süreçte %d dk'dır art arda atlanıyor).", waited // 60)
             return
         _STOCK_SKIP_SINCE.pop(dbname, None)
         try:

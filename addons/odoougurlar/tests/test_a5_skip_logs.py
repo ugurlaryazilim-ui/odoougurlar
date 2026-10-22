@@ -27,6 +27,24 @@ class TestA5SkipLogs(TransactionCase):
             Queue.auto_sync_cron()
         self.assertTrue(any('hâlâ işleniyor' in r.getMessage() and r.levelno == logging.INFO for r in cm.records))
 
+    def test_stock_skip_stale_record_does_not_warn_after_long_gap(self):
+        # Ö-2: başka worker'ın kilidi alıp sayacı silmesi bu süreçte görülmez; günler sonraki kısa çakışma
+        # eski kaydın "N bin dk" WARNING'ini üretmemeli
+        cr = sql_db.db_connect(self.env.cr.dbname).cursor()
+        self.addCleanup(cr.close)
+        cr.execute('SELECT pg_advisory_lock(%s)', [nebim_service.NEBIM_STOCK_SYNC_LOCK])
+        self.addCleanup(cr.execute, 'SELECT pg_advisory_unlock(%s)', [nebim_service.NEBIM_STOCK_SYNC_LOCK])
+        self.patch(nebim_service, '_STOCK_SKIP_SINCE', {})
+        service = self.env['odoougurlar.nebim.service']
+        clock = [1000.0]
+        with patch.object(nebim_service, 'time', SimpleNamespace(monotonic=lambda: clock[0])):
+            service.sync_stock_prices()
+            clock[0] += 3 * 24 * 3600
+            with self.assertNoLogs(SERVICE_LOGGER, logging.WARNING):
+                service.sync_stock_prices()
+            first, last = nebim_service._STOCK_SKIP_SINCE[self.env.cr.dbname]
+            self.assertEqual(first, last)   # seri yeniden başladı
+
     def test_stock_skip_debug_then_warning_after_30_min_and_reset_on_lock(self):
         # başka worker kilidi tutar
         cr = sql_db.db_connect(self.env.cr.dbname).cursor()
@@ -39,10 +57,16 @@ class TestA5SkipLogs(TransactionCase):
         with patch.object(nebim_service, 'time', SimpleNamespace(monotonic=lambda: clock[0])):
             with self.assertNoLogs(SERVICE_LOGGER, logging.WARNING):
                 service.sync_stock_prices()       # ilk atlama: DEBUG
-            clock[0] += nebim_service.STOCK_SKIP_WARN_SECONDS + 1
+            step = nebim_service.STOCK_SKIP_RESET_SECONDS   # seriyi koparmayan en uzun aralık
+            while clock[0] - 1000.0 + step < nebim_service.STOCK_SKIP_WARN_SECONDS:
+                clock[0] += step
+                with self.assertNoLogs(SERVICE_LOGGER, logging.WARNING):
+                    service.sync_stock_prices()
+            clock[0] += step
             with self.assertLogs(SERVICE_LOGGER, logging.WARNING) as cm:
                 service.sync_stock_prices()
             self.assertIn('30 dk', cm.records[0].getMessage())
+            self.assertIn('bu süreçte', cm.records[0].getMessage())
             # kilit bırakılınca sayaç sıfırlanır
             cr.execute('SELECT pg_advisory_unlock(%s)', [nebim_service.NEBIM_STOCK_SYNC_LOCK])
             with patch.object(type(service), '_sync_stock_prices_locked', return_value=None):
