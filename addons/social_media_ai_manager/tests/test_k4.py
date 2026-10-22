@@ -85,8 +85,10 @@ class TestOAuthSecrets(TransactionCase):
         # NEDEN (A5 O1): OAuth uçları yalnız sistem yöneticisine açık ve imzalı state ister
         admin_env = self.env(user=new_test_user(
             self.env, login='k4_oauth_admin', groups='base.group_user,base.group_system'))
-        self.fake_request = SimpleNamespace(env=admin_env, redirect=lambda url, **kw: ('REDIRECT', url))
-        state = make_oauth_state(admin_env, 'meta', 0)
+        session = {}
+        self.fake_request = SimpleNamespace(env=admin_env, session=session,
+                                            redirect=lambda url, **kw: ('REDIRECT', url))
+        state = make_oauth_state(admin_env, 'meta', 0, session)
         # NEDEN: @http.route sarmalayıcısı dönüşü Response'a çevirir; gerçek metodu doğrudan çağırıyoruz
         ctrl = oauth_meta.MetaOAuthController()
         self.callback = lambda **kw: oauth_meta.MetaOAuthController.facebook_callback.__wrapped__(

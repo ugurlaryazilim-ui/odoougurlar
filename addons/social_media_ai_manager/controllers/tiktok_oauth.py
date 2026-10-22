@@ -40,7 +40,7 @@ class TikTokOAuth(http.Controller):
             'redirect_uri': redirect_uri,
             'response_type': 'code',
             'scope': scopes,
-            'state': make_oauth_state(env, 'tiktok', account_id),
+            'state': make_oauth_state(env, 'tiktok', account_id, request.session),
         })
 
         return request.redirect(auth_url, local=False)
@@ -58,7 +58,7 @@ class TikTokOAuth(http.Controller):
             return "Error from TikTok: %s" % html_escape(error)
 
         # NEDEN (A5 O1): imzasız state ile başkasının TikTok kodu şirket hesabına yazdırılabiliyordu
-        account_id = check_oauth_state(env, 'tiktok', kwargs.get('state'))
+        account_id = check_oauth_state(env, 'tiktok', kwargs.get('state'), request.session)
         if not account_id:
             return "Invalid or expired state. Please start the login again."
         if not code:

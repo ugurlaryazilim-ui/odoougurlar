@@ -97,14 +97,20 @@ class TestFixYoutubePrecheck(_Base):
 
 class _OAuthBase(_Base):
 
+    def setUp(self):
+        super().setUp()
+        # NEDEN: gerçek istekte login ve callback aynı oturumu paylaşır; nonce oturumda tutulur (N2)
+        self.session = {}
+
     def _call(self, module, cls_name, meth, user, **kw):
-        req = SimpleNamespace(env=self.env(user=user), redirect=lambda url, **k: ('REDIRECT', url))
+        req = SimpleNamespace(env=self.env(user=user), session=self.session,
+                              redirect=lambda url, **k: ('REDIRECT', url))
         ctrl = getattr(module, cls_name)()
         with patch.object(module, 'request', req):
             return getattr(getattr(module, cls_name), meth).__wrapped__(ctrl, **kw)
 
     def _state(self, provider, account_id, user=None):
-        return tools.make_oauth_state(self.env(user=user or self.admin), provider, account_id)
+        return tools.make_oauth_state(self.env(user=user or self.admin), provider, account_id, self.session)
 
 
 @tagged('post_install', '-at_install', 'social_media_ai_manager')
@@ -187,7 +193,34 @@ class TestOAuthState(_OAuthBase):
         self.assertEqual(out[0], 'REDIRECT')
         from urllib.parse import parse_qs, urlparse
         state = parse_qs(urlparse(out[1]).query)['state'][0]
-        self.assertEqual(tools.check_oauth_state(self.env(user=self.admin), 'youtube', state), self.yt.id)
+        self.assertEqual(
+            tools.check_oauth_state(self.env(user=self.admin), 'youtube', state, self.session), self.yt.id)
+
+    def test_state_is_single_use(self):
+        state = self._state('youtube', self.yt.id)
+        env = self.env(user=self.admin)
+        self.assertEqual(tools.check_oauth_state(env, 'youtube', state, self.session), self.yt.id)
+        self.assertIsNone(tools.check_oauth_state(env, 'youtube', state, self.session))
+        # callback uçunda da: ikinci kullanım hesabı bağlamaz
+        state2 = self._state('youtube', self.yt.id)
+        self.assertEqual(self._yt_callback(self.admin, state2)[0], 'REDIRECT')
+        self.assertIn('Invalid or expired state', self._yt_callback(self.admin, state2))
+
+    def test_state_from_other_session_rejected(self):
+        state = self._state('youtube', self.yt.id)
+        self.assertIsNone(tools.check_oauth_state(self.env(user=self.admin), 'youtube', state, {}))
+
+    def test_non_ascii_or_malformed_signature_rejected_not_500(self):
+        env = self.env(user=self.admin)
+        payload = self._state('youtube', self.yt.id).rsplit('.', 1)[0]
+        for sig in ('ç' * 64, 'ı' + 'a' * 63, '', '%00'):
+            self.assertIsNone(tools.check_oauth_state(env, 'youtube', payload + '.' + sig, self.session), sig)
+        self.assertIn('Invalid or expired state', self._yt_callback(self.admin, payload + '.çş'))
+
+    def test_nonce_store_is_bounded(self):
+        for _i in range(tools._NONCE_MAX + 5):
+            self._state('youtube', self.yt.id)
+        self.assertLessEqual(len(self.session[tools._NONCE_KEY]), tools._NONCE_MAX)
 
     def test_plain_user_forbidden(self):
         cases = ((youtube_oauth, 'YouTubeOAuth', 'youtube_login', {'account_id': str(self.yt.id)}),
