@@ -17,12 +17,11 @@ from odoo import http
 from odoo.exceptions import AccessError, MissingError, UserError
 from odoo.http import request
 
-from .main import MPID_RE, PAYMENT_LIST_PATH
+from .main import MO_RESULT_PATH, MPID_RE, PAYMENT_LIST_PATH
 
 _logger = logging.getLogger(__name__)
 
 PAY_PATH = '/sanal_pos/mail_order/pay/<int:payment_id>'
-RESULT_PATH = '/sanal_pos/mail_order/result'
 RECORD_PATH = PAYMENT_LIST_PATH + '/%d'
 EXPIRY_YEAR_SPAN = 15
 
@@ -88,7 +87,7 @@ class SanalPosMailOrderController(http.Controller):
                             type(exc).__name__, payment_id)
         return self._render('sanal_pos.mail_order_card_page', values, card_page_csp(origin))
 
-    @http.route(RESULT_PATH, type='http', auth='user', methods=['GET'])
+    @http.route(MO_RESULT_PATH, type='http', auth='user', methods=['GET'])
     def mail_order_result(self, mpid=None, **_kwargs):
         """3D dönüşünden sonra: durumu sorgular ve ödeme kaydının formuna yönlendirir (303)."""
         if not request.env.user.has_group('sanal_pos.group_sanal_pos_user'):
