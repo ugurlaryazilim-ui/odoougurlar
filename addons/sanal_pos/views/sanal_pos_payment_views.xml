@@ -16,6 +16,7 @@
                 <field name="currency_id" column_invisible="True"/>
                 <field name="amount" sum="Toplam"/>
                 <field name="refunded_amount" optional="show"/>
+                <field name="payment_method" string="Yöntem"/>
                 <field name="channels_display"/>
                 <field name="state" widget="badge"
                        decoration-success="state == 'paid'"
@@ -53,14 +54,22 @@
                             invisible="state != 'review'"/>
                     <button name="action_resend" type="object" string="Yeniden Gönder"
                             class="btn-secondary" groups="sanal_pos.group_sanal_pos_user"
-                            invisible="not can_resend"/>
+                            invisible="not can_resend or payment_method == 'mail_order'"/>
                     <button name="action_cancel_link" type="object" string="Linki İptal Et"
                             class="btn-secondary" groups="sanal_pos.group_sanal_pos_user"
-                            invisible="state != 'sent'"
+                            invisible="state != 'sent' or payment_method == 'mail_order'"
                             confirm="Link Paratika'da iptal edilecek. Devam edilsin mi?"/>
                     <button name="action_new_link" type="object" string="Yeni Link Oluştur"
                             class="btn-primary" groups="sanal_pos.group_sanal_pos_user"
-                            invisible="state not in ('expired', 'link_cancelled', 'error', 'voided', 'refunded')"/>
+                            invisible="state not in ('expired', 'link_cancelled', 'error', 'voided', 'refunded') or payment_method == 'mail_order'"/>
+                    <!-- Mail Order (K-14): kart sayfası Odoo'da; kapatma KK-21 -->
+                    <button name="action_open_card_page" type="object" string="Kart Bilgisi Gir"
+                            class="btn-primary" groups="sanal_pos.group_sanal_pos_user"
+                            invisible="payment_method != 'mail_order' or state != 'sent'"/>
+                    <button name="action_mail_order_close" type="object" string="Mail Order'ı Kapat"
+                            class="btn-secondary" groups="sanal_pos.group_sanal_pos_user"
+                            invisible="payment_method != 'mail_order' or state != 'sent'"
+                            confirm="Paratika'daki işlem sorgulanacak; satış yoksa mail order kapatılır. Devam edilsin mi?"/>
                     <!-- G11: iptal/iade yalnız yönetici; onay sihirbazı açılır (KK-40, KK-41, KK-50) -->
                     <button name="action_open_void_wizard" type="object" string="Ödemeyi İptal Et"
                             class="btn-danger" groups="sanal_pos.group_sanal_pos_manager"
@@ -100,15 +109,16 @@
                             <field name="invoice_date"/>
                             <field name="customer_code"/>
                             <field name="amount"/>
+                            <field name="payment_method"/>
                             <field name="state" widget="badge"
                                    decoration-success="state == 'paid'"
                                    decoration-info="state in ('sending', 'sent')"
                                    decoration-warning="state in ('unknown', 'review', 'refund_pending', 'partial_refund')"
                                    decoration-danger="state == 'error'"/>
                         </group>
-                        <group string="Link">
-                            <field name="channels_display"/>
-                            <field name="expiry_hours"/>
+                        <group string="Link / Oturum">
+                            <field name="channels_display" invisible="payment_method == 'mail_order'"/>
+                            <field name="expiry_hours" invisible="payment_method == 'mail_order'"/>
                             <field name="sent_at"/>
                             <field name="expires_at"/>
                             <field name="user_id"/>
@@ -209,6 +219,11 @@
                 <field name="customer_name"/>
                 <field name="customer_phone"/>
                 <field name="merchant_payment_id" string="Ödeme Numarası"/>
+                <filter name="method_link" string="Link"
+                        domain="[('payment_method', '=', 'link')]"/>
+                <filter name="method_mail_order" string="Mail Order"
+                        domain="[('payment_method', '=', 'mail_order')]"/>
+                <separator/>
                 <filter name="open" string="Açık"
                         domain="[('state', 'in', ('sent', 'unknown'))]"/>
                 <separator/>
@@ -229,6 +244,7 @@
                         domain="[('user_id', '=', uid)]"/>
                 <group>
                     <filter name="group_state" string="Durum" context="{'group_by': 'state'}"/>
+                    <filter name="group_method" string="Yöntem" context="{'group_by': 'payment_method'}"/>
                     <filter name="group_user" string="Oluşturan" context="{'group_by': 'user_id'}"/>
                     <filter name="group_environment" string="Ortam" context="{'group_by': 'environment'}"/>
                 </group>

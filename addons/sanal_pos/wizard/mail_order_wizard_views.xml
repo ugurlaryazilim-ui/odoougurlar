@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- Mail Order sihirbazı (K-14). Link sihirbazından farkı: kanal ve geçerlilik alanı yok, KK-3
+         uyarısı var. Kart alanı YOKTUR (K-13): kart bilgisi ayrı kart sayfasında girilir. -->
+    <record id="view_sanal_pos_mail_order_wizard_form" model="ir.ui.view">
+        <field name="name">sanal.pos.mail.order.wizard.form</field>
+        <field name="model">sanal.pos.mail.order.wizard</field>
+        <field name="arch" type="xml">
+            <form string="Mail Order">
+                <field name="fetched" invisible="1"/>
+                <field name="is_test" invisible="1"/>
+                <field name="prior_refunded" invisible="1"/>
+                <field name="currency_id" invisible="1"/>
+                <div class="alert alert-danger text-center fw-bold" role="alert"
+                     invisible="not is_test">
+                    TEST ORTAMI – gerçek tahsilat yapılmaz
+                </div>
+                <div class="alert alert-warning" role="alert" invisible="not blocking_message">
+                    <field name="blocking_message" readonly="1" nolabel="1"/>
+                </div>
+                <div class="alert alert-warning fw-bold" role="alert">
+                    Kart bilgisini yalnız bu ekrandan açılan kart sayfasına girin; not almayın, e-posta/mesajla almayın, tarayıcıya kaydettirmeyin. Banka doğrulama (SMS) kodunu müşteriden alıp yalnız banka sayfasına girin.
+                </div>
+                <group>
+                    <group string="Fatura">
+                        <label for="invoice_no"/>
+                        <div class="o_row">
+                            <!-- Kamera ile okut / Enter: fatura otomatik getirilir -->
+                            <field name="invoice_no" readonly="fetched"
+                                   widget="sanal_pos_scan_char"
+                                   options="{'fetch_method': 'action_fetch_invoice'}"
+                                   placeholder="UGR fatura numarası"/>
+                            <button name="action_fetch_invoice" type="object"
+                                    string="Faturayı Getir" class="btn-secondary"
+                                    icon="fa-search" invisible="fetched"/>
+                        </div>
+                        <field name="invoice_date" invisible="not fetched"/>
+                        <field name="customer_code" invisible="not fetched"/>
+                        <field name="amount" invisible="not fetched" class="fw-bold"/>
+                    </group>
+                </group>
+                <group string="Müşteri" invisible="not fetched">
+                    <group>
+                        <field name="customer_name" required="fetched"/>
+                        <field name="customer_phone" placeholder="5XX XXX XX XX"/>
+                        <field name="customer_email" placeholder="ornek@alanadi.com"/>
+                    </group>
+                    <group>
+                        <field name="customer_address"/>
+                        <field name="customer_city"/>
+                        <field name="customer_zip"/>
+                    </group>
+                </group>
+                <div class="alert alert-info" role="alert" invisible="not prior_refunded or not fetched">
+                    Bu faturanın önceki ödemesi iade/iptal edilmiş. Yeni deneme için onaylayın:
+                    <field name="confirm_prior_refund" nolabel="1"/>
+                    <label for="confirm_prior_refund"/>
+                </div>
+                <footer>
+                    <button name="action_create_mail_order" type="object" string="Kart Bilgisi Gir"
+                            class="btn-primary" invisible="not fetched"/>
+                    <button string="Vazgeç" class="btn-secondary" special="cancel"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_sanal_pos_mail_order_wizard" model="ir.actions.act_window">
+        <field name="name">Mail Order</field>
+        <field name="res_model">sanal.pos.mail.order.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="view_id" ref="view_sanal_pos_mail_order_wizard_form"/>
+        <field name="target">new</field>
+    </record>
+</odoo>

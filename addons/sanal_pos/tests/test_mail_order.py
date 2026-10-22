@@ -770,7 +770,10 @@ class TestDuplicateBlocks(MailOrderCase):
     def test_d_onceki_iade_onay_ister(self):
         for n, state in enumerate(('voided', 'refunded'), start=1):
             with self.subTest(state=state):
-                payment = self.make_mail_order(state=state, attempt_no=n, provider_tran_ref='T-OLD%d' % n)
+                # attempt_no=n*10: onayla açılan yeni deneme MAX+1 alır (1. turda 2); n ile 2. turdaki
+                # sabit 2 çakışıp unique ihlali verirdi (test kurulum hatası, G3'te düzeltildi)
+                payment = self.make_mail_order(state=state, attempt_no=n * 10, provider_tran_ref='T-OLD%d' % n)
+                self.mock.calls.clear()    # 1. turdaki onaylı deneme 2. turun sayacını kirletmesin
                 message = self.mo_attempt()
                 self.assertIn('iade', message or '')
                 self.assertNotIn(OPEN_MO, message)

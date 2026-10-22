@@ -25,6 +25,7 @@ Sanal POS / Ödeme Linki
         'data/ir_sequence.xml',
         'data/ir_cron.xml',
         'wizard/payment_create_wizard_views.xml',
+        'wizard/mail_order_wizard_views.xml',
         'wizard/review_close_wizard_views.xml',
         'wizard/payment_resend_wizard_views.xml',
         'wizard/payment_refund_wizard_views.xml',

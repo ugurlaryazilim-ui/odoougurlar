@@ -151,7 +151,10 @@ class SanalPosPaymentCreateWizard(models.TransientModel):
         return records
 
     def write(self, vals):
-        self._check_protected_vals(vals)
+        # NEDEN: yazımda anahtarın varlığı yeter (False da yasak): istemci 'fetched'ı sıfırlayıp
+        # fatura kilidini oynatamasın; sunucu kodu ``_write_fetched`` kullanır (bkz. KARARLAR K-14).
+        if any(name in vals for name in _PROTECTED_FIELDS):
+            raise UserError('Fatura bilgisi yalnız "Faturayı Getir" ile alınabilir.')
         return super().write(vals)
 
     def _write_fetched(self, vals):
@@ -207,11 +210,8 @@ class SanalPosPaymentCreateWizard(models.TransientModel):
         return self._reopen_action()
 
     # ---------------------------------------------------------------- doğrulama
-    def _validated_values(self):
-        """Girişleri doğrular ve temizlenmiş değerleri döndürür; hatalar tek UserError'da."""
-        self.ensure_one()
-        require_contact = get_bool_param(self.env, 'sanal_pos.require_contact', default=True)
-        errors = []
+    def _validated_base(self, errors):
+        """Link ve Mail Order için ortak alanlar (ad zorunlu, adres/il/posta; uzunluk denetimi)."""
         values = {
             'customer_name': clean_text(self.customer_name),
             'customer_address': clean_text(self.customer_address),
@@ -224,6 +224,14 @@ class SanalPosPaymentCreateWizard(models.TransientModel):
             limit = FIELD_MAX_LENGTH[name]
             if len(values[name]) > limit:
                 errors.append('%s en çok %d karakter olabilir.' % (self._fields[name].string, limit))
+        return values
+
+    def _validated_values(self):
+        """Girişleri doğrular ve temizlenmiş değerleri döndürür; hatalar tek UserError'da."""
+        self.ensure_one()
+        require_contact = get_bool_param(self.env, 'sanal_pos.require_contact', default=True)
+        errors = []
+        values = self._validated_base(errors)
 
         # Telefon (KK-6/7, U-4)
         phone_raw = (self.customer_phone or '').strip()
@@ -288,6 +296,12 @@ class SanalPosPaymentCreateWizard(models.TransientModel):
     def action_create_link(self):
         """Tasarım §6.1: kontroller -> 'Gönderiliyor' + commit -> dış çağrı -> sonuç + commit."""
         self.ensure_one()
+        return self._create_sending_payment('link')._run_create_link()
+
+    def _create_sending_payment(self, payment_method):
+        """Adım 1-6 (link ve Mail Order ortak): 'Gönderiliyor' kaydı COMMIT EDİLİR ve döndürülür;
+        bundan sonra raise yok. Dış çağrıyı (7-9) çağıran yöntem yürütür."""
+        self.ensure_one()
         Payment = self.env['sanal.pos.payment']
         # 1. yetki ve getirme
         Payment._check_sanal_pos_user()
@@ -319,7 +333,7 @@ class SanalPosPaymentCreateWizard(models.TransientModel):
         values.update({
             # NEDEN: yöntem bağlamdan (default_payment_method) türemez, burada açıkça yazılır
             # (bkz. KARARLAR K-14).
-            'payment_method': 'link',
+            'payment_method': payment_method,
             'invoice_source': 'nebim',
             'invoice_no': invoice_no,
             'invoice_ref': info['invoice_ref'] or False,
@@ -341,5 +355,4 @@ class SanalPosPaymentCreateWizard(models.TransientModel):
         if notes:
             payment._post_note(notes)
         payment._sp_commit()
-        # 7-9. kilit, dış çağrı, sonuç (raise yok)
-        return payment._run_create_link()
+        return payment

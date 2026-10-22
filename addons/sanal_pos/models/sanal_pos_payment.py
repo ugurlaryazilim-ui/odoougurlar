@@ -102,6 +102,12 @@ LINK_NOT_FOUND_PENDING_MSG = "Link Paratika'da henüz bulunamadı; durum tekrar 
 AMBIGUOUS_MSG = ("Paratika'da birden fazla aday link bulundu; yönetici Paratika panelinden "
                  'kontrol etmelidir.')
 STALE_SENDING_MSG = "Link oluşturma işlemi yarıda kaldı; durum Paratika'dan uzlaştırılacak."
+SESSION_FAIL_MSG = 'Paratika yanıt vermedi; kart sayfası açılamadı. Tekrar deneyebilirsiniz.'   # KK-12
+MAIL_ORDER_PAY_PATH = '/sanal_pos/mail_order/pay/%d'     # kart sayfası rotası (G4)
+MAIL_ORDER_EXPIRY_HOURS = 1                              # oturum süresi sabit 1 saat (SESSIONEXPIRY=1h)
+# Sağlayıcı mesajının kullanıcıya doğrudan gösterildiği hata kodları (Türkçe, yapılandırma/ret);
+# diğerleri (zaman aşımı, HTTP, çözülemeyen yanıt) tek genel mesajla gösterilir.
+SESSION_DIRECT_CODES = ('CONFIG', 'RETURNURL')
 STALE_SENDING_MO_MSG = 'Mail order oturumu açılamadı (istek yarıda kaldı). Tekrar deneyebilirsiniz.'
 # G10: yeniden gönder / link iptali (KK-31, KK-32)
 CHANNEL_MSG = 'En az bir gönderim kanalı seçin.'                                         # KK-9
@@ -670,13 +676,157 @@ class SanalPosPayment(models.Model):
             'type': 'ir.actions.client',
             'tag': 'display_notification',
             'params': {
-                'title': 'Ödeme linki: %s' % self.name,
+                'title': ('Mail Order: %s' if self.payment_method == 'mail_order'
+                          else 'Ödeme linki: %s') % self.name,
                 'message': message,
                 'type': kind,
                 'sticky': sticky,
                 'next': self._form_action(),
             },
         }
+
+    # ---------------------------------------------------------------- mail order (K-14)
+    # Sihirbaz (wizard/mail_order_wizard.py) 'sending' kaydını açıp commit eder; burada oturum
+    # (SESSIONTOKEN) çağrısı ve sonrası bulunur. Kart verisi bu modelde ve çağrılarda YOKTUR:
+    # kart alanlarını tarayıcı doğrudan Paratika'ya gönderir (K-13).
+    def _call_create_session(self):
+        """Sağlayıcı ``create_session``; beklenmeyen istisna ``ok=False`` olur (raise yok)."""
+        self.ensure_one()
+        payment_id = self.id
+        try:
+            with self.env.cr.savepoint():
+                return self._provider().create_session(self)
+        except Exception as exc:  # noqa: BLE001 - dış çağrıdan sonra raise yok
+            # DIKKAT: istisna metni kart verisi içerebilir; yalnız sınıf adı loglanır (K-13)
+            _logger.error('sanal_pos: oturum açmada beklenmeyen hata (%s), ödeme id=%s',
+                          type(exc).__name__, payment_id)
+            return {'ok': False, 'timeout': False, 'error_code': 'EXCEPTION',
+                    'error_message': SESSION_FAIL_MSG}
+
+    def _apply_session_result(self, result):
+        """Oturum sonucunu yazar: ``sent`` ya da ``error``.
+
+        NEDEN: SESSIONTOKEN kimseye mesaj göndermez; yanıt gelmediyse token hiç kimseye
+        ulaşmamıştır, ödeme yapılamaz. Bu yüzden zaman aşımı dahil her başarısızlık ``error``
+        olur, ``unknown`` ASLA (link'te Paratika gönderim yaptığı için ``unknown`` vardı);
+        hemen yeni deneme açılabilir (bkz. KARARLAR K-14).
+        """
+        self.ensure_one()
+        user = (self.user_id or self.env.user).name or '-'
+        if result.get('ok') and result.get('token'):
+            now = fields.Datetime.now()
+            self.write({
+                'state': 'sent', 'provider_token': result['token'], 'sent_at': now,
+                'expires_at': now + timedelta(hours=MAIL_ORDER_EXPIRY_HOURS),
+                'last_error_code': False, 'last_error_message': False,
+            })
+            self._post_note('Mail order oturumu açıldı (%s)' % user)
+            return
+        code = result.get('error_code') or ('NO_TOKEN' if result.get('ok') else 'UNKNOWN')
+        direct = code.startswith(('ERR', 'RC')) or code in SESSION_DIRECT_CODES
+        message = (result.get('error_message') if direct else None) or SESSION_FAIL_MSG
+        self.write({'state': 'error', 'last_error_code': code, 'last_error_message': message[:250]})
+        self._post_note('Mail order oturumu açılamadı: %s' % message)
+
+    def _run_create_session(self):
+        """Kayıt 'sending' olarak COMMIT EDİLMİŞ olmalıdır; kilit, çağrı, sonuç + commit. Raise etmez."""
+        self.ensure_one()
+        if not self._lock_for_provider_call():
+            return self._notification_action(BUSY_MSG, 'warning')
+        self._apply_session_result(self._call_create_session())
+        self._sp_commit()
+        if self.state == 'sent':
+            return self._card_page_action()
+        return self._notification_action(self.last_error_message or SESSION_FAIL_MSG, 'danger')
+
+    def _card_page_action(self):
+        # NEDEN: aynı sekmede (target 'self'): kart sayfası ve 3D akışı yeni sekme/pencere açmaz
+        # (KK-18); URL yalnız kayıt kimliğini taşır, token/kart verisi taşımaz.
+        self.ensure_one()
+        return {'type': 'ir.actions.act_url', 'url': MAIL_ORDER_PAY_PATH % self.id, 'target': 'self'}
+
+    def _check_card_page_open(self):
+        """Kart sayfası yalnız açık (Gönderildi), süresi dolmamış, token'lı mail order için."""
+        self.ensure_one()
+        rec = self.sudo()
+        if rec.payment_method != 'mail_order' or rec.state != 'sent' or not rec.provider_token:
+            raise UserError('Kart sayfası yalnız açık (Gönderildi) mail order kaydı için açılabilir.')
+        if not rec.expires_at or rec.expires_at <= fields.Datetime.now():
+            raise UserError('Mail order oturumunun süresi dolmuş; "Mail Order" menüsünden yeni '
+                            'deneme açın.')
+
+    def action_open_card_page(self):
+        """'Kart Bilgisi Gir': aynı token ile kart sayfasını yeniden açar (Paratika çağrısı yok)."""
+        self.ensure_one()
+        self._check_sanal_pos_user()
+        self._check_card_page_open()
+        return self._card_page_action()
+
+    def _mail_order_card_values(self):
+        """Kart sayfası (G4 denetleyicisi) için gösterim değerleri. Kart verisi içermez.
+
+        Paratika'ya yalnız kartsız QUERYINSTALLMENT gider; hata ``installments=[]`` olur
+        (sayfa yalnız "Tek çekim" gösterir).
+        """
+        self.ensure_one()
+        self._check_sanal_pos_user()
+        self._check_card_page_open()
+        rec = self.sudo()
+        installments = rec._call_provider_safely(
+            'query_installments', 'taksit sorgusunda').get('options') or []
+        return {
+            'payment_id': rec.id,
+            'form_action': rec._provider().direct_post_url(rec),
+            'invoice_no': rec.invoice_no,
+            'customer_name': rec.customer_name,
+            'amount': rec.amount,
+            'amount_text': format_try(rec.amount),
+            'expires_at': rec.expires_at,
+            'expires_local': rec._format_local(rec.expires_at),
+            'is_test': rec.environment == 'test',
+            'installments': installments,
+        }
+
+    def action_mail_order_close(self):
+        """'Mail Order'ı Kapat' (KK-21): açık oturumu kapatır ama önce Paratika'ya sorar.
+
+        NEDEN: ödeme gerçekleşmişken sessizce ``expired`` yazmak çift tahsilata yol açar
+        (müşterinin kartı çekilmiş, kayıt kapalı). Bu yüzden önce QUERYTRANSACTION; durum kararı
+        ``_sync_status`` ile tek kaynaktan verilir (bkz. KARARLAR K-14).
+        DIKKAT: sorgu yanıtsızsa kayıt DEĞİŞMEZ (fail-closed): açık kalır, yeni deneme engelli.
+        """
+        self.ensure_one()
+        self._check_sanal_pos_user()
+        rec = self.sudo()
+        message = 'Yalnız açık (Gönderildi) mail order kaydı kapatılabilir.'
+        if rec.payment_method != 'mail_order' or rec.state != 'sent':
+            raise UserError(message)
+        if not rec._lock_for_provider_call():
+            raise UserError(BUSY_MSG)
+        rec.invalidate_recordset()
+        if rec.state != 'sent':
+            raise UserError(message)
+        previous_expiry = rec.expires_at
+        # Süre bir saniye geriye çekilir: Odoo zamanı saniye hassasiyetindedir, aynı saniyede
+        # "süresi doldu" karşılaştırması (now > expires_at) sağlanmazdı.
+        rec.write({'expires_at': fields.Datetime.now() - timedelta(seconds=1)})
+        result = rec._sync_status()
+        if not result.get('ok'):
+            rec.write({'expires_at': previous_expiry})
+            self._sp_commit()
+            return self._notification_action(QUERY_FAILED_MSG, 'warning')
+        if rec.state == 'expired':
+            rec._post_note('Mail order %s tarafından kapatıldı.' % (self.env.user.name or '-'))
+            text, kind = 'Mail order kapatıldı; yeni deneme açabilirsiniz.', 'success'
+        elif rec.state == 'paid':
+            text, kind = 'Ödeme alınmış; kayıt Ödendi olarak güncellendi.', 'success'
+        elif rec.state == 'review':
+            text, kind = 'Ödeme incelemeye alındı; ayrıntı kayıt notunda.', 'warning'
+        else:
+            text, kind = ("Paratika'da devam eden bir işlem var; mail order kapatılmadı. "
+                          'Sonuç otomatik izlenecek.'), 'warning'
+        self._sp_commit()
+        return self._notification_action(text, kind)
 
     def action_new_link(self):
         """'Yeni Link Oluştur' (REUSABLE_STATES): sihirbazı faturayı yeniden getirip bu kaydın
@@ -1222,7 +1372,9 @@ class SanalPosPayment(models.Model):
         self.write(values)
         if self.state == 'sent' and self.expires_at and now > self.expires_at and not pending:
             self.write({'state': 'expired'})
-            self._post_note('Link süresi doldu; Paratika\'da onaylı ödeme yok.')
+            self._post_note('Mail order süresi doldu; Paratika\'da onaylı ödeme yok.'
+                            if self.payment_method == 'mail_order' else
+                            'Link süresi doldu; Paratika\'da onaylı ödeme yok.')
 
     @api.model
     def _late_status_blocks(self, result):
