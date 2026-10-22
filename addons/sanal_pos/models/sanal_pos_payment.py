@@ -816,6 +816,7 @@ class SanalPosPayment(models.Model):
                 'query_installments', 'taksit sorgusunda').get('options') or []
         return {
             'payment_id': rec.id,
+            'payment_name': '' if rec.name == '/' else rec.name,    # breadcrumb etiketi
             'form_action': form_action,
             'invoice_no': rec.invoice_no,
             'customer_name': rec.customer_name,
