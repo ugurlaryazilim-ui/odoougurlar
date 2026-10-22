@@ -63,14 +63,24 @@ class AIContentLog(models.Model):
         deadline = time.monotonic() + _GC_TIME_BUDGET
         in_cron = bool(self.env.context.get('cron_id'))
         total = 0
+        last_id = 0
         while True:
+            # NEDEN (A5 diğer Ö-2): eski "id IN (SELECT id ... create_date < c LIMIT n)" her partide
+            # tabloyu baştan tarıyor, önceki partilerin ölü satırlarını (vacuum'a kadar) tekrar geziyordu.
+            # Birincil anahtar sırasıyla kaldığı yerden devam edilir: tur başına tablo en fazla bir kez
+            # gezilir, create_date indeksi gerekmez. Genç satırlar atlanır (sıra dışı eski satır da silinir).
             self.env.cr.execute(SQL(
-                "DELETE FROM %(t)s WHERE id IN (SELECT id FROM %(t)s WHERE create_date < %(c)s LIMIT %(n)s)",
-                t=SQL.identifier(self._table), c=cutoff, n=_GC_BATCH))
-            deleted = self.env.cr.rowcount
+                "SELECT id FROM %(t)s WHERE id > %(last)s AND create_date < %(c)s ORDER BY id LIMIT %(n)s",
+                t=SQL.identifier(self._table), c=cutoff, last=last_id, n=_GC_BATCH))
+            ids = [row[0] for row in self.env.cr.fetchall()]
+            if ids:
+                self.env.cr.execute(SQL("DELETE FROM %(t)s WHERE id = ANY(%(ids)s)",
+                                        t=SQL.identifier(self._table), ids=ids))
+            deleted = len(ids)
             total += deleted
             if deleted < _GC_BATCH or not in_cron:
                 break
+            last_id = ids[-1]
             self.env['ir.cron']._commit_progress(deleted)
             if time.monotonic() >= deadline:
                 break

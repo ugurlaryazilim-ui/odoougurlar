@@ -66,6 +66,27 @@ class TestAiContentLogRetention(TransactionCase):
         self.assertFalse(recs.exists())
         self.assertEqual(commit.call_count, 2)  # son (kısa) partiden sonra commit yok
 
+    def test_cron_walks_id_order_skips_young_and_never_rescans(self):
+        # A5 diğer Ö-2: genç satırlar araya karışsa da tüm eskiler silinir; partiler kaldığı id'den sürer
+        old, young = self.Log, self.Log
+        for i in range(6):
+            old |= self._log(400)
+            if i % 2:
+                young |= self._log(5)
+        seen = []
+        real = self.env.cr.execute
+
+        def spy(query, params=None, *a, **kw):
+            seen.append(str(query))
+            return real(query, params, *a, **kw)
+        cron_model = type(self.env['ir.cron'])
+        with patch(LOG_MOD + '._GC_BATCH', 2),                 patch.object(cron_model, '_commit_progress', return_value=100.0),                 patch.object(self.env.cr, 'execute', spy):
+            self.Log.with_context(cron_id=1)._cron_gc_old_logs()
+        self.assertFalse(old.exists())
+        self.assertEqual(young.exists(), young)
+        self.assertFalse([q for q in seen if 'IN (SELECT' in q], 'alt sorgulu tam tarama kaldı')
+        self.assertTrue([q for q in seen if 'id >' in q and 'ORDER BY id' in q])
+
     def test_time_budget_stops_the_loop(self):
         recs = self.Log
         for _i in range(5):
