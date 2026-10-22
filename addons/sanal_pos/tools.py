@@ -111,6 +111,61 @@ def mask_params(params, secret_keys):
     return {k: (MASK if str(k).lower() in secrets else v) for k, v in (params or {}).items()}
 
 
+# NEDEN: Mail Order'da kart verisi Odoo'ya hiç girmemelidir (bkz. KARARLAR K-13); bu, mimari
+# savunmanın yanındaki son katmandır: bir yanıt/istisna metnine yanlışlıkla PAN sızsa bile
+# günlüğe yazılmaz. Luhn doğrulaması rastgele uzun sayıları (ödeme numarası, işlem no) korur.
+# pgTranRefId Paratika'nın işlem referansıdır (16 hane olabilir, Luhn tesadüfen tutabilir): muaf.
+# DIKKAT: aday deseni (13-19 hane, tek ayraç: boşluk/tire) gevşetilirse tutar/tarih/MPID
+# metinleri bozulur; sıkılaştırılırsa ayraçlı PAN kaçar. tests/test_mail_order.py::TestCardMasking.
+_CARD_CANDIDATE_RE = re.compile(
+    r'(?i:pgTranRefId)["\']?\s*[:=]\s*["\']?[0-9]+'
+    r'|(?<!\w)[0-9](?:[ -]?[0-9]){12,18}(?!\w)')
+_DIGIT_GROUP_RE = re.compile(r'[0-9]+')
+
+
+def _luhn_ok(digits):
+    total = 0
+    for index, char in enumerate(reversed(digits)):
+        value = int(char)
+        if index % 2 == 1:
+            value *= 2
+            if value > 9:
+                value -= 9
+        total += value
+    return total % 10 == 0
+
+
+def _mask_candidate(match):
+    text = match.group(0)
+    if not text[0].isdigit():
+        return text                     # pgTranRefId muafiyeti
+    groups = [(m.start(), m.end()) for m in _DIGIT_GROUP_RE.finditer(text)]
+    out, last, i = [], 0, 0
+    while i < len(groups):
+        # En uzun, soldan başlayan grup penceresi: "9000.00 4355 0843 5508 4358" gibi
+        # bitişik sayılar PAN'ı gizlemesin (aday bütününde Luhn tutmayabilir).
+        # Gerçek PAN '0' ile başlamaz: baştaki sıfırlar (ör. "00" kuruş) Luhn'u bozmaz ama
+        # PAN'ın parçası da değildir.
+        for j in range(len(groups), i, -1) if text[groups[i][0]] != '0' else ():
+            digits = ''.join(text[a:b] for a, b in groups[i:j])
+            if 13 <= len(digits) <= 19 and _luhn_ok(digits):
+                out.append(text[last:groups[i][0]] + '****' + digits[-4:])
+                last = groups[j - 1][1]
+                i = j
+                break
+        else:
+            i += 1
+    return ''.join(out) + text[last:]
+
+
+def mask_card_data(text):
+    """Luhn-geçerli 13-19 haneli rakam dizilerini (boşluk/tire ayraçlı dahil) ``****<son4>``
+    yapar. Başka hiçbir şeye dokunmaz; tekrar uygulamak sonucu değiştirmez."""
+    if not text or not isinstance(text, str):
+        return text
+    return _CARD_CANDIDATE_RE.sub(_mask_candidate, text)
+
+
 def scrub(text, secrets):
     """Metindeki sır değerlerini her geçtiği yerde ``'***'`` yapar. Boş sırlar yok sayılır."""
     if not text:

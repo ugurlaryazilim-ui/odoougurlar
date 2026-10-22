@@ -11,6 +11,11 @@ Ortak sonuç anahtarları: ``ok``, ``timeout``, ``error_code``, ``error_message`
 (Türkçe, kullanıcıya gösterilebilir), ``raw_code``. Metotlara göre ek anahtarlar:
 
 * ``create_link``  -> ``token``, ``url``
+* ``create_session`` -> ``token`` (Mail Order: Direct POST oturumu; hata/zaman aşımı/token yok ->
+  ``ok=False``, belirsizlik yoktur)
+* ``direct_post_url`` -> kart formunun gönderileceği adres ya da ``None`` (çağrı yapmaz)
+* ``query_installments`` -> ``options`` (``[{'count': int, 'networks': [str], 'rate': float}]``;
+  hata -> ``ok=False``, ``options=[]``)
 * ``resend``       -> -
 * ``cancel_link``  -> ``already_closed``
 * ``find_link``    -> ``found``, ``token``, ``status`` (+ ``ambiguous``)
@@ -27,6 +32,8 @@ import logging
 from odoo import api, models
 from odoo.exceptions import UserError
 
+from .. import tools
+
 _logger = logging.getLogger(__name__)
 
 # Log gövdesi sınırı (KK-39): ~20 KB
@@ -42,6 +49,21 @@ class SanalPosProvider(models.AbstractModel):
     # Aksi halde dış çağrı (VOID/REFUND dahil) tetiklenebilirdi. Yeni sağlayıcı da aynısını yapmalı.
     @api.private
     def create_link(self, payment):
+        raise NotImplementedError()
+
+    @api.private
+    def create_session(self, payment):
+        """Mail Order: kart sayfası için ödeme oturumu (token) açar. Kart verisi almaz."""
+        raise NotImplementedError()
+
+    @api.private
+    def direct_post_url(self, payment):
+        """Kart formunun doğrudan sağlayıcıya gönderileceği adres; token yoksa ``None``."""
+        raise NotImplementedError()
+
+    @api.private
+    def query_installments(self, payment):
+        """İşyerinin taksit seçenekleri (kart verisi gönderilmez)."""
         raise NotImplementedError()
 
     @api.private
@@ -101,11 +123,17 @@ class SanalPosProvider(models.AbstractModel):
     def _log_call(self, payment, action, provider, environment, duration_ms=0,
                   http_status=0, response_code=None, error_code=None, success=False,
                   request_body=None, response_body=None, is_financial=False):
-        """``sanal.pos.log`` satırı yazar (KK-39). Gövdeler ÇAĞIRANDA maskelenmiş olmalıdır.
+        """``sanal.pos.log`` satırı yazar (KK-39). Sırlar ÇAĞIRANDA maskelenmiş olmalıdır;
+        kart numarası (Luhn-geçerli PAN) ise burada MERKEZİ olarak maskelenir.
 
         Log yazımı başarısız olsa bile iş akışı kesilmez (dış çağrıdan sonra raise yok);
         hata yalnız istisna sınıf adıyla loglanır (gövde/sır içermesin).
         """
+        # NEDEN: Mail Order'da kart verisi Odoo'ya hiç girmemeli (bkz. KARARLAR K-13); yanıt gövdesi
+        # ya da istisna metni yanlışlıkla PAN taşısa bile her sağlayıcı için tek noktada maskelenir.
+        # DIKKAT: maske kırpmadan ÖNCE uygulanır; yoksa sınırda ikiye bölünen PAN Luhn'a takılmaz.
+        request_body = tools.mask_card_data(request_body)
+        response_body = tools.mask_card_data(response_body)
         if response_body and len(response_body) > LOG_BODY_LIMIT:
             response_body = response_body[:LOG_BODY_LIMIT] + '...[kırpıldı]'
         values = {
