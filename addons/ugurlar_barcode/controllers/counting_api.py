@@ -18,7 +18,7 @@ class CountingApiController(BarcodeApiBase):
     def count_save(self, shelf_barcode='', items=None, **kw):
         """Sayım kaydet: raf barkodu + [{barcode, quantity}]."""
         self._check_internal_user()
-        if not shelf_barcode or not items:
+        if not shelf_barcode or not items or not isinstance(items, list) or not isinstance(shelf_barcode, str):
             return {'error': 'Raf ve ürün listesi gerekli'}
         limit_error = self._check_bulk_items(items)
         if limit_error:
@@ -41,8 +41,13 @@ class CountingApiController(BarcodeApiBase):
         # 1) Kalemleri çözümle (yanıt sırası korunur)
         counted = []  # (results indeksi, ürün, barkod, sayılan)
         for item in items:
-            # NEDEN: istemci barcode:null gönderebilir; .get varsayılanı null'u yakalamaz
-            bc = (item.get('barcode') or '').strip()
+            # NEDEN (A5 H2): JSON istemcisi kalemi dict dışı, barkodu sayı/null/liste gönderebilir;
+            # eskiden .get/.strip AttributeError ile tüm sayımı 500'e düşürürdü. Bozuk kalem not_found.
+            if not isinstance(item, dict):
+                results.append({'barcode': '', 'status': 'not_found'})
+                continue
+            raw_bc = item.get('barcode')
+            bc = str(raw_bc).strip() if isinstance(raw_bc, (str, int)) and not isinstance(raw_bc, bool) else ''
             new_qty = self._parse_qty(item.get('quantity', 0), default=0, allow_zero=True)
             if new_qty is None:
                 results.append({'barcode': bc, 'status': 'error', 'message': 'Geçersiz miktar'})

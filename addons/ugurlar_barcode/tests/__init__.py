@@ -21,3 +21,4 @@ from . import test_perf_packing_schedule
 from . import test_gc_operations
 from . import test_perf_shelf_bulk
 from . import test_k1_cleanup
+from . import test_a5_fixes
