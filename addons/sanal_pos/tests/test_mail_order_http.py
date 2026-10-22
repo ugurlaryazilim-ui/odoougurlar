@@ -13,7 +13,7 @@ from lxml import html as lxml_html
 from odoo.tests import tagged
 
 from .common import (
-    CRON_SYNC_FLAGGED, CUSTOMER_NAME, EMAIL, INV_NO, LEAK_CVV, LEAK_OWNER, LEAK_PAN,
+    CRON_SYNC_FLAGGED, CUSTOMER_NAME, EMAIL, INV_NO, LEAK_CVV, LEAK_OWNER, LEAK_PAN, LIVE_URL_PREFIX,
     MAIL_ORDER_PAY_PATH, MAIL_ORDER_RESULT_PATH, MAIL_ORDER_RETURN_PATH, TEST_URL_PREFIX,
     SanalPosHttpCase, installment_body, timeout_exc, tran,
 )
@@ -146,7 +146,9 @@ class TestCardPage(MoHttpCase):
         response = self.page(payment)
         self.assertEqual(response.status_code, 200)
         form = self.doc(response).xpath('//form')[0]
-        self.assertTrue(form.get('action').startswith('https://www.paratika.com.tr'))
+        # G4 düzeltmesi (test hatası): canlı kök modülde ve test_mail_order'da vpos.paratika.com.tr
+        # (LIVE_URL_PREFIX, kaynaklar/paratika-direct-post.md §8); www.paratika.com.tr hiçbir yerde yok.
+        self.assertEqual(form.get('action'), LIVE_URL_PREFIX + '/post/sale3d/TOK-LIVE')
         self.assertNotIn('test.paratika.com.tr', form.get('action'))
 
     def test_taksit_secenekleri(self):
@@ -223,7 +225,9 @@ class TestMoReturn(MoHttpCase):
         data = dict(extra)
         if mpid is not None:
             data['MERCHANTPAYMENTID'] = mpid
-        return self.url_open(MAIL_ORDER_RETURN_PATH, data=data, allow_redirects=False)
+        # G4 düzeltmesi (test hatası): url_open boş data ile GET gönderir (method verilmezse);
+        # 'eksik numara' durumu boş POST'tur, GET değil (GET -> 405 ayrıca test_get_405'te).
+        return self.url_open(MAIL_ORDER_RETURN_PATH, data=data, method='POST', allow_redirects=False)
 
     def test_get_405(self):
         self.assertEqual(self.url_open(MAIL_ORDER_RETURN_PATH, allow_redirects=False).status_code, 405)
@@ -368,6 +372,15 @@ class TestMoResult(MoHttpCase):
                 self.assertEqual(response.status_code, 303)
                 self.assertTrue(response.headers['Location'].endswith(PAYMENT_LIST))
         self.assertNoParatikaCalls()
+
+    def test_sent_olmayan_kayit_sorgusuz_yonlendirir(self):
+        # Kardeş yol (G4): ödenmiş/kapanmış kayıtta sonuç sayfası yenilense de Paratika sorgusu yok
+        paid = self.make_mail_order(state='paid', invoice_no='R-PAID')
+        response = self.result(paid.merchant_payment_id)
+        self.assertEqual(response.status_code, 303)
+        self.assertTrue(response.headers['Location'].endswith(self.target(paid)))
+        self.assertNoParatikaCalls()
+        self.assertEqual(self.reload(paid).state, 'paid')
 
     def test_oturumsuz_giris_gerekir_grupsuz_reddedilir(self):
         payment = self.make_mail_order()

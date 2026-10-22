@@ -33,6 +33,7 @@ Sanal POS / Ödeme Linki
         'wizard/refund_approval_wizard_views.xml',
         'views/sanal_pos_payment_views.xml',
         'views/sanal_pos_log_views.xml',
+        'views/mail_order_templates.xml',   # kart sayfası QWeb; CSS assets'e EKLENMEZ (K-13)
         'views/res_config_settings_views.xml',
         'views/menus.xml',
     ],

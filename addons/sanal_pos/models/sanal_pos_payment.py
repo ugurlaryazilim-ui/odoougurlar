@@ -105,6 +105,8 @@ STALE_SENDING_MSG = "Link oluşturma işlemi yarıda kaldı; durum Paratika'dan 
 SESSION_FAIL_MSG = 'Paratika yanıt vermedi; kart sayfası açılamadı. Tekrar deneyebilirsiniz.'   # KK-12
 MAIL_ORDER_PAY_PATH = '/sanal_pos/mail_order/pay/%d'     # kart sayfası rotası (G4)
 MAIL_ORDER_EXPIRY_HOURS = 1                              # oturum süresi sabit 1 saat (SESSIONEXPIRY=1h)
+# Sonuç sayfası yenilense de ödeme başına en çok bu aralıkla bir QUERYTRANSACTION (tasarım §5.2)
+MAIL_ORDER_RESULT_MIN_INTERVAL = timedelta(seconds=10)
 # Sağlayıcı mesajının kullanıcıya doğrudan gösterildiği hata kodları (Türkçe, yapılandırma/ret);
 # diğerleri (zaman aşımı, HTTP, çözülemeyen yanıt) tek genel mesajla gösterilir.
 SESSION_DIRECT_CODES = ('CONFIG', 'RETURNURL')
@@ -770,6 +772,7 @@ class SanalPosPayment(models.Model):
         """
         self.ensure_one()
         self._check_sanal_pos_user()
+        self.check_access('read')
         self._check_card_page_open()
         rec = self.sudo()
         installments = rec._call_provider_safely(
@@ -786,6 +789,38 @@ class SanalPosPayment(models.Model):
             'is_test': rec.environment == 'test',
             'installments': installments,
         }
+
+    def _mail_order_after_return(self):
+        """Sonuç sayfası (3D dönüşü sonrası, oturumlu GET): durumu hemen sorgular. Raise etmez.
+
+        Karar yine yalnız QUERYTRANSACTION'dır (``_sync_status``); dönüş gövdesi okunmaz.
+        Kilit alınamazsa (cron/başka istek sorguluyor) ya da son sorgu çok yeniyse dokunmaz;
+        bayrak cron'u ve periyodik cron sonucu yine toplar. True: sorgu yapıldı.
+        """
+        self.ensure_one()
+        self._check_sanal_pos_user()
+        rec = self.sudo()
+        try:
+            if rec.payment_method != 'mail_order' or rec.state != 'sent':
+                return False
+            # NEDEN: kilit beklenmez; LockNotAvailable savepoint dışında tüm isteği yeniden
+            # çalıştırırdı (ikinci QUERYTRANSACTION). Kilitliyse cron zaten sorguluyor.
+            if not rec._try_lock_nowait():
+                return False
+            rec.invalidate_recordset()
+            now = fields.Datetime.now()
+            if rec.state != 'sent' or (
+                    rec.last_checked_at and rec.last_checked_at > now - MAIL_ORDER_RESULT_MIN_INTERVAL):
+                return False
+            with self.env.cr.savepoint():
+                rec._sync_status()
+                rec.write({'sync_requested': False, 'last_checked_at': fields.Datetime.now()})
+        except Exception as exc:  # noqa: BLE001 - sonuç sayfası her durumda kayda yönlendirir
+            _logger.warning('sanal_pos: mail order dönüş sorgusu yapılamadı (%s), ödeme id=%s',
+                            type(exc).__name__, rec.id)
+            return False
+        self._sp_commit()
+        return True
 
     def action_mail_order_close(self):
         """'Mail Order'ı Kapat' (KK-21): açık oturumu kapatır ama önce Paratika'ya sorar.

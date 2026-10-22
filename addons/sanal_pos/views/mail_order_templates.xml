@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!--
+    DIKKAT: Mail Order kart sayfası (bkz. KARARLAR K-13). Bu şablonlara
+      * <script>, satır içi olay işleyicisi (on...=), iframe/object/embed,
+      * web.layout / t-call ile arka uç şablonu ya da /web/assets varlığı,
+      * kart alanlarına value / t-att-value,
+      * Odoo'ya POST eden form ya da csrf_token
+    EKLEMEYİN: kart verisi Odoo koduna/sunucusuna açılır, CSP (default-src 'none') sayfayı bozar.
+    Formun action'ı yalnız provider.direct_post_url (Paratika sale3d); alan adları yalnız
+    Paratika'nın Direct POST alan adlarıdır (cardOwner, pan, expiryMonth, expiryYear, cvv,
+    installmentCount). Tek stil kaynağı /sanal_pos/static/src/css/mail_order.css.
+    -->
+    <template id="mail_order_card_page" name="Sanal POS: Mail Order kart sayfası">
+        <html lang="tr">
+            <head>
+                <meta charset="utf-8"/>
+                <meta name="viewport" content="width=device-width, initial-scale=1"/>
+                <meta name="robots" content="noindex, nofollow"/>
+                <title>Mail Order: kart bilgisi</title>
+                <link rel="stylesheet" href="/sanal_pos/static/src/css/mail_order.css"/>
+            </head>
+            <body>
+                <main class="mo-page">
+                    <div t-if="is_test" class="mo-test-band">TEST ORTAMI: gerçek tahsilat yapılmaz</div>
+                    <h1>Mail Order ile ödeme</h1>
+                    <dl class="mo-summary">
+                        <dt>Fatura</dt><dd t-out="invoice_no"/>
+                        <dt>Müşteri</dt><dd t-out="customer_name"/>
+                        <dt>Tutar</dt><dd t-out="amount_text"/>
+                        <dt>Son geçerlilik</dt><dd t-out="expires_local"/>
+                    </dl>
+                    <p class="mo-warning">Kart bilgisini yalnız bu ekrandan açılan kart sayfasına girin; not almayın, e-posta/mesajla almayın, tarayıcıya kaydettirmeyin. Banka doğrulama (SMS) kodunu müşteriden alıp yalnız banka sayfasına girin.</p>
+                    <!-- Form doğrudan Paratika'ya gider; Odoo bu alanları hiçbir yolla almaz (K-13). -->
+                    <form class="mo-form" method="post" t-att-action="form_action" autocomplete="off">
+                        <label for="cardOwner">Kart sahibinin adı</label>
+                        <input id="cardOwner" name="cardOwner" type="text" maxlength="32"
+                               autocomplete="off" required="required"/>
+                        <label for="pan">Kart numarası (yalnız rakam)</label>
+                        <input id="pan" name="pan" type="text" inputmode="numeric" pattern="[0-9]{12,19}"
+                               maxlength="19" autocomplete="off" required="required"/>
+                        <div class="mo-row">
+                            <div>
+                                <label for="expiryMonth">Son kullanma ayı</label>
+                                <select id="expiryMonth" name="expiryMonth" autocomplete="off" required="required">
+                                    <option value="">Ay</option>
+                                    <t t-foreach="expiry_months" t-as="month">
+                                        <option t-att-value="month" t-out="month"/>
+                                    </t>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="expiryYear">Son kullanma yılı</label>
+                                <select id="expiryYear" name="expiryYear" autocomplete="off" required="required">
+                                    <option value="">Yıl</option>
+                                    <t t-foreach="expiry_years" t-as="year">
+                                        <option t-att-value="year" t-out="year"/>
+                                    </t>
+                                </select>
+                            </div>
+                            <div>
+                                <label for="cvv">Güvenlik kodu (CVV)</label>
+                                <input id="cvv" name="cvv" type="password" inputmode="numeric"
+                                       pattern="[0-9]{3,4}" maxlength="4" autocomplete="off" required="required"/>
+                            </div>
+                        </div>
+                        <label for="installmentCount">Taksit</label>
+                        <!-- G0-Q7: tek çekim değeri '1' varsayımı (spike sonrası tek değişim yeri). -->
+                        <select id="installmentCount" name="installmentCount">
+                            <option value="1">Tek çekim</option>
+                            <t t-foreach="installments" t-as="option">
+                                <option t-att-value="option['count']"
+                                        t-out="'%s taksit (%s)' % (option['count'], ', '.join(option['networks']) or 'tüm kartlar')"/>
+                            </t>
+                        </select>
+                        <button type="submit" class="mo-submit">Öde (3D)</button>
+                    </form>
+                    <t t-if="installments">
+                        <h2>Kart programına göre taksitler</h2>
+                        <p class="mo-hint">Müşteriye kartının programını (Axess, Maximum, World...) sorun; kartın desteklemediği taksit banka tarafından reddedilir.</p>
+                        <table class="mo-table">
+                            <thead>
+                                <tr><th>Taksit</th><th>Kart programı</th><th>Komisyon oranı</th></tr>
+                            </thead>
+                            <tbody>
+                                <tr t-foreach="installments" t-as="option">
+                                    <td t-out="option['count']"/>
+                                    <td t-out="', '.join(option['networks']) or '-'"/>
+                                    <td t-out="option['rate_text']"/>
+                                </tr>
+                            </tbody>
+                        </table>
+                    </t>
+                    <p class="mo-back"><a t-att-href="record_url">Vazgeç, ödeme kaydına dön</a></p>
+                </main>
+            </body>
+        </html>
+    </template>
+
+    <template id="mail_order_error_page" name="Sanal POS: Mail Order hata sayfası">
+        <html lang="tr">
+            <head>
+                <meta charset="utf-8"/>
+                <meta name="viewport" content="width=device-width, initial-scale=1"/>
+                <meta name="robots" content="noindex, nofollow"/>
+                <title>Mail Order: kart sayfası açılamadı</title>
+                <link rel="stylesheet" href="/sanal_pos/static/src/css/mail_order.css"/>
+            </head>
+            <body>
+                <main class="mo-page">
+                    <h1>Kart sayfası açılamadı</h1>
+                    <p class="mo-error" t-out="message"/>
+                    <p class="mo-back"><a t-att-href="back_url">Geri dön</a></p>
+                </main>
+            </body>
+        </html>
+    </template>
+
+    <!-- mo_return (public): sabit metin + Odoo kökenli geçiş; target yalnız MPID_RE'ye uyan değer. -->
+    <template id="mail_order_return_page" name="Sanal POS: Mail Order dönüş sayfası">
+        <html lang="tr">
+            <head>
+                <meta charset="utf-8"/>
+                <meta http-equiv="refresh" t-attf-content="0;url={{ target }}"/>
+                <meta name="robots" content="noindex, nofollow"/>
+                <title>Ödeme sonucu alınıyor</title>
+                <link rel="stylesheet" href="/sanal_pos/static/src/css/mail_order.css"/>
+            </head>
+            <body>
+                <main class="mo-page">
+                    <p>Ödeme sonucu alınıyor…</p>
+                    <p class="mo-back"><a t-att-href="target">Sayfa açılmazsa buraya tıklayın</a></p>
+                </main>
+            </body>
+        </html>
+    </template>
+</odoo>
