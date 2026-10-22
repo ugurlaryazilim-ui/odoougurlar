@@ -232,8 +232,10 @@ class TestTestMode(SettingsMixin, SmsTestCase):
                         self.assertNotIn(name, res, '%s yönetici olmayana döndü' % name)
                     self.assertNotIn('TURATEL-SIR-1', repr(res))
                     self.assertNotIn('SMARTADM-SIR-2', repr(res))
-                    self.assertEqual(res.get('sms_turatel_originator'), 'BASLIK')   # gruplu olmayan etkilenmez
-                    self.assertIn('sms_test_mode', res)
+                    # NEDEN: sms_turatel_originator (config_parameter) için "yönetici olmayana döner" varsayımı
+                    # kaldırıldı: odoougurlar res_config_secret_guard (A5 N1) kuruluyken tüm config_parameter
+                    # alanları düşer; sms_system tek başına kuruluyken ise döner. Her iki durum da geçerli.
+                    self.assertIn('sms_test_mode', res)   # config_parameter'sız alan etkilenmez
 
     def test_a2_g1_get_values_sistem_yoneticisi_sirlari_gorur(self):
         with patch('odoo.addons.base.models.res_config.ResConfigSettings.get_values', self._leaky_get_values):
