@@ -753,8 +753,22 @@ class SanalPosPayment(models.Model):
             if not tran:
                 continue                                 # 'none'/'ambiguous': hiçbir şey yapılmaz
             status = tran.get('status')
-            if not self._refund_match_decisive(line, tran, how, need_time=status == 'failed'):
+            if how != 'ref' and self._refund_tran_before_line(line, tran):
+                continue                                 # önceki denemenin/başka isteğin işlemi
+            if status != 'approved' and not self._refund_match_decisive(line, tran, how):
+                # DIKKAT (inceleme Ö-1, güvenlik D-2): kararsız eşleşme ref BAĞLAMAZ. Bağlanan ref
+                # sonraki turda 'ref' eşleşmesi olur ve o işlemin FA'sı satırı reddeder (R1 sınıfı).
+                # Satırın kendi nosu varsa başka nolu işlemin durumu da satıra yazılmaz.
+                if status != 'failed' and not line.provider_ref:
+                    # zamansız bekleyen işlem: ham durum görünür, ref bağlanmaz
+                    vals = self._refund_bind_vals(line, tran)
+                    vals.pop('provider_ref', None)
+                    if vals:
+                        line.write(vals)
                 continue
+            # NEDEN: onaylı eşleşme zamansız da olsa kabul edilir (P-10: biçim belgesiz; yoksa ref'siz
+            # satır hiç sonuçlanmazdı) ve satırın farklı nosu varsa benimsenir (R-3, _refund_bind_vals
+            # notu). Onay tutarı iade edilebilire döndürmez; yanlış eşleşme çift iade yolu açmaz.
             vals = self._refund_bind_vals(line, tran)
             if status == 'approved':
                 vals.update(self._refund_done_vals(tran, now))
@@ -784,11 +798,17 @@ class SanalPosPayment(models.Model):
         # Onaylı/redli eşleşmede bugünkü yollar (onaylı döngüsü, bulunamadı sayacı) çalışır.
         for line in self.refund_ids.filtered(lambda l: l.state == 'unknown' and l.kind == 'refund'):
             tran, how = self._match_refund_transaction(line, financial, used_refs(line))
-            if (not tran or tran.get('status') in REFUND_TERMINAL_STATUSES
-                    or not self._refund_match_decisive(line, tran, how)):
+            if not tran or tran.get('status') in REFUND_TERMINAL_STATUSES:
+                continue
+            decisive = self._refund_match_decisive(line, tran, how)
+            if not decisive and (line.provider_ref or self._refund_tran_before_line(line, tran)):
                 continue
             vals = self._refund_bind_vals(line, tran)
-            vals.update(state='pending_approval', provider_ref=tran.get('ref'), unknown_since=False,
+            if not decisive:
+                # DIKKAT (inceleme Ö-1): zamansız eşleşme satırı bekletir ama ref BAĞLAMAZ; bağlanan
+                # ref o işlemin sonraki FA'sına red yetkisi verirdi.
+                vals.pop('provider_ref', None)
+            vals.update(state='pending_approval', unknown_since=False,
                         not_found_count=0, error_code=False, error_message=False)
             line.write(vals)
             self._post_note('%s iade Paratika\'da finans onayı bekliyor görünüyor.'
@@ -801,9 +821,12 @@ class SanalPosPayment(models.Model):
         Dönüş ``(tran, neden)``; neden: 'ref', 'unique', 'ambiguous' ya da 'none'.
         """
         if line.provider_ref:
-            for tran in financial:
-                if tran.get('ref') == line.provider_ref:
-                    return tran, 'ref'
+            same = [t for t in financial if t.get('ref') == line.provider_ref]
+            if same:
+                # NEDEN (inceleme Ö-2): aynı işlem no birden çok listelenebilir (ör. önce IP/FA,
+                # sonra AP satırı). Kesin sonuç kazanır: onay > red > diğer; listedeki ilk değil.
+                rank = {'approved': 0, 'failed': 1}
+                return min(same, key=lambda t: rank.get(t.get('status'), 2)), 'ref'
         cents = self._to_amount2(line.amount)
         created = line.create_date
 
@@ -832,8 +855,8 @@ class SanalPosPayment(models.Model):
         return None, 'none'
 
     @api.model
-    def _refund_match_decisive(self, line, tran, how, need_time=False):
-        """Eşleşme satırı sonuçlandırabilir/ref bağlayabilir mi (güvenlik bulgusu R1)?
+    def _refund_match_decisive(self, line, tran, how):
+        """Eşleşme satırı reddedebilir/ref bağlayabilir mi (güvenlik bulgusu R1, Ö-1, D-2)?
 
         DIKKAT: REFUND hata yanıtı satırı ref'siz 'failed' yapar; o denemenin Paratika işlemi
         used_refs'e girmez ve 5 dk toleransla yeni satırın tek adayı olabilir. Ona dayanıp
@@ -842,20 +865,27 @@ class SanalPosPayment(models.Model):
         Ref bağlama da aynı şarta bağlıdır: bağlanan ref sonraki turda 'ref' eşleşmesi olur.
         AP için de geçerli: ön senkron, satır açılmadan görünen her AP'yi bir satıra bağlar;
         satırdan önce tarihli boşta AP başka bir isteğindir (panel yarışı, hata yanıtı alıp
-        Paratika'da işlenmiş önceki deneme). Onunla 'done' bekleme engelini erken kaldırır.
+        Paratika'da işlenmiş önceki deneme). Onunla 'done' bekleme engelini erken kaldırır
+        (onaylı eşleşmede çağıran yalnız ``_refund_tran_before_line`` ile eler).
+        Zaman yoksa sıra kanıtlanamaz: red verilmez, ref bağlanmaz (satır bekler, 72 saat uyarısı).
+        Satırın kendi işlem nosu varsa ve sorguda görünmüyorsa aynı tutarlı başka nolu işlem onun
+        yerine karar vermez (D-2: panelden yapılıp reddedilen başka iade).
         """
         if how == 'ref':
             return True
+        if line.provider_ref:
+            return False
         when, created = tran.get('time'), line.create_date
-        if not when or not created:
-            # NEDEN: zaman yoksa sıra kanıtlanamaz; red verilmez (satır bekler, 72 saat uyarısı).
-            # AP/bekleme zamansız işlemle bağlanır (P-10: biçim belgesiz; okunamazsa ref'siz
-            # satır hiç sonuçlanmazdı).
-            return not need_time
         # NEDEN: ikisi de naive UTC (_parse_time saat dilimsiz metni Europe/Istanbul sayar).
         # create_date saniyeye kırpılır: timeCreated saniye hassasiyetinde gelebilir; önceki
         # deneme aynı saniyede olamaz (hata yanıtı + sihirbazı yeniden açma arada).
-        return when >= created.replace(microsecond=0)
+        return bool(when and created and when >= created.replace(microsecond=0))
+
+    @staticmethod
+    def _refund_tran_before_line(line, tran):
+        """İşlem satırdan önce tarihli mi (zaman yoksa False: sıra bilinmiyor)."""
+        when, created = tran.get('time'), line.create_date
+        return bool(when and created and when < created.replace(microsecond=0))
 
     @staticmethod
     def _refund_done_vals(tran, now):
@@ -933,7 +963,7 @@ class SanalPosPayment(models.Model):
             self.message_post(body=body, message_type='comment', subtype_xmlid='mail.mt_note',
                               partner_ids=partners.ids)
 
-    def _sync_refund_transaction(self, tran, listed, now, query_refs=None):
+    def _sync_refund_transaction(self, tran, listed, now, query_refs):
         """Onaylı tek iade/iptal işlemi (sözleşme §6 a-f)."""
         ref = tran.get('ref') or False
         if ref and ref in set(self.refund_ids.mapped('provider_ref')):
@@ -967,7 +997,6 @@ class SanalPosPayment(models.Model):
             self._post_note('%s (%s) işlem no Paratika sorgusuyla eşleştirildi: %s' % (
                 label, format_try(line.amount), ref))
             return 'adopted'
-        query_refs = query_refs or set()
         # Uçuştaki istek: işleniyor satırı ya da işlem nosu sorguda görünmeyen onay bekleyen
         # satır (eşleştirme belirsiz/aday dışı kaldıysa) bu işlemin sahibi olabilir; panel satırı
         # açılırsa aynı iade iki kez sayılır.

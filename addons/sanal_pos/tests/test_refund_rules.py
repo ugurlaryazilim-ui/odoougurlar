@@ -5,6 +5,7 @@ Kabul testlerine (test_refund.py) ek kanıtlar: belirsiz iade satırı erken 'Ba
 olmaz (çift iade = para kaybı), kilit/indeks savunmaları, dış çağrı sonrası raise yok,
 R-3 işlem no benimseme ve tek iptal satırı, 2'den fazla ondalık reddi.
 """
+from datetime import timedelta
 from unittest.mock import patch
 
 from odoo.exceptions import UserError
@@ -12,6 +13,7 @@ from odoo.tests import tagged
 
 from .common import CRON_SYNC, ok_body, timeout_exc, tran
 from .test_refund import BUSY_MSG, WIZARD, RefundCase
+from .test_refund_approval import ms
 
 PAYMENT = 'sanal.pos.payment'
 
@@ -44,8 +46,10 @@ class TestUnknownRefundNotFound(RefundCase):
     def test_bekleyen_islem_varken_basarisiz_olmaz(self):
         payment, line = self.unknown_refund()
         self.age_line(line, 30)
+        # satırdan sonra tarihli: sıra kanıtlı (zamansız eşleşme ref bağlamaz, inceleme Ö-1)
         self.set_query_transactions(tran('AP', 'SALE', '9000.00', 'T1'),
-                                    tran('IP', 'REFUND', '2500.00', 'R-PEND'))
+                                    tran('IP', 'REFUND', '2500.00', 'R-PEND',
+                                         timeCreated=ms(line.create_date + timedelta(minutes=1))))
         for _ in range(3):
             self.run_cron(CRON_SYNC)
         line.invalidate_recordset()

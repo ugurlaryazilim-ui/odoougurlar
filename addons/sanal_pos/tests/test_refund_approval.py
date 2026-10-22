@@ -289,6 +289,16 @@ class TestPendingBlocks(ApprovalCase):
         self.assertIn('unknown', definition)
         self.assertIn('UNIQUE', definition.upper())
 
+    def test_m03_tutarsiz_veride_bekleyen_satir_odeme_paid_olsa_da_iade_iptal_kapali(self):
+        # İkinci katman: ödeme durumu yeniden hesaplanmamış (paid) olsa da bekleyen satır engeller
+        payment = self.paid()
+        self.assertTrue(payment.can_refund and payment.can_void, 'ön koşul: satırsız ödeme açık')
+        self.make_refund_line(payment, 2500.0, state='pending_approval', provider_ref='R-M03')
+        payment.invalidate_recordset()
+        self.assertEqual(payment.state, 'paid', 'tutarsız veri: yeniden hesap yapılmadı')
+        self.assertFalse(payment.can_refund)
+        self.assertFalse(payment.can_void)
+
 
 # ---------------------------------------------------------------------------------------
 # KK-5: AP -> done
@@ -651,7 +661,9 @@ class TestMatching(ApprovalCase):
     def test_kk9_refsiz_satir_tek_aday_ile_baglanir_bekleyen_durumda_kalir(self):
         payment, line = self.pending_payment(2500.0, ref=None)
         self.assertFalse(line.provider_ref)
-        self.query(payment, rt('IP', 2500.0, 'R-Q'))
+        created = self.age(line, hours=1)
+        # satırdan sonra tarihli: sıra kanıtlı (zamansız bekleyen ref bağlamaz, inceleme Ö-1)
+        self.query(payment, rt('IP', 2500.0, 'R-Q', timeCreated=ms(created + timedelta(minutes=1))))
         self.sync(payment)
         self.refresh(line)
         self.assertEqual((line.state, line.provider_ref, line.provider_status),
@@ -737,8 +749,10 @@ class TestMatching(ApprovalCase):
         self.query(payment, rt('AP', 2500.0, 'R-USED'))
         # ilk iade onaylı; ikinci (aynı tutar) iade istenir
         line = self.request_refund(payment, 2500.0, ref=None)
+        created = self.age(line, hours=1)
         # Boşta aday R-FREE: R-USED aday sayılsaydı iki aday olur, belirsiz kalır ve bağlanmazdı
-        self.query(payment, rt('AP', 2500.0, 'R-USED'), rt('IP', 2500.0, 'R-FREE'))
+        self.query(payment, rt('AP', 2500.0, 'R-USED'),
+                   rt('IP', 2500.0, 'R-FREE', timeCreated=ms(created + timedelta(minutes=1))))
         self.sync(payment)
         self.refresh(line, done)
         self.assertEqual(line.state, 'pending_approval', 'R-USED başka satıra ait; bu satıra bağlanmaz')
@@ -836,6 +850,64 @@ class TestStaleCandidateGuard(ApprovalCase):
         self.refresh(line)
         self.assertEqual(line.state, 'unknown')
         self.assertFalse(line.provider_ref)
+
+    # İnceleme Ö-1: zamansız (sırası kanıtlanamayan) bekleyen işlem de ref bağlamaz
+    def test_o1_zamansiz_bekleyen_islem_baglanmaz_ayni_ref_fa_olunca_reddetmez(self):
+        payment, line = self.pending_payment(2500.0, ref=None)
+        self.query(payment, rt('IP', 2500.0, 'R-X'))
+        self.sync(payment)
+        self.assert_still_pending(payment, line)
+        self.assertEqual(line.provider_status, 'IP', 'ham durum yine görünür')
+        self.query(payment, rt('FA', 2500.0, 'R-X'))
+        self.sync(payment)
+        self.assert_still_pending(payment, line)
+
+    def test_o1_belirsiz_satir_zamansiz_bekleyen_islemle_ref_baglamadan_bekler(self):
+        payment = self.paid(amount=9000.0)
+        line = self.make_refund_line(payment, 2500.0, state='unknown', provider_ref=None)
+        self.query(payment, rt('IP', 2500.0, 'R-UX'))
+        self.sync(payment)
+        self.assert_still_pending(payment, line)
+        self.query(payment, rt('FA', 2500.0, 'R-UX'))
+        self.sync(payment)
+        self.assert_still_pending(payment, line)
+
+    # Güvenlik D-2: kendi işlem nosu olan satırı başka nolu işlem reddetmez / yeniden bağlamaz
+    def test_d2_kendi_nosu_gorunmezken_panelden_reddedilen_ayni_tutarli_iade_reddetmez(self):
+        payment, line = self.pending_payment(2500.0, ref='R-A')
+        created = self.age(line, hours=1)
+        panel_ip = rt('IP', 2500.0, 'R-P', timeCreated=ms(created + timedelta(minutes=10)))
+        self.query(payment, panel_ip)
+        self.sync(payment)
+        self.refresh(line)
+        self.assertEqual((line.state, line.provider_ref), ('pending_approval', 'R-A'))
+        self.query(payment, rt('FA', 2500.0, 'R-P', timeCreated=ms(created + timedelta(minutes=10))))
+        self.sync(payment)
+        self.refresh(line)
+        self.assertEqual((line.state, line.provider_ref), ('pending_approval', 'R-A'),
+                         'başka nolu FA bu satırı reddetmemeli')
+        self.assertFalse(self.messages_with(payment, 'REDDEDİLDİ'))
+        self.assertEqual(payment.state, 'refund_pending')
+        # kendi işlemi görünür ve onaylanır
+        self.query(payment, rt('FA', 2500.0, 'R-P', timeCreated=ms(created + timedelta(minutes=10))),
+                   rt('AP', 2500.0, 'R-A', timeCreated=ms(created + timedelta(seconds=5))))
+        self.sync(payment)
+        self.refresh(line)
+        self.assertEqual((line.state, line.provider_ref), ('done', 'R-A'))
+
+    # İnceleme Ö-2: aynı işlem no birden çok listelenirse kesin sonuç (önce AP) kazanır
+    def test_o2_ayni_ref_birden_cok_listelenirse_onayli_kayit_kazanir(self):
+        for first in ('IP', 'FA'):
+            with self.subTest(ilk=first):
+                payment, line = self.pending_payment(2500.0, ref='R-D-%s' % first,
+                                                     invoice_no='DUP-%s' % first)
+                self.query(payment, rt(first, 2500.0, 'R-D-%s' % first),
+                           rt('AP', 2500.0, 'R-D-%s' % first))
+                self.sync(payment)
+                self.refresh(line)
+                self.assertEqual(line.state, 'done')
+                self.assertFalse(self.messages_with(payment, 'REDDEDİLDİ'))
+                self.assertEqual(len(self.lines(payment)), 1)
 
 
 # ---------------------------------------------------------------------------------------
@@ -1039,7 +1111,9 @@ class TestUnknownToPending(ApprovalCase):
             with self.subTest(durum=status):
                 payment, line = self.unknown_refund(invoice_no='UNK-%s' % status)
                 self.age_line(line, 30)
-                self.query(payment, rt(status, 2500.0, 'R-U-%s' % status))
+                # satırdan sonra tarihli: sıra kanıtlı (zamansız eşleşme ref bağlamaz, inceleme Ö-1)
+                self.query(payment, rt(status, 2500.0, 'R-U-%s' % status,
+                                       timeCreated=ms(line.create_date + timedelta(minutes=1))))
                 self.sync(payment)
                 self.refresh(line)
                 self.assertEqual(line.state, 'pending_approval')

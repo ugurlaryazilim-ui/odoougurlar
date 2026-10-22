@@ -21,7 +21,7 @@ import time
 
 from markupsafe import Markup
 
-from odoo import fields, models
+from odoo import api, fields, models
 from odoo.exceptions import UserError
 
 from ..models.sanal_pos_payment import PAYMENT_STATES, REFUND_RECOMPUTE_STATES
@@ -50,6 +50,24 @@ class SanalPosRefundApprovalWizard(models.TransientModel):
         [('draft', 'Hazır'), ('compared', 'Karşılaştırıldı'), ('applied', 'Uygulandı')],
         string='Aşama', required=True, default='draft', readonly=True)
     report_html = fields.Html(string='Rapor', readonly=True)
+
+    # DIKKAT: aşama ve rapor yalnız sunucu eylemlerinden yazılır (güvenlik D-1). ``readonly`` alan
+    # özelliği yalnız arayüzdür; RPC create/write ile ``state='compared'`` verilirse karşılaştırma
+    # atlanıp uygulama çalıştırılabilirdi. Context bayrağı ile muafiyet KULLANMA: RPC context'i
+    # istemci belirler. İç yazım ``_write_internal`` üzerinden yapılır.
+    _CLIENT_PROTECTED = ('state', 'report_html')
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        clean = [{k: v for k, v in vals.items() if k not in self._CLIENT_PROTECTED}
+                 for vals in vals_list]
+        return super().create(clean)
+
+    def write(self, vals):
+        return super().write({k: v for k, v in vals.items() if k not in self._CLIENT_PROTECTED})
+
+    def _write_internal(self, vals):
+        return super().write(vals)
 
     # ---------------------------------------------------------------- yardımcılar
     def _check_manager(self, allow_su=False):
@@ -102,9 +120,7 @@ class SanalPosRefundApprovalWizard(models.TransientModel):
             # DIKKAT: ref'siz eşleşme bir "Başarılı" satırı çevirmeye yetmez (modül açıklaması).
             # Satırın kendi işlem nosu varsa ve sorguda görünmüyorsa, aynı tutarlı başka işlem
             # onun yerine geçmez; zaman da kanıtlanamıyorsa satır elle incelenir.
-            strong = tran.get('kind') == line.kind and (how == 'ref' or (
-                not line.provider_ref
-                and payment._refund_match_decisive(line, tran, how, need_time=True)))
+            strong = tran.get('kind') == line.kind and payment._refund_match_decisive(line, tran, how)
             if not strong:
                 item['note'] = AMBIGUOUS_REASON
             elif tran.get('status') == 'approved':
@@ -215,7 +231,7 @@ class SanalPosRefundApprovalWizard(models.TransientModel):
         if skipped:
             notes.append('%s ödeme süre sınırı nedeniyle sorgulanmadı; Paratika ile Karşılaştır\'ı '
                          'tekrar çalıştırın.' % skipped)
-        self.write({'state': 'compared', 'report_html': self._render_report(rows, notes)})
+        self._write_internal({'state': 'compared', 'report_html': self._render_report(rows, notes)})
         return self._reopen_action()
 
     # ---------------------------------------------------------------- uygula (yalnız yönetici)
@@ -248,7 +264,7 @@ class SanalPosRefundApprovalWizard(models.TransientModel):
         if unprocessed:
             notes.append('%s ödeme süre sınırı nedeniyle işlenmedi; Geçişi Uygula\'yı tekrar çalıştırın.'
                          % unprocessed)
-        self.write({'state': 'compared' if unprocessed else 'applied',
+        self._write_internal({'state': 'compared' if unprocessed else 'applied',
                     'report_html': self._render_report(rows, notes)})
         return self._reopen_action()
 

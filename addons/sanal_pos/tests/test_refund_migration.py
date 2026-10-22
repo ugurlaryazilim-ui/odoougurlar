@@ -352,6 +352,34 @@ class TestRefundApprovalMigration(RefundCase):
         self.assertEqual(self.compact(), before)
         self.assertFalse(self.env['ir.config_parameter'].sudo().get_param(ICP_KEY))
 
+    # Test raporu M19: yönetici denetimi her iki eylemde de kendi mesajıyla (ACL değil) devrede
+    def test_m19_sudo_olusturulmus_sihirbaz_yonetici_olmayan_kullanicida_calismaz(self):
+        wiz = self.env[WIZ].sudo().create({})
+        before = self.compact()
+        with self.assertRaisesRegex(AccessError, 'yönetici yetkisi'):
+            wiz.with_user(self.user_sp).action_compare()
+        wiz.sudo().action_compare()
+        with self.assertRaisesRegex(AccessError, 'yönetici yetkisi'):
+            wiz.with_user(self.user_sp).action_apply()
+        self.assertEqual(self.compact(), before)
+        self.assertFalse(self.env['ir.config_parameter'].sudo().get_param(ICP_KEY))
+
+    # Güvenlik D-1: aşama ve rapor istemciden yazılamaz; karşılaştırma atlanamaz
+    def test_d1_istemci_asama_ve_raporu_yazamaz_karsilastirma_atlanamaz(self):
+        wiz = self.env[WIZ].with_user(self.user_mgr).create(
+            {'state': 'compared', 'report_html': '<p>sahte rapor</p>'})
+        wiz.invalidate_recordset()
+        self.assertEqual(wiz.state, 'draft')
+        self.assertNotIn('sahte', self.report(wiz))
+        wiz.write({'state': 'compared', 'report_html': '<p>sahte rapor</p>'})
+        wiz.invalidate_recordset()
+        self.assertEqual(wiz.state, 'draft')
+        self.assertNotIn('sahte', self.report(wiz))
+        before = self.compact()
+        with self.assertRaisesRegex(UserError, 'Karşılaştır'):
+            wiz.action_apply()
+        self.assertEqual(self.compact(), before)
+
     def test_kk16_migrations_klasoru_yok(self):
         from odoo.tools import file_path
         import os
