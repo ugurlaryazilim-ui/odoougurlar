@@ -133,6 +133,45 @@ def installment_totals(amount, rate, count):
     return total, monthly
 
 
+def format_rate(rate):
+    """``13.57`` -> ``'%13,57'``."""
+    return '%' + ('%.2f' % Decimal(str(rate or 0))).replace('.', ',')
+
+
+def match_surcharge_rate(amount, got, count, rates):
+    """Çekilen ``got`` tutarını ``count`` taksitin vade farklı toplamıyla eşleyen oran (``Decimal``) ya da ``None``.
+
+    Eşleşme: ``|got - installment_totals(amount, oran, count)[0]| <= count kuruş``; birden çok oran
+    tutarsa en yakın toplamınki. Tek çekim, ``got <= amount`` ve oran ≤ 0 hiç eşleşmez (o durumlarda
+    kural ``got == amount``'tır).
+    NEDEN (pay = taksit sayısı kadar kuruş): Paratika'nın toplamı nasıl yuvarladığı belgesiz (G0'da
+    ölçülmedi). Toplam kuruşa yuvarlanmış taksitlerin çarpımıysa sapma en çok n x 0,5 kuruştur; toplamın
+    kendi yuvarlama yöntemi farkı (yukarı/kesme) 1 kuruş daha ekler; n >= 2 için n/2 + 1 <= n. Sabit
+    ±0,05 TL 12 taksitte yetmeyebilir, 2 taksitte gereğinden geniştir. 12 taksitte en çok 0,12 TL.
+    """
+    count = int(count or 0)
+    base = Decimal(str(amount or 0))
+    try:
+        got = Decimal(str(got))
+    except (InvalidOperation, TypeError, ValueError):
+        return None
+    if count < 2 or got <= base:
+        return None
+    tolerance = _CENT * count
+    best = None
+    for raw in rates or []:
+        try:
+            rate = Decimal(str(raw))
+        except (InvalidOperation, TypeError, ValueError):
+            continue
+        if rate <= 0:
+            continue
+        diff = abs(got - installment_totals(base, rate, count)[0])
+        if diff <= tolerance and (best is None or diff < best[0]):
+            best = (diff, rate)
+    return best[1] if best else None
+
+
 def installment_table(amount, options):
     """Kart sayfası taksit tablosu değerleri.
 
@@ -156,7 +195,7 @@ def installment_table(amount, options):
         rows.append({
             'count': option['count'],
             'networks': shown,
-            'rate_text': ('%' + ('%.2f' % rate).replace('.', ',')) if rate else 'Vade farkı yok',
+            'rate_text': format_rate(rate) if rate else 'Vade farkı yok',
             'total_text': format_try(total),
             'monthly_text': format_try(monthly),
             'select_text': '%s taksit — toplam %s%s' % (

@@ -15,6 +15,8 @@
                 <field name="customer_phone"/>
                 <field name="currency_id" column_invisible="True"/>
                 <field name="amount" sum="Toplam"/>
+                <!-- Vade farkı dahil tahsil edilen tutar; İade edilen bunu (Tutar'ı değil) aşamaz. -->
+                <field name="paid_amount" string="Tahsil Edilen" optional="show" sum="Toplam"/>
                 <field name="refunded_amount" optional="show"/>
                 <field name="payment_method" string="Yöntem"/>
                 <field name="channels_display"/>

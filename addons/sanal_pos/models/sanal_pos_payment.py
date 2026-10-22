@@ -22,7 +22,7 @@ from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tools import float_compare
 
-from ..tools import format_try
+from ..tools import format_rate, format_try, match_surcharge_rate
 from .res_config_settings import get_bool_param
 
 _logger = logging.getLogger(__name__)
@@ -1455,8 +1455,11 @@ class SanalPosPayment(models.Model):
                   if t.get('kind') != 'sale' and t.get('status') == 'approved']
         return approved, in_review, pending, failed, others
 
-    def _review_reason(self, approved, in_review, others):
-        """İnceleme nedeni (boş = ödendi sayılabilir)."""
+    def _review_reason(self, approved, in_review, others, surcharge=True):
+        """İnceleme nedeni. ``('', '')`` ya da ``('', not)`` = ödendi sayılabilir (not: vade farkı).
+
+        ``surcharge=False``: vade farkı denetlenmez (geç ödeme zaten İnceleme'dir; ek sorgu gereksiz).
+        """
         expected = self._to_amount2(self.amount)
         currency = self.currency_id.name or 'TRY'
         if len(approved) > 1:
@@ -1468,6 +1471,10 @@ class SanalPosPayment(models.Model):
             tran = approved[0]
             got = self._to_amount2(tran.get('amount'))
             if got is None or got != expected:
+                note = (surcharge and got is not None and (tran.get('currency') or '') == currency
+                        and self._installment_surcharge_note(tran, expected, got))
+                if note:
+                    return '', note
                 return 'REVIEW_AMOUNT', ('Tutar uyuşmazlığı: Paratika\'da tahsil edilen %s, '
                                          'talep tutarı %s.' % (
                                              format_try(tran.get('amount') or 0),
@@ -1485,6 +1492,49 @@ class SanalPosPayment(models.Model):
                                     'talep tutarı %s.' % (format_try(others[0].get('amount') or 0),
                                                          format_try(self.amount)))
         return None, None
+
+    def _installment_surcharge_note(self, tran, expected, got):
+        """Çekilen tutar taksitin beklenen vade farklı toplamıysa not metni, değilse ``''``.
+
+        Paratika taksitte müşteri vade farkını (``customerCostCommissionRate``) AMOUNT'a kendisi
+        ekler (kullanıcı kararı 2026-10-22: beklenen toplamsa Ödendi, değilse İnceleme).
+        NEDEN (oran kaynağı = sync anında QUERYINSTALLMENT): link'te Odoo taksit tablosunu hiç
+        görmez (müşteri Paratika sayfasında seçer); ödeme anı oranını saklamak yeni stored alan
+        (deploy penceresi) ve kart sayfası GET'inde kayda yazım (kilit çakışması) isterdi. Oran
+        ödemeden sonra değiştiyse eşleşme tutmaz ve kayıt İnceleme'ye düşer: hata yalnız güvenli
+        tarafa olur. Yalnız üst sınır (got <= tutar x (1 + en yüksek oran)) "az tahsilat"ı da Ödendi
+        sayardı, kullanıcı kararıyla çelişir.
+        Sorgu yalnız taksit >= 2 ve got > beklenen iken yapılır (nadir yol); sorgu hatası = İnceleme.
+        """
+        count = tran.get('installment_count') or 1
+        if count < 2 or got <= expected:
+            return ''
+        # DIKKAT: çağıranlar satır kilidi altındadır (QUERYTRANSACTION gibi); bu ikinci dış çağrı
+        # kilidi en çok bir zaman aşımı kadar uzatır. Koşulları gevşetip her senkronda sorgulatmayın.
+        result = self._call_provider_safely('query_installments', 'vade farkı oran sorgusunda')
+        if not result.get('ok'):
+            return ''
+        option = next((o for o in result.get('options') or [] if o.get('count') == count), None)
+        systems = (option or {}).get('systems') or []
+        payment_system = tran.get('payment_system')
+        own = [s['rate'] for s in systems if payment_system and payment_system in s['keys']]
+        if not own and payment_system and payment_system in (result.get('system_keys') or []):
+            # NEDEN: işlemin ağı tabloda var ama bu taksit sayısında oranı yok -> başka ağın
+            # oranıyla eşleşme tesadüftür; İnceleme (güvenli taraf).
+            return ''
+        # İşlemin ödeme sistemi tablodakilerden biriyse yalnız onun oranı; bilinmiyor/eşleşmiyorsa
+        # herhangi bir oran (aynı taksitte ağlar farklı oranlı olabilir).
+        rate = match_surcharge_rate(expected, got, count, own or [s['rate'] for s in systems])
+        if rate is None:
+            return ''
+        note = 'Vade farkı %s (%d taksit, %s)' % (format_try(got - expected), count, format_rate(rate))
+        if not own:
+            # G0: paymentSystem biçimi doğrulanmadı; eşleşmeme kalıcıysa eşleştirme anahtarı
+            # düzeltilsin diye ham değer (sistem adı/kodu, sır/kart verisi değil) loglanır.
+            _logger.info('sanal_pos: vade farkı ağ eşleşmedi, paymentSystem=%r, ödeme id=%s',
+                         payment_system, self.id)
+            note += ' (ağ eşleşmedi)'
+        return note
 
     def _set_review(self, code, reason, tran, approved=None):
         values = {'state': 'review', 'last_error_code': code, 'last_error_message': reason[:250]}
@@ -1518,6 +1568,8 @@ class SanalPosPayment(models.Model):
             detail = ['%d taksit' % (values.get('installment_count') or 1)]
             if values.get('card_last4'):
                 detail.append('kart son 4: %s' % values['card_last4'])
+            if reason:
+                detail.append(reason)               # vade farkı notu (_installment_surcharge_note)
             if self.payment_method == 'mail_order':
                 # NEDEN: kartı giren kişi izlenebilsin; yalnız son 4 hane yazılır, kart verisi yok.
                 self._post_note('Mail order ödemesi alındı: %s, %s, başlatan: %s' % (
@@ -1572,7 +1624,7 @@ class SanalPosPayment(models.Model):
         tran = (approved or in_review or [None])[0]
         if not tran:
             return
-        code, reason = self._review_reason(approved, in_review, [])
+        code, reason = self._review_reason(approved, in_review, [], surcharge=False)
         prefix = 'Kapalı linke (%s) geç ödeme geldi: Paratika %s, talep tutarı %s.' % (
             dict(PAYMENT_STATES).get(self.state, self.state),
             format_try(tran.get('amount') or 0), format_try(self.amount))
