@@ -40,8 +40,9 @@ EXPECTED_PUBLIC = {
     'sanal.pos.payment.resend.wizard': {'default_get', 'action_confirm'},
     'sanal.pos.payment.refund.wizard': {'action_confirm'},
     'sanal.pos.payment.review.close.wizard': {'action_confirm'},
-    # create/write: yalnız yönetici ACL'i; aşama/rapor alanlarını atar (D-1, test_refund_migration)
-    'sanal.pos.refund.approval.wizard': {'create', 'write', 'action_compare', 'action_apply'},
+    # default_get/create/write: yalnız yönetici ACL'i; aşama/rapor alanlarını atar (D-1, test_refund_migration)
+    'sanal.pos.refund.approval.wizard': {'default_get', 'create', 'write', 'action_compare',
+                                         'action_apply'},
     'res.config.settings': {'action_copy_tailor_mssql', 'action_sanal_pos_test_connection',
                             'default_get', 'set_values'},
 }

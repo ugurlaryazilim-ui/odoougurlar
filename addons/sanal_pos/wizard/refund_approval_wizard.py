@@ -57,11 +57,25 @@ class SanalPosRefundApprovalWizard(models.TransientModel):
     # istemci belirler. İç yazım ``_write_internal`` üzerinden yapılır.
     _CLIENT_PROTECTED = ('state', 'report_html')
 
+    @api.model
+    def default_get(self, fields_list):
+        # NEDEN: ``default_state``/``default_report_html`` context'i de istemciden gelir
+        # (pop yetmez: alanın kendi 'draft' varsayılanı da buradan gelir, zorunlu alan boş kalır)
+        defaults = super().default_get(fields_list)
+        defaults.pop('report_html', None)
+        if 'state' in defaults:
+            defaults['state'] = 'draft'
+        return defaults
+
     @api.model_create_multi
     def create(self, vals_list):
         clean = [{k: v for k, v in vals.items() if k not in self._CLIENT_PROTECTED}
                  for vals in vals_list]
-        return super().create(clean)
+        records = super().create(clean)
+        # DIKKAT: ikinci katman. Varsayılanlar create içinde süzmeden SONRA eklenir; başka bir
+        # varsayılan yolu (ör. ir.default) da aşamayı/raporu dolduramasın.
+        records._write_internal({'state': 'draft', 'report_html': False})
+        return records
 
     def write(self, vals):
         return super().write({k: v for k, v in vals.items() if k not in self._CLIENT_PROTECTED})

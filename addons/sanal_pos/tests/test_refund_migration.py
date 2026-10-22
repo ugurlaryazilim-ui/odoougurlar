@@ -380,6 +380,22 @@ class TestRefundApprovalMigration(RefundCase):
             wiz.action_apply()
         self.assertEqual(self.compact(), before)
 
+    def test_d1_default_baglamiyla_da_asama_ve_rapor_yazilamaz(self):
+        # RPC context'i istemcidedir: default_* create'te süzmeden SONRA uygulanır (düzeltme turu #2)
+        ctx = {'default_state': 'compared', 'default_report_html': '<p>sahte rapor</p>'}
+        Wiz = self.env[WIZ].with_user(self.user_mgr).with_context(**ctx)
+        defaults = Wiz.default_get(['state', 'report_html'])
+        self.assertEqual(defaults.get('state'), 'draft')
+        self.assertFalse(defaults.get('report_html'))
+        wiz = Wiz.create({})
+        wiz.invalidate_recordset()
+        self.assertEqual(wiz.state, 'draft')
+        self.assertNotIn('sahte', self.report(wiz))
+        before = self.compact()
+        with self.assertRaisesRegex(UserError, 'Karşılaştır'):
+            wiz.action_apply()
+        self.assertEqual(self.compact(), before)
+
     def test_kk16_migrations_klasoru_yok(self):
         from odoo.tools import file_path
         import os
