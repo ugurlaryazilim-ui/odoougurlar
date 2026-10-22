@@ -108,7 +108,9 @@ class SanalPosParatikaController(http.Controller):
         # sonuç sayfası Odoo kökenli bir gezinmeyle (meta refresh/bağlantı) açılınca oturumla
         # gelir. Bağlantıya yalnız MPID_RE'ye uyan değer girer, QWeb ayrıca kaçışlar (XSS).
         target = (MO_RESULT_PATH + '?' + urlencode({'mpid': mpid})) if mpid else PAYMENT_LIST_PATH
-        body = request.env['ir.qweb']._render('sanal_pos.mail_order_return_page', {'target': target})
+        body = request.env['ir.qweb']._render(
+            'sanal_pos.mail_order_return_page',
+            {'target': target, 'css_url': tools.mail_order_css_url()})
         # DIKKAT: body Markup'tır; düz str ile birleştirmek DOCTYPE'ı kaçışlar (quirks kipi, Ö-1)
         return request.make_response(
             Markup('<!DOCTYPE html>\n') + body,

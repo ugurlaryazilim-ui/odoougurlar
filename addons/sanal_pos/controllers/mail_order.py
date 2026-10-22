@@ -20,7 +20,7 @@ from odoo.exceptions import AccessError, MissingError, UserError
 from odoo.http import request
 
 from ..models.provider_paratika import DIRECT_POST_HOSTS
-from ..tools import installment_table
+from ..tools import installment_table, mail_order_css_url
 from .main import MO_RESULT_PATH, MPID_RE, PAYMENT_LIST_PATH
 
 _logger = logging.getLogger(__name__)
@@ -148,7 +148,7 @@ class SanalPosMailOrderController(http.Controller):
     @staticmethod
     def _render(template, values, csp, status=200):
         # NEDEN: ir.qweb doğrudan; request.render/web.layout arka uç varlıklarını eklerdi.
-        body = request.env['ir.qweb']._render(template, values)
+        body = request.env['ir.qweb']._render(template, dict(values, css_url=mail_order_css_url()))
         # DIKKAT: body Markup'tır; düz str ile birleştirmek ('<!DOCTYPE…' + body) soldaki metni
         # kaçışlar (&lt;!DOCTYPE) ve tarayıcı sayfayı quirks kipinde gösterir (Ö-1).
         return request.make_response(

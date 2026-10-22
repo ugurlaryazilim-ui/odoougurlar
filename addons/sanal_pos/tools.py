@@ -4,6 +4,8 @@
 Telefon, metin, ASCII, e-posta, TL biçimi ve maskeleme. Sır maskeleme
 (KK-37 / NFR-4): loglara ve kullanıcı mesajlarına sır değeri yazılmaz.
 """
+import hashlib
+import os
 import re
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
 
@@ -20,6 +22,12 @@ _ASCII_TABLE = str.maketrans({
 })
 
 PHONE_FORMATS = ('10', '0', '90', '+90')
+
+# Mail Order sayfalarının tek stil dosyası (K-13: arka uç varlığı yok; adres CSP style-src 'self')
+MAIL_ORDER_CSS_PATH = '/sanal_pos/static/src/css/mail_order.css'
+MAIL_ORDER_CSS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                   'static', 'src', 'css', 'mail_order.css')
+_VERSION_CACHE = {}
 
 
 # ---------------------------------------------------------------- telefon
@@ -311,3 +319,26 @@ def scrub(text, secrets):
     for value in values:
         out = out.replace(value, MASK)
     return out
+
+
+# ---------------------------------------------------------------- statik dosya sürümü
+def static_file_version(path):
+    """Dosya içeriğinden türeyen 12 haneli sürüm (mtime'a göre önbelleklenir; dosya yoksa OSError).
+
+    NEDEN: Odoo /static yanıtı ``Cache-Control: public, max-age=604800`` (1 hafta) ile gelir; adres
+    sabit kalırsa dağıtımdan sonra tarayıcı eski CSS'i sunucuya sormadan kullanır ve yeni işaretleme
+    stilsiz görünür (canlı hata). İçerikten türeyen ``?v=`` her değişiklikte adresi değiştirir.
+    """
+    stamp = os.stat(path).st_mtime_ns
+    cached = _VERSION_CACHE.get(path)
+    if cached and cached[0] == stamp:
+        return cached[1]
+    with open(path, 'rb') as handle:
+        version = hashlib.sha256(handle.read()).hexdigest()[:12]
+    _VERSION_CACHE[path] = (stamp, version)
+    return version
+
+
+def mail_order_css_url():
+    """Mail Order stil dosyasının sürümlü adresi (göreli, aynı köken: CSP style-src 'self')."""
+    return '%s?v=%s' % (MAIL_ORDER_CSS_PATH, static_file_version(MAIL_ORDER_CSS_FILE))
