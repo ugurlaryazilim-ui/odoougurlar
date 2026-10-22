@@ -3,3 +3,4 @@ from . import test_rule_engine
 from . import test_campaign_workflow
 from . import test_metrics_archiving
 from . import test_sync_writes
+from . import test_log_retention
