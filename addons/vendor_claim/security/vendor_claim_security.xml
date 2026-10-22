@@ -11,12 +11,20 @@
             <field name="category_id" ref="module_category_vendor_claim"/>
         </record>
 
-        <!-- Tüm çalışanlar (base.group_user) kayıt açıp ilerletir, silemez.
-             Yönetici: silme, her durum geçişi (düzeltme), ayarlar -->
+        <!-- Kullanıcı: kayıt açar ve ilerletir, silemez. Erişim yalnız bu gruba/yöneticiye verilir
+             (base.group_user'a BAĞLANMAZ: ayrı ayrı izin verilebilsin; yükseltmede mevcut iç kullanıcılara
+             migrations/19.0.1.3.0 bir kez ekler) -->
+        <record id="group_vendor_claim_user" model="res.groups">
+            <field name="name">Kullanıcı</field>
+            <field name="privilege_id" ref="privilege_vendor_claim"/>
+            <field name="implied_ids" eval="[(4, ref('base.group_user'))]"/>
+        </record>
+
+        <!-- Yönetici: silme, her durum geçişi (düzeltme), ayarlar -->
         <record id="group_vendor_claim_manager" model="res.groups">
             <field name="name">Yönetici</field>
             <field name="privilege_id" ref="privilege_vendor_claim"/>
-            <field name="implied_ids" eval="[(4, ref('base.group_user'))]"/>
+            <field name="implied_ids" eval="[(4, ref('group_vendor_claim_user'))]"/>
         </record>
 
         <record id="base.group_system" model="res.groups">

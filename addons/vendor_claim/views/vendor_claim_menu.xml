@@ -6,23 +6,27 @@
     </record>
 
     <menuitem id="menu_vendor_claim_root"
+              groups="group_vendor_claim_user"
               name="Tedarikçi İnceleme"
               web_icon="vendor_claim,static/description/icon.png"
               sequence="96"/>
 
     <menuitem id="menu_vendor_claim_mobile"
+              groups="group_vendor_claim_user"
               name="İnceleme Mobil"
               parent="menu_vendor_claim_root"
               action="action_vendor_claim_mobile"
               sequence="5"/>
 
     <menuitem id="menu_vendor_claim_records"
+              groups="group_vendor_claim_user"
               name="İnceleme Kayıtları"
               parent="menu_vendor_claim_root"
               action="action_vendor_claim"
               sequence="10"/>
 
     <menuitem id="menu_vendor_claim_analysis"
+              groups="group_vendor_claim_user"
               name="Analiz"
               parent="menu_vendor_claim_root"
               action="action_vendor_claim_analysis"
