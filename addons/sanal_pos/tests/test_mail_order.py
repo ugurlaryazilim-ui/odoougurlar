@@ -247,6 +247,8 @@ class TestProviderSession(MailOrderCase):
         self.assertEqual(item['quantity'], 1)
         self.assertEqual(item['amount'], 9000.0)
         self.assertIn(payment.invoice_no, item['name'])
+        # Canlı: description'sız kalem ERR10128 (violatorParam=ORDERITEMS:description)
+        self.assertIn(payment.invoice_no, item['description'])
         # productCode verilmezse Paratika üretir; verilirse tekil olmalı (yeniden denemede çakışır)
         self.assertNotIn('productCode', item)
 
@@ -265,6 +267,12 @@ class TestProviderSession(MailOrderCase):
         self.assertEqual(res['error_code'], 'ERR10010')
         self.assertIn('zorunlu bir alanın boş', res['error_message'])
         self.assertIn('CUSTOMEREMAIL', res['error_message'])
+
+    def test_hata_mesaji_kalem_alani_iki_nokta(self):
+        self.mock.queue('SESSIONTOKEN', err_body(
+            'ERR10128', 'Geçersiz parametre değeri', violatorParam='ORDERITEMS:description'))
+        res = self.env[PROVIDER].create_session(self.sending_mo())
+        self.assertIn('(alan: ORDERITEMS:description)', res['error_message'])
 
     def test_hata_mesaji_ihlal_eden_alan_sanitize(self):
         # violatorParam sağlayıcıdan gelir; yalnız parametre adı biçimi kabul edilir
