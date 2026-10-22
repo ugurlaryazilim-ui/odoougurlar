@@ -74,3 +74,27 @@ class TestVendorClaimAccess(VcCase):
         self.assertNotIn(inactive, group.user_ids)
         # ikinci çalıştırmada eklenecek kimse yok (idempotent)
         self.assertFalse(module.grant_internal_users(self.env))
+
+    def test_overdue_activity_only_for_claim_user(self):
+        claim = self.make_claim()
+        claim.action_send_to_vendor()
+        claim.sudo().write({'sent_at': self.ago(days=20), 'user_id': self.plain.id})
+        self.Claim.sudo()._cron_overdue_alerts()
+        self.assertTrue(claim.overdue_notified)
+        self.assertFalse(claim.activity_ids)   # grubu olmayan sorumluya görev düşmez
+        claim2 = self.make_claim()
+        claim2.action_send_to_vendor()
+        claim2.sudo().write({'sent_at': self.ago(days=20), 'user_id': self.user.id})
+        self.Claim.sudo()._cron_overdue_alerts()
+        self.assertEqual(claim2.activity_ids.user_id, self.user)
+
+    def test_responsible_domain_limits_to_claim_users(self):
+        domain = self.Claim._claim_user_domain()
+        found = self.env['res.users'].search(domain)
+        self.assertIn(self.user, found)
+        self.assertIn(self.manager, found)
+        self.assertNotIn(self.plain, found)
+        # mevcut sorumlu grubu olmasa da kayıt okunup yazılabilir (form bozulmaz)
+        claim = self.make_claim()
+        claim.sudo().user_id = self.plain
+        self.assertEqual(claim.sudo().user_id, self.plain)

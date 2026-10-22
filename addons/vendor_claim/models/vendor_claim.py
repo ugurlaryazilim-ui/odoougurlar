@@ -45,7 +45,7 @@ class VendorClaim(models.Model):
 
     name = fields.Char(string='Takip No', required=True, copy=False, readonly=True, default='Yeni', index=True)
     user_id = fields.Many2one('res.users', string='Sorumlu', default=lambda self: self.env.user,
-                              tracking=True, index=True)
+                              tracking=True, index=True, domain=lambda self: self._claim_user_domain())
     company_id = fields.Many2one('res.company', string='Şirket', default=lambda self: self.env.company,
                                  required=True)
 
@@ -465,6 +465,23 @@ class VendorClaim(models.Model):
             if loose:
                 loose.write({'res_model': claim._name, 'res_id': claim.id})
 
+    @api.model
+    def _claim_user_group(self):
+        # NEDEN: grup yükseltmeden önce DB'de yoktur; o durumda herkes uygun sayılır (eski davranış sürer)
+        return self.env.ref('vendor_claim.group_vendor_claim_user', raise_if_not_found=False)
+
+    @api.model
+    def _claim_user_domain(self):
+        """Sorumlu seçimi: yalnız Kullanıcı grubundaki (yönetici/admin zincirle dahil) iç kullanıcılar.
+        DIKKAT: yalnız seçim listesini daraltır; grubu sonradan kalkmış mevcut sorumlu kayıtta görünmeye devam eder."""
+        group = self._claim_user_group()
+        domain = [('share', '=', False)]
+        return domain + [('all_group_ids', 'in', group.ids)] if group else domain
+
+    def _is_claim_user(self, user):
+        group = self._claim_user_group()
+        return not group or group in user.all_group_ids
+
     def _is_claim_manager(self):
         return self.env.su or self.env.user.has_group('vendor_claim.group_vendor_claim_manager')
 
@@ -777,7 +794,8 @@ class VendorClaim(models.Model):
         claims = self.search([('is_overdue', '=', True), ('overdue_notified', '=', False)], limit=500)
         for claim in claims:
             user = claim.user_id or claim.create_uid
-            if user and user.active and not user.share:
+            # Sorumlunun grubu sonradan kalkmışsa aktivite atanmaz (göremeyeceği kayıt için görev düşmesin)
+            if user and user.active and not user.share and self._is_claim_user(user):
                 claim.activity_schedule(
                     'mail.mail_activity_data_todo', user_id=user.id,
                     summary=_('Tedarikçide %s günü geçti') % days,
