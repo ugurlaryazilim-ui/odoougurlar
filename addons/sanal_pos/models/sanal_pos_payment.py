@@ -104,13 +104,25 @@ AMBIGUOUS_MSG = ("Paratika'da birden fazla aday link bulundu; yönetici Paratika
 STALE_SENDING_MSG = "Link oluşturma işlemi yarıda kaldı; durum Paratika'dan uzlaştırılacak."
 SESSION_FAIL_MSG = 'Paratika yanıt vermedi; kart sayfası açılamadı. Tekrar deneyebilirsiniz.'   # KK-12
 MAIL_ORDER_PAY_PATH = '/sanal_pos/mail_order/pay/%d'     # kart sayfası rotası (G4)
-MAIL_ORDER_EXPIRY_HOURS = 1                              # oturum süresi sabit 1 saat (SESSIONEXPIRY=1h)
+# Oturum süresi (SESSIONEXPIRY bundan üretilir) ve aynı MPID'yi yeniden kullanma penceresi (K-15)
+MAIL_ORDER_EXPIRY_HOURS = 1
 # Sonuç sayfası yenilense de ödeme başına en çok bu aralıkla bir QUERYTRANSACTION (tasarım §5.2)
 MAIL_ORDER_RESULT_MIN_INTERVAL = timedelta(seconds=10)
 # Sağlayıcı mesajının kullanıcıya doğrudan gösterildiği hata kodları (Türkçe, yapılandırma/ret);
 # diğerleri (zaman aşımı, HTTP, çözülemeyen yanıt) tek genel mesajla gösterilir.
 SESSION_DIRECT_CODES = ('CONFIG', 'RETURNURL')
 STALE_SENDING_MO_MSG = 'Mail order oturumu açılamadı (istek yarıda kaldı). Tekrar deneyebilirsiniz.'
+# K-15: Paratika oturumu hâlâ canlı olan kapalı/hatalı mail order (aynı MPID ile yeniden açılır)
+LIVE_MO_LINK_MSG = ("Bu faturanın mail order oturumu Paratika'da %s saatine kadar geçerli; o saate "
+                    'kadar link oluşturulamaz. Yeni deneme için "Mail Order" menüsünü kullanın.')
+MO_REUSE_MISMATCH_MSG = ("Bu faturanın önceki mail order oturumu Paratika'da %s saatine kadar geçerli "
+                         've fatura tutarı/müşteri kodu değişmiş; aynı ödeme numarasıyla yeni oturum '
+                         'açılamaz. O saatten sonra tekrar deneyin.')
+MO_REUSE_PENDING_MSG = ("Önceki mail order denemesinde Paratika'da devam eden bir işlem var (banka "
+                        'doğrulaması bekliyor olabilir); yeni deneme açılmadı. Birkaç dakika sonra '
+                        'tekrar deneyin.')
+MO_REUSE_QUERY_FAILED_MSG = ("Önceki mail order denemesi Paratika'dan sorgulanamadı; yeni deneme "
+                             'açılmadı. Birazdan tekrar deneyin.')
 # G10: yeniden gönder / link iptali (KK-31, KK-32)
 CHANNEL_MSG = 'En az bir gönderim kanalı seçin.'                                         # KK-9
 RESEND_CHANNELS = ('sms', 'email')
@@ -250,7 +262,10 @@ class SanalPosPayment(models.Model):
     attempt_no = fields.Integer(string='Deneme No', default=1, copy=False)
     merchant_payment_id = fields.Char(
         string='Ödeme Numarası (MERCHANTPAYMENTID)', required=True, copy=False, index=True)
-    provider_token = fields.Char(string='Sağlayıcı Token', copy=False)
+    # G-8: mail order'da token ile Odoo dışında kart formu kurulabilir; RPC ile yalnız yönetici
+    # okur. Kod yolları sudo ile okur/yazar (_compute_link_url dahil).
+    provider_token = fields.Char(string='Sağlayıcı Token', copy=False,
+                                 groups='sanal_pos.group_sanal_pos_manager')
     link_url = fields.Char(string='Link Adresi', compute='_compute_link_url')
     sent_at = fields.Datetime(string='Gönderim Zamanı', copy=False)
     expires_at = fields.Datetime(string='Son Geçerlilik', copy=False)
@@ -330,14 +345,17 @@ class SanalPosPayment(models.Model):
         show = get_bool_param(self.env, 'sanal_pos.paratika_show_link_url', default=False)
         for rec in self:
             rec.link_url = False
+            # NEDEN: provider_token yönetici grubuna kısıtlı (G-8); link adresi (KK-17 ayarıyla)
+            # Sanal POS kullanıcısına da gösterilir, token sudo ile okunur.
+            token = rec.sudo().provider_token
             # NEDEN: mail order'da token bir HPP adresi değil, Direct POST oturumudur; adres olarak
             # gösterilmez (bkz. KARARLAR K-14).
-            if not show or not rec.provider_token or rec.payment_method == 'mail_order':
+            if not show or not token or rec.payment_method == 'mail_order':
                 continue
             if 'sanal.pos.provider.%s' % (rec.provider or '') not in self.env:
                 continue
             # Ö-E: adres kalıbı yalnız sağlayıcıda (create_link yanıtıyla aynı kaynak)
-            rec.link_url = rec._provider()._link_url(rec, rec.provider_token) or False
+            rec.link_url = rec._provider()._link_url(rec, token) or False
 
     @api.depends('state', 'expires_at', 'payment_method')
     def _compute_can_resend(self):
@@ -413,8 +431,9 @@ class SanalPosPayment(models.Model):
 
     # ---------------------------------------------------------------- yeni link (G7, tasarım §6.1/§6.2)
     # Sihirbaz (wizard/payment_create_wizard.py) adım 1-6'yı yürütür; burada ortak kurallar ve
-    # dış çağrı sonrası adımlar (7-9) bulunur. ``sending`` kaydının başlangıç zamanı create_date'tir:
-    # G8 cron'u ``sending`` kaydı yalnız yaş eşiği + FOR UPDATE SKIP LOCKED ile almalıdır.
+    # dış çağrı sonrası adımlar (7-9) bulunur. ``sending`` kaydının başlangıç zamanı write_date'tir
+    # (``_sending_started_at``): G8 cron'u ``sending`` kaydı yalnız yaş eşiği + FOR UPDATE SKIP LOCKED
+    # ile almalıdır.
     @api.model
     def _check_sanal_pos_user(self):
         if not (self.env.su or self.env.user.has_group('sanal_pos.group_sanal_pos_user')):
@@ -437,12 +456,15 @@ class SanalPosPayment(models.Model):
         return (OPEN_MAIL_ORDER_MSG if payment_method == 'mail_order' else OPEN_LINK_MSG) % detail
 
     @api.model
-    def _new_link_blocker(self, invoice_no, confirm_prior_refund=False, refresh=False):
-        """Yeni link engeli mesajı (boş = engel yok). KK-19 > KK-18 > KK-20.
+    def _new_link_blocker(self, invoice_no, confirm_prior_refund=False, refresh=False,
+                          payment_method=None):
+        """Yeni link engeli mesajı (boş = engel yok). KK-19 > KK-18 > K-15 > KK-20.
 
         ORM ile ön kontrol (kullanıcıya erken ve ayrıntılı mesaj); asıl kilit DB'deki kısmi
         UNIQUE indekstir (``_invoice_open_uniq``). ``refresh`` yalnız oluşturma anında: süresi
         geçmiş 'Gönderildi' kayıtları için ``_refresh_before_new_link`` kancası çağrılır.
+        ``payment_method='link'``: Paratika oturumu canlı kapalı mail order varken link engellenir
+        (K-15; link yeni MPID alır, açık kart sekmesiyle birlikte çift tahsilat olabilirdi).
         """
         if not invoice_no:
             return ''
@@ -466,6 +488,10 @@ class SanalPosPayment(models.Model):
         if open_rec:
             creator = open_rec.user_id or open_rec.create_uid
             return self._open_link_message(creator.name, open_rec.create_date, open_rec.payment_method)
+        if payment_method == 'link':
+            live_mo = self._live_mail_order_prior(invoice_no)
+            if live_mo:
+                return LIVE_MO_LINK_MSG % live_mo._live_session_end_local()
         if unverified:
             return UNVERIFIED_PRIOR_MSG
         if not confirm_prior_refund and any(rec.state in REFUNDED_STATES for rec in records):
@@ -775,11 +801,16 @@ class SanalPosPayment(models.Model):
         self.check_access('read')
         self._check_card_page_open()
         rec = self.sudo()
-        installments = rec._call_provider_safely(
-            'query_installments', 'taksit sorgusunda').get('options') or []
+        form_action = rec._provider().direct_post_url(rec)
+        # NEDEN: adres izin listesi dışındaysa sayfa zaten hata gösterir; Paratika'ya (yanlış
+        # yapılandırılmış adrese) kimlik bilgisiyle istek de gitmesin (G-1).
+        installments = []
+        if form_action:
+            installments = rec._call_provider_safely(
+                'query_installments', 'taksit sorgusunda').get('options') or []
         return {
             'payment_id': rec.id,
-            'form_action': rec._provider().direct_post_url(rec),
+            'form_action': form_action,
             'invoice_no': rec.invoice_no,
             'customer_name': rec.customer_name,
             'amount': rec.amount,
@@ -862,6 +893,94 @@ class SanalPosPayment(models.Model):
                           'Sonuç otomatik izlenecek.'), 'warning'
         self._sp_commit()
         return self._notification_action(text, kind)
+
+    # -- K-15: aynı MPID ile yeni deneme
+    @api.model
+    def _live_mail_order_prior(self, invoice_no):
+        """Faturanın Paratika oturumu hâlâ canlı olabilecek, ödenmemiş kapalı/hatalı mail order'ı.
+
+        NEDEN: "Kapat" Paratika oturumunu sonlandıramaz (iptal API'si yok); açık bir kart/banka
+        sekmesi oturum bitene kadar ödeme yapabilir. Yeni deneme bu yüzden aynı MERCHANTPAYMENTID
+        ile açılır: Paratika aynı MPID'de ikinci başarılı satışa izin vermez (bkz. KARARLAR K-15).
+        ``sent_at`` son başarılı SESSIONTOKEN zamanıdır; oturum açılamayan denemede korunur.
+        """
+        if not invoice_no:
+            return self.sudo().browse()
+        since = fields.Datetime.now() - timedelta(hours=MAIL_ORDER_EXPIRY_HOURS)
+        return self.sudo().search([
+            ('invoice_no', '=', invoice_no), ('payment_method', '=', 'mail_order'),
+            ('state', 'in', ('expired', 'error')), ('paid_at', '=', False),
+            ('sent_at', '>', since)], order='id desc', limit=1)
+
+    def _live_session_end_local(self):
+        self.ensure_one()
+        return self._format_local(self.sent_at + timedelta(hours=MAIL_ORDER_EXPIRY_HOURS))
+
+    def _reopen_mail_order(self, values):
+        """K-15: canlı oturumlu eski denemeyi aynı MPID ile 'Gönderiliyor'a döndürür.
+
+        Önce QUERYTRANSACTION: onaylı/incelemeli işlem varsa token ALINMAZ, kayıt paid/review olur
+        ve öyle döner (çağıran ``state != 'sending'`` ise oturum açmaz). Bekleyen işlem, yanıtsız
+        sorgu ya da değişmiş tutar/müşteri kodu UserError'dur (kayıt değişmez). Yalnız red/boş
+        sonuçta kayıt yeniden açılır. Çağıran commit eder (``_create_sending_payment``).
+        """
+        self.ensure_one()
+        rec = self.sudo()
+        # DIKKAT: Paratika aynı MPID'de yeni token için amount/customer/currency/sessionType/returnUrl
+        # aynılığını şart koşar; müşteri alanları bu yüzden önceki denemeden korunur.
+        if (float_compare(values['amount'], rec.amount, precision_digits=2) != 0
+                or (values.get('customer_code') or False) != (rec.customer_code or False)):
+            raise UserError(MO_REUSE_MISMATCH_MSG % rec._live_session_end_local())
+        if not rec._lock_for_provider_call():
+            raise UserError(BUSY_MSG)
+        rec.invalidate_recordset()
+        if rec.state not in ('expired', 'error') or rec.paid_at:
+            raise UserError(self._new_link_blocker(rec.invoice_no) or BUSY_MSG)
+        result = rec._call_provider_safely('query_status', 'durum sorgusunda')
+        if not result.get('ok'):
+            raise UserError(MO_REUSE_QUERY_FAILED_MSG)
+        transactions = result.get('transactions') or []
+        approved, in_review, pending, failed, others = self._classify(transactions)
+        now = fields.Datetime.now()
+        if approved or in_review or others:
+            # NEDEN: geç ödeme kuralı (REVIEW_LATE) burada uygulanmaz: aynı MPID'de başka deneme
+            # yoktur, ödeme bu denemenindir; tutar/para birimi farkı yine incelemeye düşer.
+            rec.write({'last_checked_at': now})
+            rec._apply_open_status(transactions, now)
+            return rec
+        if pending:
+            # NEDEN: kapalı kayıt periyodik cron'da sorgulanmaz; bayrak sonucu toplatır. UserError
+            # işlemi geri alacağı için bayrak önce kalıcılaştırılır (_refresh_before_new_link gibi).
+            rec.write({'sync_requested': True, 'last_checked_at': now})
+            self._trigger_sync_cron(flagged=True)
+            self._sp_commit()
+            raise UserError(MO_REUSE_PENDING_MSG)
+        try:
+            with self.env.cr.savepoint():
+                rec.write({
+                    'state': 'sending', 'provider_token': False, 'expires_at': False,
+                    'last_error_code': False, 'last_error_message': False,
+                    'failed_attempt_count': len(failed), 'last_checked_at': now,
+                    'user_id': values.get('user_id') or self.env.uid,
+                })
+                rec.flush_recordset()
+        except pg_errors.UniqueViolation:
+            raise UserError(self._open_link_message_sql(rec.invoice_no)) from None
+        rec._post_note('Aynı ödeme numarasıyla (%s) yeni mail order denemesi: %s. Tutar ve müşteri '
+                       'bilgileri önceki denemeyle aynı kalır.' % (
+                           rec.merchant_payment_id, self.env.user.name or '-'))
+        return rec
+
+    def _mail_order_reuse_notification(self):
+        """K-15: yeniden açma yerine eski oturumda ödeme bulunduğunda kullanıcıya bildirim."""
+        self.ensure_one()
+        if self.state == 'paid':
+            return self._notification_action(
+                'Önceki mail order oturumunda ödeme alınmış; kayıt Ödendi olarak güncellendi, yeni '
+                'oturum açılmadı.', 'success')
+        return self._notification_action(
+            'Önceki mail order oturumunda işlem bulundu ve incelemeye alındı; yeni oturum açılmadı.',
+            'warning')
 
     def action_new_link(self):
         """'Yeni Link Oluştur' (REUSABLE_STATES): sihirbazı faturayı yeniden getirip bu kaydın
@@ -1396,11 +1515,15 @@ class SanalPosPayment(models.Model):
             if self.payment_method == 'mail_order':
                 # NEDEN: personel kart sayfasında müşteriyle birlikte olduğundan reddin gerçek nedeni
                 # (yetersiz limit vb.) lazım; link'te müşteri HPP'de görür (bkz. KARARLAR K-14).
-                last = [t for t in transactions if t.get('kind') == 'sale'
-                        and t.get('status') in ('failed', 'cancelled') and t.get('error_code')][-1:]
-                if last:
-                    values.update(last_error_code=last[0]['error_code'],
-                                  last_error_message=(last[0].get('error_message') or '')[:250]
+                candidates = [t for t in transactions if t.get('kind') == 'sale'
+                              and t.get('status') in ('failed', 'cancelled') and t.get('error_code')]
+                if candidates:
+                    # NEDEN (Ö-4): Paratika liste sırası belgesiz; en yeni işlem zamanı seçilir,
+                    # zaman yoksa/eşitse liste sırasındaki sonuncusu.
+                    _index, last = max(enumerate(candidates),
+                                       key=lambda p: (p[1].get('time') or datetime.min, p[0]))
+                    values.update(last_error_code=last['error_code'],
+                                  last_error_message=(last.get('error_message') or '')[:250]
                                   or values['last_error_message'])
         elif self.state == 'sent':
             values.update(last_error_code=False, last_error_message=False)
@@ -1434,6 +1557,17 @@ class SanalPosPayment(models.Model):
         self._set_review('REVIEW_LATE', ('%s %s' % (prefix, reason or '')).strip(), tran, approved)
 
     # ---------------------------------------------------------------- belirsiz uzlaştırma (KK-16)
+    def _sending_started_at(self):
+        """'Gönderiliyor'a giriş zamanı (bayat-sending yaşı).
+
+        NEDEN: K-15 ile yeniden açılan mail order'ın create_date'i eski denemenindir; create_date'e
+        bakmak commit ile kilit arasındaki kaydı "yarıda kaldı" sayıp Hata yapardı. 'sending'e
+        giriş (create ya da yeniden açma yazımı) write_date'i günceller; sending'deyken kayda
+        başka yazım yaşı yalnız uzatır (güvenli taraf). Yeni stored alan gerekmez.
+        """
+        self.ensure_one()
+        return self.write_date or self.create_date
+
     def _mark_stale_sending(self):
         """5 dakikadan eski 'Gönderiliyor' (yarıda kalmış istek) -> 'Belirsiz'
         (mail order'da 'Hata')."""
@@ -1595,7 +1729,7 @@ class SanalPosPayment(models.Model):
         if (rec.state not in OPEN_STATES + ('review', 'refund_pending')
                 and rec.create_date < now - CHECK_STATUS_MAX_AGE):
             raise UserError('30 günden eski kapanmış kayıt sorgulanamaz.')
-        if rec.state == 'sending' and rec.create_date >= now - STALE_SENDING_AGE:
+        if rec.state == 'sending' and rec._sending_started_at() >= now - STALE_SENDING_AGE:
             raise UserError(BUSY_MSG)
         if not rec._lock_for_provider_call():
             raise UserError(BUSY_MSG)
@@ -2031,8 +2165,10 @@ class SanalPosPayment(models.Model):
         ids = []
         for query, params in (
             (flagged, []),
-            ("SELECT id FROM sanal_pos_payment WHERE state = 'sending' AND create_date < %s "
-             'ORDER BY id LIMIT %s', [stale_before]),
+            # DIKKAT: yaş write_date'ten (bkz. _sending_started_at); create_date K-15 ile yeniden
+            # açılan kayıtta eskidir
+            ("SELECT id FROM sanal_pos_payment WHERE state = 'sending' "
+             'AND COALESCE(write_date, create_date) < %s ORDER BY id LIMIT %s', [stale_before]),
             # pending_approval: tetik kaybolsa da onay bekleyen iade her turda sorgulanır (K-12)
             ("SELECT DISTINCT payment_id FROM sanal_pos_refund WHERE state IN ('unknown', "
              "'pending_approval') OR (state = 'processing' AND create_date < %s) "
@@ -2067,7 +2203,8 @@ class SanalPosPayment(models.Model):
         if self.sync_requested and recent:
             return False  # G-1 hız sınırı: bayrak korunur, ertelenmiş tetik/periyodik cron alır
         if self.state == 'sending':
-            if not self.create_date or self.create_date >= now - STALE_SENDING_AGE:
+            started = self._sending_started_at()
+            if not started or started >= now - STALE_SENDING_AGE:
                 return False  # G7 isteği sürüyor olabilir; bayrak korunur
             self._mark_stale_sending()
         if self.state == 'unknown':

@@ -26,6 +26,7 @@ from .common import (
     PASSWORD, TEST_URL_PREFIX, LIVE_URL_PREFIX, RawResponse, SanalPosCase, connection_exc, err_body,
     installment_body, invoice_rows, ok_body, timeout_exc, tran,
 )
+from ..models.sanal_pos_payment import BUSY_MSG
 
 PROVIDER = 'sanal.pos.provider.paratika'
 MO_WIZARD = 'sanal.pos.mail.order.wizard'
@@ -297,11 +298,20 @@ class TestProviderSession(MailOrderCase):
         self.assertNoParatikaCalls()
 
     def test_direct_post_url_ozel_adres_ve_token_yok(self):
-        self.env['ir.config_parameter'].sudo().set_param(
-            'sanal_pos.paratika_test_url', 'https://sandbox.example.test/api/v2/')
+        # G-1: ayardaki adres kartın gideceği yerdir; izin listesi (DIRECT_POST_HOSTS) dışı -> None
+        params = self.env['ir.config_parameter'].sudo()
         payment = self.make_mail_order(provider_token='TOK-C')
+        for url in ('https://sandbox.example.test/api/v2/', 'http://test.paratika.com.tr/paratika/api/v2',
+                    'https://test.paratika.com.tr:8443/paratika/api/v2',
+                    'https://x@test.paratika.com.tr/paratika/api/v2',
+                    'https://test.paratika.com.tr.evil.example/api/v2'):
+            with self.subTest(url=url):
+                params.set_param('sanal_pos.paratika_test_url', url)
+                self.assertIsNone(self.env[PROVIDER].direct_post_url(payment))
+        # olumlu çapa: izinli host, özel yol, sondaki '/' kırpılır
+        params.set_param('sanal_pos.paratika_test_url', 'https://test.paratika.com.tr/ozel/api/v2/')
         self.assertEqual(self.env[PROVIDER].direct_post_url(payment),
-                         'https://sandbox.example.test/api/v2/post/sale3d/TOK-C')
+                         'https://test.paratika.com.tr/ozel/api/v2/post/sale3d/TOK-C')
         self.assertIsNone(self.env[PROVIDER].direct_post_url(
             self.make_mail_order(provider_token=False, invoice_no='NOTOK')))
 
@@ -403,18 +413,59 @@ class TestCardMasking(MailOrderCase):
                 self.assertNotIn('4355', masked)
                 self.assertNotIn('5508', masked)
 
-    def test_mask_bozulmayanlar(self):
+    def test_mask_g5_kacan_bicimler(self):
+        # G-5 (güvenlik PoC'leri): harfe/alt çizgiye bitişik, nokta/artı/NBSP/çift boşluk ayraçlı
+        # ve URL kodlu PAN da maskelenir
+        cases = ('x4355084355084358', 'card_4355084355084358', '4355084355084358TL',
+                 '4355.0843.5508.4358', '4355  0843  5508  4358', '4355 0843 5508 4358',
+                 '4355+0843+5508+4358', 'pan%3D4355084355084358', 'pan=4355%200843%205508%204358',
+                 '4355%2D0843%2D5508%2D4358', 'a 9000.00 4355 0843 5508 4358 b')
+        for text in cases:
+            with self.subTest(text=text):
+                masked = self.mask(text)
+                self.assertIn('****4358', masked)
+                for part in ('4355', '0843', '5508'):
+                    self.assertNotIn(part, masked)
+                self.assertEqual(self.mask(masked), masked)       # idempotent
+
+    def test_mask_harfe_bitisik_mpid_anahtarliysa_korunur(self):
+        # NEDEN (G-5 sonrası güncelleme): harfe bitişik PAN artık maskelendiği için serbest metindeki
+        # 'UGR<13 hane Luhn>-1' de maskelenir; günlükte anahtarlı MPID (JSON/form) korunur.
         valid13 = luhn_complete('422222222222')
+        mpid = 'UGR%s-1' % valid13
+        for text in (json.dumps({'merchantPaymentId': mpid}), 'MERCHANTPAYMENTID=%s&x=1' % mpid):
+            with self.subTest(text=text):
+                self.assertEqual(self.mask(text), text)
+        self.assertNotIn(valid13, self.mask('serbest %s' % mpid))          # olumlu çapa
+
+    def test_mask_response_kart_sahibi_bin_son4_anahtarlari(self):
+        # G-4: Paratika yanıtındaki kart sahibi adı / BIN / pan benzeri alanlar günlükte '***'
+        data = {'transactionList': [{
+            'cardHolderName': 'AHMET YILMAZ', 'nameOnCard': 'AHMET', 'cardOwner': 'AHMET',
+            'panFirst6': '435508', 'panLast4': '4358', 'maskedPan': '435508******4358',
+            'cardBin': 435508, 'bin': '435508', 'company': 'UGURLAR', 'amount': '9000.00',
+            'pgTranId': 'PG-1', 'merchantPaymentId': 'UGR1-1'}]}
+        text = self.env[PROVIDER]._mask_response(data)
+        row = json.loads(text)['transactionList'][0]
+        for key in ('cardHolderName', 'nameOnCard', 'cardOwner', 'panFirst6', 'panLast4',
+                    'maskedPan', 'cardBin', 'bin'):
+            self.assertEqual(row[key], '***', key)
+        for key in ('company', 'amount', 'pgTranId', 'merchantPaymentId'):          # olumlu çapa
+            self.assertEqual(row[key], data['transactionList'][0][key], key)
+        for needle in ('AHMET', '435508'):
+            self.assertNotIn(needle, text)
+
+    def test_mask_bozulmayanlar(self):
         valid12 = luhn_complete('43550843550')
-        self.assertEqual(len(valid13), 13)
         self.assertEqual(len(valid12), 12)
         cases = {
             'luhn_gecersiz_uzun': 'ref 4355084355084359 bitti',
             'on_iki_hane': 'no %s bitti' % valid12,
-            'mpid_harfe_bitisik': 'UGR%s-1' % valid13,
             'pgTranRefId_json': json.dumps({'pgTranRefId': LEAK_PAN, 'a': 1}),
             'pgTranRefId_urlencoded': 'pgTranRefId=%s&x=1' % LEAK_PAN,
             'tarih_zaman': 'created 2026-10-22 13:45:10',
+            'tutar_ve_tarih': 'amount=9000.00&date=22.10.2026',
+            'yuzde_kodlu_kisa': 'a%20b%2012345',
             'bos': '',
         }
         for name, text in cases.items():
@@ -477,6 +528,17 @@ class TestMenuAndAccess(MailOrderCase):
         self.assertTrue(rules)
         for rule in rules:
             self.assertEqual(rule.domain_force.replace(' ', ''), "[('create_uid','=',user.id)]")
+
+    def test_g8_provider_token_yalniz_yonetici_okur_link_adresi_calisir(self):
+        payment = self.make_mail_order()
+        with self.assertRaises(AccessError):
+            payment.with_user(self.user_sp).read(['provider_token'])
+        self.assertEqual(payment.with_user(self.user_mgr).read(['provider_token'])[0]['provider_token'],
+                         payment.provider_token)                           # olumlu çapa
+        # kardeş yol: link adresi (KK-17 ayarı açıkken) Sanal POS kullanıcısına hâlâ hesaplanır
+        self.set_setting('paratika_show_link_url', True)
+        link = self.make_payment(invoice_no='G8-LINK')
+        self.assertIn(link.provider_token, link.with_user(self.user_sp).link_url or '')
 
     def test_baska_kullanici_sihirbazi_okuyamaz(self):
         wiz = self.mail_order_wizard(user=self.user_sp)
@@ -613,9 +675,12 @@ class TestCreateMailOrder(MailOrderCase):
 
     def test_kk4_ikinci_deneme_numarasi(self):
         first = self.create_mail_order()
-        first.sudo().write({'state': 'expired'})
+        # NEDEN: Paratika oturumu (sent_at + 1 saat) bitmiş olmalı; canlıysa aynı MPID yeniden
+        # kullanılır (K-15, TestMpidReuse)
+        first.sudo().write({'state': 'expired', 'sent_at': self.past(hours=2)})
         first.flush_recordset()
         second = self.create_mail_order()
+        self.assertNotEqual(second, first)
         self.assertEqual((second.attempt_no, second.merchant_payment_id), (2, '%s-2' % INV_NO))
         self.assertEqual(self.mock.calls_for('SESSIONTOKEN')[-1].params['MERCHANTPAYMENTID'], '%s-2' % INV_NO)
 
@@ -716,7 +781,9 @@ class TestCreateMailOrder(MailOrderCase):
 class TestDuplicateBlocks(MailOrderCase):
 
     def free(self, payment):
-        payment.sudo().write({'state': 'expired'})
+        # NEDEN: Paratika oturumu da bitmiş sayılır (sent_at pencere dışı); canlı oturumlu kapalı
+        # mail order link'i engeller (K-15, TestMpidReuse.test_canli_mo_link_engeller)
+        payment.sudo().write({'state': 'expired', 'sent_at': self.past(hours=2)})
         payment.flush_recordset()
 
     def test_a_acik_link_mail_orderi_engeller(self):
@@ -811,6 +878,158 @@ class TestDuplicateBlocks(MailOrderCase):
         self.assertIn(OPEN_MO, str(ctx.exception))
         self.assertEqual(self.link_calls(), 0)
         self.assertEqual(len(self.payments()), 1)
+
+
+# ======================================================================================
+# K-15 (Ö-3/G-2): "Kapat" Paratika oturumunu bitiremez -> yeni deneme aynı MPID ile
+# ======================================================================================
+@tagged('post_install', '-at_install', 'sanal_pos')
+class TestMpidReuse(MailOrderCase):
+
+    def closed(self):
+        """Kart sayfası açılmış (token verilmiş) ve personelce kapatılmış deneme."""
+        payment = self.create_mail_order()
+        payment.with_user(self.user_sp).action_mail_order_close()
+        self.assertEqual(self.reload(payment).state, 'expired')
+        self.old_token = payment.sudo().provider_token
+        self.mock.calls.clear()
+        return payment
+
+    def assertUnchanged(self, payment, state='expired'):
+        self.reload(payment)
+        self.assertEqual(len(self.payments()), 1)
+        self.assertEqual(payment.state, state)
+        self.assertEqual(payment.sudo().provider_token, self.old_token)
+        self.assertEqual(self.mock.count('SESSIONTOKEN'), 0)
+
+    def test_kapat_sonra_ayni_mpid(self):
+        payment = self.closed()
+        self.assertIsNone(self.mo_attempt())
+        self.assertEqual(self.payments(), payment)                       # yeni kayıt yok
+        self.reload(payment)
+        self.assertEqual((payment.state, payment.attempt_no, payment.merchant_payment_id),
+                         ('sent', 1, '%s-1' % INV_NO))
+        self.assertNotEqual(payment.sudo().provider_token, self.old_token)
+        # önce eski MPID sorgulanır, sonra aynı MPID ile tek SESSIONTOKEN
+        self.assertEqual(self.mock.actions, ['QUERYTRANSACTION', 'SESSIONTOKEN'])
+        call = self.mock.last('SESSIONTOKEN')
+        self.assertEqual(call.params['MERCHANTPAYMENTID'], '%s-1' % INV_NO)
+        self.assertEqual(call.params['AMOUNT'], '9000.00')
+        self.assertEqual(call.probe['rows'].get('%s-1' % INV_NO), 'sending')
+        self.assertGreaterEqual(call.probe['commits'], 1, 'dış çağrıdan önce kayıt commit edilmeli')
+        self.assertIn('Aynı ödeme numarasıyla', self.chatter(payment))
+
+    def test_eski_mpidde_onay_token_yok_odendi(self):
+        payment = self.closed()
+        self.set_query_transactions(tran('AP', 'SALE', '9000.00', 'PG-OLD'))
+        result = self.mail_order_wizard().action_create_mail_order()
+        self.assertEqual(self.mock.count('SESSIONTOKEN'), 0)
+        self.assertEqual(self.reload(payment).state, 'paid')
+        self.assertEqual(self.payments(), payment)
+        self.assertEqual(result['tag'], 'display_notification')
+        self.assertIn('Ödendi', result['params']['message'])
+        # kardeş: tutar farklı onay -> inceleme, yine token yok
+        other = self.new_invoice('REUSE-RV')
+        self.set_query_transactions()
+        self.create_mail_order(invoice_no=other)
+        rv = self.last_payment(other)
+        rv.with_user(self.user_sp).action_mail_order_close()
+        self.set_query_transactions(tran('AP', 'SALE', '8000.00', 'PG-RV'))
+        self.assertIsNone(self.mo_attempt(invoice_no=other))
+        self.assertEqual(self.reload(rv).state, 'review')
+        self.assertEqual(self.mock.count('SESSIONTOKEN'), 1)              # yalnız rv'nin ilk oturumu
+
+    def test_bekleyen_islem_engeller(self):
+        payment = self.closed()
+        self.set_query_transactions(tran('IP', 'SALE', '9000.00', 'PG-IP'))
+        self.assertIn('devam eden bir işlem', self.mo_attempt() or '')
+        self.assertUnchanged(payment)
+        self.assertTrue(payment.sync_requested)               # sonuç cron'la toplanır (commit'li)
+
+    def test_sorgu_yanitsiz_kaydi_degistirmez(self):
+        payment = self.closed()
+        self.mock.queue('QUERYTRANSACTION', timeout_exc())
+        self.assertIn('sorgulanamadı', self.mo_attempt() or '')
+        self.assertUnchanged(payment)
+        self.assertEqual(self.mock.count('QUERYTRANSACTION'), 1)
+
+    def test_tutar_farkli_engel(self):
+        payment = self.closed()
+        self.set_invoice(invoice_rows(total='9500.00'))
+        message = self.mo_attempt() or ''
+        self.assertIn('tutarı/müşteri kodu değişmiş', message)
+        self.assertIn(payment._live_session_end_local(), message)
+        self.assertUnchanged(payment)
+        self.assertEqual(self.mock.count('QUERYTRANSACTION'), 0)
+
+    def test_pencere_bitince_yeni_mpid(self):
+        payment = self.closed()
+        payment.sudo().write({'sent_at': self.past(minutes=61)})
+        payment.flush_recordset()
+        self.assertIsNone(self.mo_attempt())
+        new = self.last_payment()
+        self.assertNotEqual(new, payment)
+        self.assertEqual((new.attempt_no, new.merchant_payment_id), (2, '%s-2' % INV_NO))
+        self.assertEqual(self.mock.last('SESSIONTOKEN').params['MERCHANTPAYMENTID'], '%s-2' % INV_NO)
+        self.assertEqual(self.reload(payment).state, 'expired')
+
+    def test_oturum_hatasi_sonrasi_ayni_mpid(self):
+        payment = self.closed()
+        sent_at = payment.sent_at
+        self.mock.queue('SESSIONTOKEN', err_body('ERR77777', 'Beklenmeyen sorun'))
+        self.assertIsNone(self.mo_attempt())
+        self.reload(payment)
+        self.assertEqual(self.payments(), payment)
+        self.assertEqual(payment.state, 'error')
+        self.assertEqual(payment.sent_at, sent_at)        # son verilen token'ın zamanı korunur
+        # sonraki deneme yine aynı kayıt / aynı MPID
+        self.assertIsNone(self.mo_attempt())
+        self.assertEqual((self.reload(payment).state, len(self.payments())), ('sent', 1))
+        mpids = [c.params['MERCHANTPAYMENTID'] for c in self.mock.calls_for('SESSIONTOKEN')]
+        self.assertEqual(mpids, ['%s-1' % INV_NO] * 2)
+
+    def test_canli_mo_link_engeller(self):
+        payment = self.closed()
+        message = self.link_attempt() or ''
+        self.assertIn('saatine kadar geçerli', message)
+        self.assertIn(payment._live_session_end_local(), message)
+        self.assertEqual(self.link_calls(), 0)
+        wiz = self.env[LINK_WIZARD].with_user(self.user_sp).create({'invoice_no': INV_NO})
+        wiz.action_fetch_invoice()
+        self.assertIn('saatine kadar geçerli', wiz.blocking_message or '')
+        # mail order sihirbazı engellenmez (aynı MPID ile yeniden açar)
+        self.assertFalse(self.mail_order_wizard().blocking_message)
+        # olumlu çapa: oturum bitince link açılır
+        payment.sudo().write({'sent_at': self.past(hours=2)})
+        payment.flush_recordset()
+        self.assertIsNone(self.link_attempt())
+
+    def test_kilit_mesgul_busy(self):
+        payment = self.closed()
+        Model = type(self.env['sanal.pos.payment'])
+        with patch.object(Model, '_lock_for_provider_call', return_value=False):
+            message = self.mo_attempt() or ''
+        self.assertEqual(message, BUSY_MSG)
+        self.assertUnchanged(payment)
+        self.assertEqual(self.mock.calls, [])
+
+    def test_yeniden_acilan_kayit_bayat_sayilmaz(self):
+        # B: commit ile kilit arasında yeniden açılmış kayıt; create_date eski denemenin zamanı
+        payment = self.closed()
+        reopened = self.mail_order_wizard()._create_sending_payment('mail_order')
+        self.assertEqual((reopened, reopened.state), (payment, 'sending'))
+        self.env.cr.execute('UPDATE sanal_pos_payment SET create_date = %s WHERE id = %s',
+                            [self.past(hours=2), payment.id])
+        payment.invalidate_recordset()
+        self.run_cron(CRON_SYNC)
+        self.assertEqual(self.reload(payment).state, 'sending')
+        with self.assertRaises(UserError) as ctx:
+            payment.with_user(self.user_sp).action_check_status()
+        self.assertEqual(str(ctx.exception.args[0]), BUSY_MSG)
+        # olumlu çapa: yeniden açılma da 5 dk'dan eskiyse yarıda kalmış sayılır
+        self.set_create_date(payment, self.past(minutes=10))
+        self.run_cron(CRON_SYNC)
+        self.assertEqual((self.reload(payment).state, payment.last_error_code), ('error', 'STALE_SENDING'))
 
 
 # ======================================================================================
@@ -917,6 +1136,20 @@ class TestSyncAndErrors(MailOrderCase):
         self.sync(payment)
         self.assertEqual(payment.failed_attempt_count, 1)
 
+    def test_kk10_son_hata_islem_zamanina_gore_secilir(self):
+        # Ö-4: Paratika listeyi yeniden eskiye verse de "son hata" en yeni işlemin nedenidir
+        payment = self.make_mail_order()
+        self.set_query_transactions(
+            tran('FA', 'SALE', '9000.00', 'PG-N', errorCode='ERR20051', errorMsg='Yetersiz limit',
+                 timeCreated='2026-10-22 10:05:00'),
+            tran('FA', 'SALE', '9000.00', 'PG-O', errorCode='ERR20054', errorMsg='Hatali CVV',
+                 timeCreated='2026-10-22 10:00:00'))
+        self.sync(payment)
+        self.assertEqual(payment.failed_attempt_count, 2)
+        # mesaj biçimi KK-10 normalizasyonu ('<mesaj> (<kod>)'); kod ve metin en yeni işleminki
+        self.assertEqual((payment.last_error_code, payment.last_error_message),
+                         ('ERR20051', 'Yetersiz limit (ERR20051)'))
+
     def test_kk10_link_davranisi_degismedi(self):
         payment = self.make_payment()
         self.set_query_transactions(tran('FA', 'SALE', '9000.00', 'PG-F2', errorCode='ERR20051',
@@ -982,10 +1215,13 @@ class TestSyncAndErrors(MailOrderCase):
         self.assertIn('ERR77777', payment.last_error_message)
 
     def test_kk14_suresi_dolunca_expired_ve_yeni_deneme(self):
-        payment = self.make_mail_order(expires_at=self.past(minutes=30))
+        # NEDEN: gerçekçi fikstür: süresi 30 dk önce dolan 1 saatlik oturum 90 dk önce açılmıştır
+        # (sent_at canlı pencere dışında -> yeni MPID; canlıysa K-15 aynı MPID'yi kullanır)
+        payment = self.make_mail_order(expires_at=self.past(minutes=30), sent_at=self.past(minutes=90))
         self.assertEqual(self.sync(payment).state, 'expired')
         self.assertIsNone(self.mo_attempt())
         self.assertEqual(self.last_payment().attempt_no, 2)
+        self.assertNotEqual(self.last_payment(), payment)
 
     def test_kk14_suresi_gecmemis_sent_kalir(self):
         payment = self.make_mail_order()
@@ -1145,7 +1381,13 @@ class TestLifecycleBranches(MailOrderCase):
         self.assertEqual(self.reload(payment).state, 'expired')
         self.assertLessEqual(payment.expires_at, datetime.utcnow() + timedelta(seconds=5))
         self.assertIsNone(self.mo_attempt())
-        self.assertEqual(self.last_payment().attempt_no, 2)
+        # K-15: "Kapat" Paratika oturumunu bitiremez; yeni deneme aynı kayıt ve aynı MPID ile
+        self.assertEqual(self.last_payment(), payment)
+        self.assertEqual(len(self.payments()), 1)
+        self.assertEqual((self.reload(payment).state, payment.attempt_no, payment.merchant_payment_id),
+                         ('sent', 1, '%s-1' % INV_NO))
+        mpids = [c.params['MERCHANTPAYMENTID'] for c in self.mock.calls_for('SESSIONTOKEN')]
+        self.assertEqual(mpids, ['%s-1' % INV_NO] * 2)
         self.assertEqual(self.link_calls(), 0)
 
     def test_kk21_reddedilmis_deneme_expired(self):

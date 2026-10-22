@@ -400,9 +400,14 @@ class SanalPosMixin:
         cron.ir_actions_server_id.sudo().run()
 
     def set_create_date(self, record, when):
-        """create_date'i geriye alır (bayat 'Gönderiliyor', 180 gün log temizliği vb.)."""
+        """create_date'i (ve write_date'i) geriye alır (bayat 'Gönderiliyor', 180 gün log temizliği vb.).
+
+        NEDEN: bayat-sending yaşı write_date'ten okunur (``_sending_started_at``, K-15); oluşturulup
+        dokunulmamış kayıtta ikisi eşittir.
+        """
         self.env.cr.execute(
-            "UPDATE %s SET create_date = %%s WHERE id = %%s" % record._table, [when, record.id])
+            "UPDATE %s SET create_date = %%s, write_date = %%s WHERE id = %%s" % record._table,
+            [when, when, record.id])
         record.invalidate_recordset()
 
     def assertNoParatikaCalls(self, msg=None):

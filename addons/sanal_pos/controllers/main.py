@@ -18,6 +18,8 @@ import logging
 import re
 from urllib.parse import urlencode
 
+from markupsafe import Markup
+
 from odoo import http
 from odoo.http import request
 
@@ -107,8 +109,9 @@ class SanalPosParatikaController(http.Controller):
         # gelir. Bağlantıya yalnız MPID_RE'ye uyan değer girer, QWeb ayrıca kaçışlar (XSS).
         target = (MO_RESULT_PATH + '?' + urlencode({'mpid': mpid})) if mpid else PAYMENT_LIST_PATH
         body = request.env['ir.qweb']._render('sanal_pos.mail_order_return_page', {'target': target})
+        # DIKKAT: body Markup'tır; düz str ile birleştirmek DOCTYPE'ı kaçışlar (quirks kipi, Ö-1)
         return request.make_response(
-            '<!DOCTYPE html>\n' + body,
+            Markup('<!DOCTYPE html>\n') + body,
             headers=[('Content-Type', 'text/html; charset=utf-8'),
                      ('Content-Security-Policy', MO_RETURN_CSP)] + SECURITY_HEADERS)
 

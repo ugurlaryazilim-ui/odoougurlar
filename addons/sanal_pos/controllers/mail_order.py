@@ -13,10 +13,13 @@ import logging
 from datetime import datetime
 from urllib.parse import urlsplit
 
+from markupsafe import Markup
+
 from odoo import http
 from odoo.exceptions import AccessError, MissingError, UserError
 from odoo.http import request
 
+from ..models.provider_paratika import DIRECT_POST_HOSTS
 from .main import MO_RESULT_PATH, MPID_RE, PAYMENT_LIST_PATH
 
 _logger = logging.getLogger(__name__)
@@ -30,6 +33,8 @@ EXPIRY_YEAR_SPAN = 15
 FORM_ACTION_EXTRA_SOURCES = ()
 
 PAGE_HEADERS = [
+    # G-3: arka uç sekmesi (aynı köken) window.open ile açıp kart alanlarının DOM'una erişemesin
+    ('Cross-Origin-Opener-Policy', 'same-origin'),
     ('X-Frame-Options', 'DENY'),
     ('Cache-Control', 'no-store'),
     ('Referrer-Policy', 'no-referrer'),
@@ -104,17 +109,20 @@ class SanalPosMailOrderController(http.Controller):
     # ------------------------------------------------------------------ yardımcılar
     @staticmethod
     def _https_origin(url):
+        """Form/CSP kökeni; yalnız https + kodda sabit Paratika host'u (G-1), aksi ``None``."""
         parts = urlsplit(url or '')
-        if parts.scheme != 'https' or not parts.netloc:
+        if parts.scheme != 'https' or (parts.hostname or '') not in DIRECT_POST_HOSTS or parts.port:
             return None
-        return '%s://%s' % (parts.scheme, parts.netloc)
+        return 'https://%s' % parts.hostname
 
     @staticmethod
     def _render(template, values, csp, status=200):
         # NEDEN: ir.qweb doğrudan; request.render/web.layout arka uç varlıklarını eklerdi.
         body = request.env['ir.qweb']._render(template, values)
+        # DIKKAT: body Markup'tır; düz str ile birleştirmek ('<!DOCTYPE…' + body) soldaki metni
+        # kaçışlar (&lt;!DOCTYPE) ve tarayıcı sayfayı quirks kipinde gösterir (Ö-1).
         return request.make_response(
-            '<!DOCTYPE html>\n' + body, status=status,
+            Markup('<!DOCTYPE html>\n') + body, status=status,
             headers=[('Content-Type', 'text/html; charset=utf-8'),
                      ('Content-Security-Policy', csp)] + PAGE_HEADERS)
 

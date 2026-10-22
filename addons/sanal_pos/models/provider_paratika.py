@@ -11,6 +11,7 @@
 """
 import json
 import logging
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -23,6 +24,7 @@ from odoo import api, models
 
 from .. import tools
 from .res_config_settings import get_bool_param
+from .sanal_pos_payment import MAIL_ORDER_EXPIRY_HOURS
 
 _logger = logging.getLogger(__name__)
 
@@ -37,6 +39,15 @@ CHANNEL_NAMES = {'sms': 'SMS', 'email': 'EMAIL'}
 # 5xx / çözülemeyen yanıtta işlemin gerçekleşmiş olabileceği action'lar
 STATE_CHANGING_ACTIONS = ('PAYBYLINKPAYMENT', 'VOID', 'REFUND')
 FINANCIAL_ACTIONS = ('VOID', 'REFUND')
+# G-4: Paratika yanıtlarında kart sahibi adı, BIN, maskeli PAN / son 4 hane taşıyabilecek anahtarlar
+# günlükte '***' olur (gerçek alan adları G0-Q9'da ölçülecek; desen bu yüzden geniş tutuldu).
+# NEDEN: 'pan' yalnız kelime başı/sonunda (panLast4, maskedPan, cardPan) aranır: 'company' eşleşmesin.
+# Kayda yazılan son 4 hane (card_last4) ham yanıttan normalize edilir, bu maskeden etkilenmez.
+CARD_LIKE_KEY_RE = re.compile(
+    r'holder|owner|nameoncard|cardname|first6|last4|bin$|^pan|pan$', re.IGNORECASE)
+# G-1: kart formu (Direct POST) ve CSP form-action yalnız bu Paratika host'larına gidebilir;
+# ayardaki API adresi başka host gösterirse kart sayfası açılmaz (kart başka adrese gönderilmesin).
+DIRECT_POST_HOSTS = ('vpos.paratika.com.tr', 'test.paratika.com.tr')
 
 _ISTANBUL = ZoneInfo('Europe/Istanbul')
 _UTC = timezone.utc
@@ -207,11 +218,13 @@ class SanalPosProviderParatika(models.AbstractModel):
 
     # ---------------------------------------------------------------- maskeleme
     def _clean_value(self, value, secrets, key=''):
-        """Log için: sırları süz, e-posta/telefon alanlarını maskele (özyinelemeli)."""
+        """Log için: sırları süz, kart benzeri ve e-posta/telefon alanlarını maskele (özyinelemeli)."""
         if isinstance(value, dict):
             return {k: self._clean_value(v, secrets, str(k)) for k, v in value.items()}
         if isinstance(value, list):
             return [self._clean_value(v, secrets, key) for v in value]
+        if value not in (None, '', False) and CARD_LIKE_KEY_RE.search(key):
+            return tools.MASK
         if isinstance(value, str):
             lowered = key.lower()
             if value and 'email' in lowered:
@@ -469,7 +482,10 @@ class SanalPosProviderParatika(models.AbstractModel):
             'MERCHANTPAYMENTID': payment.merchant_payment_id,
             'AMOUNT': _amount_text(payment.amount),
             'CURRENCY': payment.currency_id.name or 'TRY',
-            'SESSIONEXPIRY': '1h',
+            # NEDEN: Odoo'daki son geçerlilik (expires_at) ve aynı MPID'nin yeniden kullanım penceresi
+            # (K-15) bu süreye bağlı; tek kaynak MAIL_ORDER_EXPIRY_HOURS.
+            # G0: Paratika'nın kabul ettiği en küçük değer (ör. '30m') spike'ta ölçülecek.
+            'SESSIONEXPIRY': '%dh' % MAIL_ORDER_EXPIRY_HOURS,
             'RETURNURL': return_url,
             'MERCHANTNOTE': self._note(payment),
         }
@@ -489,12 +505,24 @@ class SanalPosProviderParatika(models.AbstractModel):
 
     @api.private
     def direct_post_url(self, payment):
-        """Kart formunun gönderileceği adres (kaydın ortamına göre); token yoksa ``None``."""
+        """Kart formunun gönderileceği adres (kaydın ortamına göre).
+
+        Token yoksa ya da ayardaki adres https + ``DIRECT_POST_HOSTS`` dışındaysa ``None``.
+        DIKKAT: bu adres kartın gideceği yerdir ve CSP form-action da buradan türer; izin listesi
+        kodda sabittir, ayarla genişletilemez (G-1).
+        """
         payment.ensure_one()
         payment = payment.sudo()
         if not payment.provider_token:
             return None
-        return '%s/post/sale3d/%s' % (self._api_url(payment), payment.provider_token)
+        api_url = self._api_url(payment)
+        parts = urlsplit(api_url)
+        if (parts.scheme != 'https' or (parts.hostname or '') not in DIRECT_POST_HOSTS
+                or parts.port or '@' in parts.netloc):
+            _logger.error('sanal_pos: kart formu adresi izin listesinde değil (host=%s), ödeme id=%s',
+                          parts.hostname, payment.id)
+            return None
+        return '%s/post/sale3d/%s' % (api_url, payment.provider_token)
 
     @api.private
     def query_installments(self, payment):

@@ -100,6 +100,35 @@ class TestCardPage(MoHttpCase):
         self.assertIn('no-store', response.headers.get('Cache-Control', ''))
         self.assertEqual(response.headers.get('Referrer-Policy'), 'no-referrer')
         self.assertEqual(response.headers.get('X-Content-Type-Options'), 'nosniff')
+        # G-3: aynı kökenli açan pencere (arka uç betiği) kart sayfasının DOM'una erişemesin
+        self.assertEqual(response.headers.get('Cross-Origin-Opener-Policy'), 'same-origin')
+
+    def test_doctype_kacislanmaz_kart_ve_hata_sayfasi(self):
+        # Ö-1/G-7: '<!DOCTYPE' kaçışlanırsa (&lt;) tarayıcı sayfayı quirks kipinde gösterir
+        ok = self.page(self.make_mail_order())
+        expired = self.page(self.make_mail_order(invoice_no='DT-2', state='expired'))
+        self.assertEqual(ok.status_code, 200)
+        self.assertEqual(expired.status_code, 409)
+        for response in (ok, expired):
+            self.assertTrue(response.text.startswith('<!DOCTYPE html>'), response.text[:40])
+            self.assertNotIn('&lt;!DOCTYPE', response.text)
+        self.assertEqual(expired.headers.get('Cross-Origin-Opener-Policy'), 'same-origin')
+
+    def test_izinsiz_paratika_adresi_hata_sayfasi_paratika_cagrisi_yok(self):
+        # G-1: form/CSP adresi ayardan gelir; izin listesi dışındaki host kartı oraya gönderemesin
+        params = self.env['ir.config_parameter'].sudo()
+        params.set_param('sanal_pos.paratika_test_url', 'https://paratika.evil.example/paratika/api/v2')
+        response = self.page(self.make_mail_order())
+        self.assertEqual(response.status_code, 500)
+        self.assertNotIn('name="pan"', response.text)
+        self.assertNotIn('evil.example', response.text)
+        self.assertEqual(self.csp(response).get('form-action'), ["'none'"])
+        self.assertEqual(self.mock.count('QUERYINSTALLMENT'), 0)
+        # olumlu çapa: izinli host (sonda '/' ve büyük harf normalize) sayfayı açar
+        params.set_param('sanal_pos.paratika_test_url', 'https://TEST.paratika.com.tr/paratika/api/v2/')
+        response = self.page(self.make_mail_order(invoice_no='G1-OK'))
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('https://test.paratika.com.tr', ' '.join(self.csp(response).get('form-action', [])))
 
     def test_form_yapisi(self):
         payment = self.make_mail_order(provider_token='TOK-FORM')
@@ -240,6 +269,9 @@ class TestMoReturn(MoHttpCase):
         self.assertIn('/sanal_pos/mail_order/result?mpid=%s' % payment.merchant_payment_id, response.text)
         self.assertNotIn('session_id', response.cookies)
         self.assertNotIn('<script', response.text.lower())
+        # Ö-1/G-7: DOCTYPE kaçışlanmamalı (quirks kipi)
+        self.assertTrue(response.text.startswith('<!DOCTYPE html>'), response.text[:40])
+        self.assertNotIn('&lt;!DOCTYPE', response.text)
 
     def test_basliklar(self):
         response = self.post_return(self.make_mail_order().merchant_payment_id)

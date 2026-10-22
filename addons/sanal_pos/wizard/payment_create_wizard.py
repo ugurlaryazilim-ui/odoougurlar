@@ -43,6 +43,8 @@ _CHANGE_FIELDS = (
 class SanalPosPaymentCreateWizard(models.TransientModel):
     _name = 'sanal.pos.payment.create.wizard'
     _description = 'Sanal POS: Yeni Ödeme Linki'
+    # Engel mesajında kullanılan yöntem (K-15: canlı mail order oturumu yalnız link'i engeller)
+    _sanal_pos_payment_method = 'link'
 
     # ---------------------------------------------------------------- fatura
     invoice_no = fields.Char(string='Fatura No', required=True)
@@ -122,7 +124,8 @@ class SanalPosPaymentCreateWizard(models.TransientModel):
         for wiz in self:
             key = wiz._invoice_key() if wiz.fetched else ''
             wiz.blocking_message = Payment._new_link_blocker(
-                key, confirm_prior_refund=True) or False
+                key, confirm_prior_refund=True,
+                payment_method=wiz._sanal_pos_payment_method) or False
 
     @api.onchange('customer_phone')
     def _onchange_customer_phone(self):
@@ -325,7 +328,8 @@ class SanalPosPaymentCreateWizard(models.TransientModel):
         values = self._validated_values()
         # 4. ön kontrol (UX); asıl engel adım 5'teki DB indeksi
         blocker = Payment._new_link_blocker(
-            invoice_no, confirm_prior_refund=self.confirm_prior_refund, refresh=True)
+            invoice_no, confirm_prior_refund=self.confirm_prior_refund, refresh=True,
+            payment_method=payment_method)
         if blocker:
             raise UserError(blocker)
         # 5. 'Gönderiliyor' kaydı (savepoint; tekillik ihlali -> KK-18)
@@ -349,10 +353,15 @@ class SanalPosPaymentCreateWizard(models.TransientModel):
             'merchant_payment_id': '%s-%d' % (invoice_no, attempt_no),
             'user_id': self.env.uid,
         })
-        payment = Payment._insert_sending(values)
-        # 6. KK-5 notları + commit (dış çağrıdan önce kayıt kalıcı)
+        payment = self._open_sending(values, info)
+        # 6. commit (dış çağrıdan önce kayıt kalıcı)
+        payment._sp_commit()
+        return payment
+
+    def _open_sending(self, values, info):
+        """Adım 5-6: yeni 'Gönderiliyor' kaydı + KK-5 notları (Mail Order K-15 için ezer)."""
+        payment = self.env['sanal.pos.payment']._insert_sending(values)
         notes = self._change_notes(info, values)
         if notes:
             payment._post_note(notes)
-        payment._sp_commit()
         return payment

@@ -402,8 +402,15 @@ class TestSecretSurfaces(SecurityCase):
         self.assertTrue(exported['datas'])
         self.assertNoSecrets(json.dumps(exported['datas'], ensure_ascii=False), where='log export')
         fields_pay = ['invoice_no', 'customer_name', 'last_error_message', 'last_error_code', 'provider_token']
-        exported = self.env['sanal.pos.payment'].with_user(self.user_sp).search([]).export_data(fields_pay)
-        self.assertNoSecrets(json.dumps(exported['datas'], ensure_ascii=False), where='ödeme export')
+        # G-8: provider_token yalnız yöneticiye açık; Sanal POS kullanıcısı onu dışa aktaramaz
+        with self.assertRaises(AccessError):
+            self.env['sanal.pos.payment'].with_user(self.user_sp).search([]).export_data(fields_pay)
+        for user, fnames in ((self.user_sp, fields_pay[:-1]), (self.user_mgr, fields_pay)):
+            with self.subTest(user=user.login):
+                exported = self.env['sanal.pos.payment'].with_user(user).search([]).export_data(fnames)
+                self.assertTrue(exported['datas'])
+                self.assertNoSecrets(json.dumps(exported['datas'], ensure_ascii=False),
+                                     where='ödeme export')
 
     def test_chatter_grupsuz_kullaniciya_gorunmez(self):
         """Chatter (KK-5 notları dahil) kişisel veri taşır: model okuma yetkisi olmayan görmez."""

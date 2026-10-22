@@ -22,6 +22,7 @@ class SanalPosMailOrderWizard(models.TransientModel):
     _name = 'sanal.pos.mail.order.wizard'
     _inherit = 'sanal.pos.payment.create.wizard'
     _description = 'Sanal POS: Mail Order'
+    _sanal_pos_payment_method = 'mail_order'
 
     def _reopen_action(self):
         action = super()._reopen_action()
@@ -61,7 +62,22 @@ class SanalPosMailOrderWizard(models.TransientModel):
     def action_create_link(self):
         raise UserError('Bu sihirbazdan link oluşturulamaz; "Kart Bilgisi Gir" düğmesini kullanın.')
 
+    def _open_sending(self, values, info):
+        """K-15: Paratika oturumu canlı olabilecek önceki deneme varsa aynı MPID ile yeniden açılır.
+
+        DIKKAT: yeni MPID'li kayıt açmak açık bir kart/banka sekmesiyle çift tahsilata yol açar
+        ("Kapat" Paratika oturumunu sonlandıramaz). Bu dal kaldırılmamalı (bkz. KARARLAR K-15).
+        """
+        prior = self.env['sanal.pos.payment']._live_mail_order_prior(values['invoice_no'])
+        if prior:
+            return prior._reopen_mail_order(values)
+        return super()._open_sending(values, info)
+
     def action_create_mail_order(self):
         """Kontroller -> 'Gönderiliyor' + commit -> SESSIONTOKEN -> sonuç + commit -> kart sayfası."""
         self.ensure_one()
-        return self._create_sending_payment('mail_order')._run_create_session()
+        payment = self._create_sending_payment('mail_order')
+        if payment.state != 'sending':
+            # K-15: önceki oturumda ödeme bulundu; yeni token alınmadı
+            return payment._mail_order_reuse_notification()
+        return payment._run_create_session()
