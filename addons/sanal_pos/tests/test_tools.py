@@ -136,6 +136,63 @@ class TestFormatTry(TransactionCase):
 
 
 @tagged('post_install', '-at_install', 'sanal_pos')
+class TestInstallmentTable(TransactionCase):
+    """Mail Order kart sayfası taksit tablosu: okunur ad, tekrarsız program, vade farkı toplamı."""
+
+    def test_ag_adlari_eslenir_bilinmeyen_duzgun_harfle(self):
+        t = _tools()
+        self.assertEqual(t.network_label('PARAF'), 'Paraf')
+        self.assertEqual(t.network_label('CARD_FNS'), 'CardFinans')
+        self.assertEqual(t.network_label('KVY_NTW'), 'Kuveyt Türk (Sağlam Kart)')
+        self.assertEqual(t.network_label('SOME_NEW'), 'Some New')
+
+    def test_toplam_kurusa_yuvarlanir_half_up(self):
+        t = _tools()
+        self.assertEqual(t.installment_totals('1000', 2.5, 4), (Decimal('1025.00'), Decimal('256.25')))
+        # 100.05 x 1.01 = 101.0505 -> 101.05 ; 0.5 kuruş yukarı: 10.05 x 1.05 = 10.5525 -> 10.55
+        self.assertEqual(t.installment_totals(Decimal('100.05'), 1, 1)[0], Decimal('101.05'))
+        self.assertEqual(t.installment_totals(Decimal('10.05'), 5, 1)[0], Decimal('10.55'))
+        # tam yarım kuruş: 0.50 x 1.01 = 0.505 -> 0.51
+        self.assertEqual(t.installment_totals(Decimal('0.50'), 1, 1)[0], Decimal('0.51'))
+        self.assertEqual(t.installment_totals(1450, 0, 3), (Decimal('1450.00'), Decimal('483.33')))
+
+    def test_ortak_program_tek_satir_unknown_gizli(self):
+        t = _tools()
+        options = [{'count': 2, 'networks': ['PARAF', 'UNKNOWN', 'KVY_NTW'], 'rate': 0},
+                   {'count': 3, 'networks': ['KVY_NTW', 'PARAF'], 'rate': 1.5}]
+        table = t.installment_table(1000, options)
+        self.assertFalse(table['per_row'])
+        self.assertEqual(table['common_networks'], ['Paraf', 'Kuveyt Türk (Sağlam Kart)'])
+        self.assertNotIn('UNKNOWN', str(table))
+        rows = table['rows']
+        self.assertEqual([r['count'] for r in rows], [1, 2, 3])
+        self.assertEqual(rows[0]['rate_text'], 'Vade farkı yok')
+        self.assertEqual(rows[0]['total_text'], '1.000,00 TL')
+        self.assertEqual(rows[1]['rate_text'], 'Vade farkı yok')
+        self.assertEqual(rows[2]['rate_text'], '%1,50')
+        self.assertEqual(rows[2]['total_text'], '1.015,00 TL')
+        self.assertEqual(rows[2]['monthly_text'], '338,33 TL')
+        self.assertEqual(rows[2]['select_text'], '3 taksit — toplam 1.015,00 TL')
+        self.assertEqual(rows[2]['networks'], [])
+
+    def test_farkli_programlar_satir_basinda(self):
+        t = _tools()
+        options = [{'count': 2, 'networks': ['AXESS', 'BONUS'], 'rate': 0},
+                   {'count': 9, 'networks': ['BONUS'], 'rate': 4.5}]
+        table = t.installment_table(1000, options)
+        self.assertTrue(table['per_row'])
+        self.assertEqual(table['rows'][1]['networks'], ['Axess', 'Bonus'])
+        self.assertEqual(table['rows'][2]['networks'], ['Bonus'])
+        self.assertEqual(table['rows'][2]['select_text'], '9 taksit — toplam 1.045,00 TL (Bonus)')
+
+    def test_taksit_yoksa_yalniz_tek_cekim(self):
+        table = _tools().installment_table(1450, [])
+        self.assertEqual([r['count'] for r in table['rows']], [1])
+        self.assertEqual(table['rows'][0]['select_text'], 'Tek çekim — 1.450,00 TL')
+        self.assertEqual(table['common_networks'], [])
+
+
+@tagged('post_install', '-at_install', 'sanal_pos')
 class TestMasking(TransactionCase):
 
     def test_kk37_telefon_son_4_hane(self):

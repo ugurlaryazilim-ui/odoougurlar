@@ -84,6 +84,87 @@ def format_try(amount):
     return '%s%s TL' % (sign, text)
 
 
+# ---------------------------------------------------------------- taksit tablosu
+# NEDEN: Paratika QUERYINSTALLMENT ağ kodlarını ham döner (PARAF, KVY_NTW...); personel kartın
+# üzerindeki tanıdık adı arar. Kod belgede yoktur (yalnız CARD_FNS örneği); eşleme kullanıcı bilgisidir.
+NETWORK_NAMES = {
+    'PARAF': 'Paraf',
+    'MAXIMUM': 'Maximum',
+    'AXESS': 'Axess',
+    'BANKKART': 'Bankkart',
+    'BONUS': 'Bonus',
+    'WORLD': 'World',
+    'CARD_FNS': 'CardFinans',
+    'KVY_NTW': 'Kuveyt Türk (Sağlam Kart)',
+}
+HIDDEN_NETWORKS = frozenset({'UNKNOWN'})
+_CENT = Decimal('0.01')
+
+
+def network_label(code):
+    """Ham ağ kodu -> okunur ad; bilinmeyen kod ``Kod_Adi`` -> ``Kod Adi`` biçiminde, kaybolmaz."""
+    code = (code or '').strip()
+    if code in NETWORK_NAMES:
+        return NETWORK_NAMES[code]
+    return code.replace('_', ' ').title()
+
+
+def _visible_networks(codes):
+    labels = []
+    for code in codes or []:
+        if (code or '').strip().upper() in HIDDEN_NETWORKS:
+            continue
+        label = network_label(code)
+        if label and label not in labels:
+            labels.append(label)
+    return labels
+
+
+def installment_totals(amount, rate, count):
+    """``(toplam, aylık)`` Decimal; toplam = tutar x (1 + oran/100), kuruşa ROUND_HALF_UP.
+
+    DIKKAT: aylık tutar yalnız bilgidir (toplam / taksit, kuruşa yuvarlı); gerçek taksit
+    dağılımını banka belirler.
+    """
+    base = Decimal(str(amount or 0))
+    total = (base * (Decimal('1') + Decimal(str(rate or 0)) / Decimal('100'))).quantize(
+        _CENT, rounding=ROUND_HALF_UP)
+    monthly = (total / Decimal(max(int(count), 1))).quantize(_CENT, rounding=ROUND_HALF_UP)
+    return total, monthly
+
+
+def installment_table(amount, options):
+    """Kart sayfası taksit tablosu değerleri.
+
+    ``options``: ``[{'count', 'networks', 'rate'}]`` (provider çıktısı). Dönüş:
+    ``{'common_networks': [ad], 'per_row': bool, 'rows': [{'count', 'networks', 'rate_text', 'total_text',
+    'monthly_text', 'select_text'}]}``. Tüm satırlarda program listesi aynıysa
+    ``common_networks`` dolu, satırlarda ``networks`` boş olur; farklıysa tersi.
+    İlk satır tek çekimdir (vade farkı yok, toplam = tutar).
+    """
+    per_row = [_visible_networks(o.get('networks')) for o in options or []]
+    first = per_row[0] if per_row else []
+    same = all(sorted(n) == sorted(first) for n in per_row)
+    rows = [{'count': 1, 'networks': [], 'rate_text': 'Vade farkı yok',
+             'total_text': format_try(Decimal(str(amount or 0))),
+             'monthly_text': format_try(Decimal(str(amount or 0))),
+             'select_text': 'Tek çekim — %s' % format_try(Decimal(str(amount or 0)))}]
+    for option, networks in zip(options or [], per_row):
+        rate = Decimal(str(option.get('rate') or 0))
+        total, monthly = installment_totals(amount, rate, option['count'])
+        shown = [] if same else networks
+        rows.append({
+            'count': option['count'],
+            'networks': shown,
+            'rate_text': ('%' + ('%.2f' % rate).replace('.', ',')) if rate else 'Vade farkı yok',
+            'total_text': format_try(total),
+            'monthly_text': format_try(monthly),
+            'select_text': '%s taksit — toplam %s%s' % (
+                option['count'], format_try(total), ' (%s)' % ', '.join(shown) if shown else ''),
+        })
+    return {'common_networks': first if same else [], 'per_row': not same, 'rows': rows}
+
+
 # ---------------------------------------------------------------- maskeleme
 def mask_phone(raw):
     """Yalnız son 4 hane görünür: ``******2233``. Boş girdi -> ``''``."""

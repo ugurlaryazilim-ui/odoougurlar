@@ -67,26 +67,35 @@
                         <label for="installmentCount">Taksit</label>
                         <!-- G0-Q7: tek çekim değeri '1' varsayımı (spike sonrası tek değişim yeri). -->
                         <select id="installmentCount" name="installmentCount">
-                            <option value="1">Tek çekim</option>
-                            <t t-foreach="installments" t-as="option">
-                                <option t-att-value="option['count']"
-                                        t-out="'%s taksit (%s)' % (option['count'], ', '.join(option['networks']) or 'tüm kartlar')"/>
+                            <t t-foreach="installment_table['rows']" t-as="row">
+                                <option t-att-value="row['count']" t-out="row['select_text']"/>
                             </t>
                         </select>
                         <button type="submit" class="mo-submit">Öde (3D)</button>
                     </form>
                     <t t-if="installments">
                         <h2>Kart programına göre taksitler</h2>
-                        <p class="mo-hint">Müşteriye kartının programını (Axess, Maximum, World...) sorun; kartın desteklemediği taksit banka tarafından reddedilir.</p>
+                        <p t-if="installment_table['common_networks']" class="mo-hint"
+                           t-out="'Taksit yapılabilen kartlar: %s' % ', '.join(installment_table['common_networks'])"/>
+                        <p class="mo-hint">Kartın desteklemediği taksit banka tarafından reddedilir. Vade farkı banka/Paratika tarafından çekim tutarına eklenir; kesin tutar banka sayfasında görünür.</p>
                         <table class="mo-table">
                             <thead>
-                                <tr><th>Taksit</th><th>Kart programı</th><th>Komisyon oranı</th></tr>
+                                <tr>
+                                    <th>Taksit</th>
+                                    <th t-if="installment_table['per_row']">Kart programı</th>
+                                    <th>Vade farkı (%)</th>
+                                    <th>Çekilecek toplam (TL)</th>
+                                    <th>Aylık taksit (TL)</th>
+                                </tr>
                             </thead>
                             <tbody>
-                                <tr t-foreach="installments" t-as="option">
-                                    <td t-out="option['count']"/>
-                                    <td t-out="', '.join(option['networks']) or '-'"/>
-                                    <td t-out="option['rate_text']"/>
+                                <tr t-foreach="installment_table['rows']" t-as="row">
+                                    <td t-out="'Tek çekim' if row['count'] == 1 else row['count']"/>
+                                    <td t-if="installment_table['per_row']"
+                                        t-out="', '.join(row['networks']) or '-'"/>
+                                    <td t-out="row['rate_text']"/>
+                                    <td t-out="row['total_text']"/>
+                                    <td t-out="row['monthly_text']"/>
                                 </tr>
                             </tbody>
                         </table>
