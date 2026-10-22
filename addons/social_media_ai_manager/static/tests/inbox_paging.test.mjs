@@ -13,8 +13,9 @@ const raw = readFileSync(resolve(here, '../src/components/inbox/inbox.js'), 'utf
 const stubs = `
 const Component = class {};
 const useState = (x) => x;
-const onWillStart = () => {}, onMounted = () => {}, onPatched = () => {}, onWillUnmount = () => {};
-const useRef = () => ({ el: null });
+const onWillStart = () => {}, onMounted = () => {}, onWillUnmount = () => {};
+const onPatched = (cb) => { globalThis.__onPatched = cb; };
+const useRef = () => globalThis.__ref;
 const registry = { category: () => ({ add: () => {} }) };
 const useService = () => globalThis.__orm;
 const _t = (s) => s;
@@ -35,6 +36,7 @@ function fakeOrm(convCount, msgCount) {
     };
 }
 const make = (convCount, msgCount) => {
+    globalThis.__ref = { el: null };
     globalThis.__orm = fakeOrm(convCount, msgCount);
     const inbox = new SocialInbox();
     inbox.setup();
@@ -95,4 +97,77 @@ test('K4: başka görüşmeye geçince mesaj sayfalaması baştan başlar', asyn
     assert.equal(inbox.state.messages.length, 400);
     await inbox.selectConversation(2);
     assert.equal(inbox.state.messages.length, 200);
+});
+
+// A5 B1/B2: kaydırma konumu. Sahte sohbet kutusu: her mesaj 100 px, yükseklik state.messages'tan türer (yama = DOM büyümesi).
+function withBox(inbox) {
+    const el = {
+        scrollTop: 0,
+        clientHeight: 400,
+        get scrollHeight() { return inbox.state.messages.length * 100; },
+    };
+    globalThis.__ref.el = el;
+    return el;
+}
+const patched = () => globalThis.__onPatched();
+
+test('B1: "önceki mesajları yükle" sonrası okunan konum korunur, alta atlamaz', async () => {
+    const inbox = make(1, 450);
+    const el = withBox(inbox);
+    inbox.state.activeConversation = { id: 1 };
+    await inbox.loadMessages(1);
+    patched();                       // ilk çizim: en alta
+    assert.equal(el.scrollTop, 20000);
+    el.scrollTop = 0;                // kullanıcı en üste kaydırdı
+    await inbox.loadMoreMessages();  // 200 → 400 mesaj (üste 200 mesaj = 20000 px eklendi)
+    patched();
+    assert.equal(el.scrollTop, 20000, 'okunan satır yerinde kalmalı (yeni - eski yükseklik)');
+    assert.notEqual(el.scrollTop, el.scrollHeight, 'en alta atlamamalı');
+});
+
+test('B1: araya giren görüşme listesi yaması kaydırma niyetini harcamaz', async () => {
+    const inbox = make(1, 450);
+    const el = withBox(inbox);
+    inbox.state.activeConversation = { id: 1 };
+    await inbox.loadMessages(1);
+    patched();
+    el.scrollTop = 0;
+    const pending = inbox.loadMoreMessages();
+    patched();                       // mesajlar gelmeden başka bir yama (örn. yoklamanın görüşme listesi)
+    assert.equal(el.scrollTop, 0, 'mesajlar gelmeden konuma dokunulmamalı');
+    await pending;
+    patched();
+    assert.equal(el.scrollTop, 20000);
+});
+
+test('B2: yoklama, kullanıcı alttaysa yeni mesajda alta kaydırır', async () => {
+    const inbox = make(1, 50);
+    const el = withBox(inbox);
+    inbox.state.activeConversation = { id: 1 };
+    await inbox.loadMessages(1);
+    patched();
+    assert.equal(el.scrollTop, 5000);
+    el.scrollTop = 4600;             // alt sınırda (yükseklik 5000 - görünür 400)
+    inbox.orm = fakeOrm(1, 51);
+    await inbox._pollOnce();
+    patched();
+    assert.equal(el.scrollTop, 5100, 'alttaki kullanıcı yeni mesajı görmeli');
+});
+
+test('B2: yoklama, geçmişi okuyan kullanıcının konumunu bozmaz', async () => {
+    const inbox = make(1, 50);
+    const el = withBox(inbox);
+    inbox.state.activeConversation = { id: 1 };
+    await inbox.loadMessages(1);
+    patched();
+    el.scrollTop = 1000;
+    inbox.orm = fakeOrm(1, 51);   // yeni mesaj geldi
+    await inbox._pollOnce();
+    patched();
+    assert.equal(el.scrollTop, 1000);
+    await inbox._pollOnce();             // yeni mesaj yok
+    patched();
+    assert.equal(el.scrollTop, 1000);
+    patched();                           // niyet yokken yama (örn. başka state) konuma dokunmaz
+    assert.equal(el.scrollTop, 1000);
 });

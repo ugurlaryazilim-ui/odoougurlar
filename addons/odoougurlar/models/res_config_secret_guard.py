@@ -14,14 +14,7 @@ read/onchange için ayrı kod yok: res.config.settings ACL'i yalnız base.group_
 (çekirdek), onchange(yeni kayıt) create denetiminde AccessError verir; ACL veren başka bir
 modül olsa da kayıt bu filtreli varsayılanlarla oluşur.
 """
-import re
-
 from odoo import api, models
-
-# NEDEN: adı/parametresi bu kalıba uyan metin alanı sır sayılır (groups= unutulmuş çekirdek ve
-# modül alanları: google_gmail_client_secret, twilio_account_token, *_api_key ...). Fazla eşleşme
-# zararsız: sistem yöneticisi olmayan ayarları zaten kaydedemez (çekirdek execute is_admin).
-_SECRET_NAME_RE = re.compile(r'key|secret|password|passwd|token|sifre', re.IGNORECASE)
 
 
 class ResConfigSettings(models.TransientModel):
@@ -35,8 +28,10 @@ class ResConfigSettings(models.TransientModel):
             if field.groups and not self._has_field_access(field, 'read'):
                 names.add(name)
                 continue
-            icp = getattr(field, 'config_parameter', None)
-            if icp and field.type in ('char', 'text') and _SECRET_NAME_RE.search(name + ' ' + icp):
+            # NEDEN: ad kalıbı kara listesi sızdırıyordu (nebim_url/MSSQL sunucu, twilio sid gibi kalıba
+            # uymayan ama hassas değerler). Ayar ekranı yalnız group_system'e açık; yönetici olmayanın
+            # hiçbir config_parameter değerine ihtiyacı yok -> hepsi düşer (kara liste yerine toptan).
+            if getattr(field, 'config_parameter', None):
                 names.add(name)
         return names
 

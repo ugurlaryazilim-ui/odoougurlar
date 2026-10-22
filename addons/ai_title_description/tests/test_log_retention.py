@@ -80,7 +80,9 @@ class TestAiContentLogRetention(TransactionCase):
             seen.append(str(query))
             return real(query, params, *a, **kw)
         cron_model = type(self.env['ir.cron'])
-        with patch(LOG_MOD + '._GC_BATCH', 2),                 patch.object(cron_model, '_commit_progress', return_value=100.0),                 patch.object(self.env.cr, 'execute', spy):
+        with patch(LOG_MOD + '._GC_BATCH', 2), \
+                patch.object(cron_model, '_commit_progress', return_value=100.0), \
+                patch.object(self.env.cr, 'execute', spy):
             self.Log.with_context(cron_id=1)._cron_gc_old_logs()
         self.assertFalse(old.exists())
         self.assertEqual(young.exists(), young)

@@ -48,7 +48,10 @@ class CountingApiController(BarcodeApiBase):
                 continue
             raw_bc = item.get('barcode')
             bc = str(raw_bc).strip() if isinstance(raw_bc, (str, int)) and not isinstance(raw_bc, bool) else ''
-            new_qty = self._parse_qty(item.get('quantity', 0), default=0, allow_zero=True)
+            # NEDEN (A5 B4): miktarı null/eksik/boş kalem 0 sayılıp raf stokunu sıfırlıyordu; sıfır yalnız açıkça
+            # gönderilen 0'dır. _parse_qty boş değeri varsayılana çevirdiği için burada ayrıca elenir.
+            raw_qty = item.get('quantity')
+            new_qty = None if raw_qty is None or raw_qty == '' else self._parse_qty(raw_qty, allow_zero=True)
             if new_qty is None:
                 results.append({'barcode': bc, 'status': 'error', 'message': 'Geçersiz miktar'})
                 continue

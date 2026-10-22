@@ -46,7 +46,7 @@ class YouTubeOAuth(http.Controller):
             'scope': ' '.join(scopes),
             'access_type': 'offline',
             'prompt': 'consent',
-            'state': make_oauth_state(env, 'youtube', account_id),
+            'state': make_oauth_state(env, 'youtube', account_id, request.session),
         })
 
         return request.redirect(auth_url, local=False)
@@ -64,7 +64,7 @@ class YouTubeOAuth(http.Controller):
             return "Error from Google: %s" % html_escape(error)
 
         # NEDEN (A5 O1): imzasız state ile başkasının Google kodu şirket hesabına yazdırılabiliyordu
-        account_id = check_oauth_state(env, 'youtube', kwargs.get('state'))
+        account_id = check_oauth_state(env, 'youtube', kwargs.get('state'), request.session)
         if not account_id:
             return "Invalid or expired state. Please start the login again."
         if not code:

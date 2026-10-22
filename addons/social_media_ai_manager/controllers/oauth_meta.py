@@ -34,7 +34,7 @@ class MetaOAuthController(http.Controller):
         # Callback tüm facebook hesaplarını günceller, hesap id'si 0.
         auth_url = "https://www.facebook.com/v19.0/dialog/oauth?" + urllib.parse.urlencode({
             'client_id': app_id, 'redirect_uri': redirect_uri, 'scope': scope, 'response_type': 'code',
-            'state': make_oauth_state(env, 'meta', 0)})
+            'state': make_oauth_state(env, 'meta', 0, request.session)})
         return werkzeug.utils.redirect(auth_url)
 
     @http.route('/social_media_ai/facebook/callback', type='http', auth='user')
@@ -42,7 +42,7 @@ class MetaOAuthController(http.Controller):
         app_secret = user_access_token = long_user_token = None  # except bloğunda maskelemek için
         env = request.env
         require_system_user(env)
-        if check_oauth_state(env, 'meta', kw.get('state')) is None:
+        if check_oauth_state(env, 'meta', kw.get('state'), request.session) is None:
             return "Invalid or expired state. Please start the login again."
         try:
             code = kw.get('code')
