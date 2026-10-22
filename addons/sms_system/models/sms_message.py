@@ -50,7 +50,7 @@ STATUS_WINDOW_HOURS = 48          # bu süreyi aşan 'bekliyor' kayıt 'bilinmey
 STATUS_TRACKED = ('pending', 'unknown')   # unknown: tanınmayan (belgesiz) kod, 48 saat boyunca yeniden sorulur
 STATUS_UNCERTAIN_LOOKBACK = 30    # dk; belirsiz kaydın gönderimi write_date'ten en çok bu kadar önce olabilir
 STATUS_TIME_BUDGET = 120          # sn; durum cron'u çalışma başına en çok bu kadar sorgu yapar
-STATUS_MAX_CANDIDATES = 20000     # durum cron'u çalışma başına en çok bu kadar kaydı belleğe alır (en yeniden başlayarak)
+STATUS_MAX_CANDIDATES = 20000     # durum cron'u çalışma başına en çok bu kadar kaydı belleğe alır (en eskiden başlayarak)
 STATUS_EXPIRE_BATCH = 5000        # 48 saat geçen kayıtlar çalışma başına bu kadarlık parçayla 'bilinmeyen' olur
 STATUS_MIN_TIME_LEFT = 20         # sn; cron süresinin sonuna bu kadar kala dur
 # ConfirmSms (Turatel cevabı 4): onay zorunlu hesapta SendSms sonrası paket onayı; kolon yok, delivery_code işareti
@@ -922,6 +922,10 @@ class SmsSystemMessage(models.Model):
         if cfg['api_mode'] != 'json':
             return   # legacy modda JSON isteği yok (KK-C14)
         confirm_failed, stats = Message._cron_confirm_pending(cfg, started)
+        # NEDEN: eski önce (id asc). En eski kayıtlar 48 saatlik pencerenin sonuna en yakın olandır ve kesin iletim
+        # raporu en çok onlarda bulunur; en yeni önce sıralansaydı birikim limiti aşınca bunlar hiç sorgulanmadan
+        # 'unknown' olurdu (starvation). Yeniler pencerede hâlâ vakit olduğundan sonraki çalışmaya kalabilir.
+        # DIKKAT: limitsiz yüklemede bellek/süre sınırsızdı; limiti kaldırma.
         # Adaylar: bekleyen/bilinmeyen + eski eşlemenin yanlış 'iletildi' (kod 0) dediği son 48 saatlik kayıtlar
         candidates = Message.search([
             '&', ('provider_service', 'in', JSON_SERVICES), '|',
@@ -929,7 +933,7 @@ class SmsSystemMessage(models.Model):
             ('delivery_state', 'in', STATUS_TRACKED),
             '&', ('delivery_state', '=', 'delivered'), ('delivery_code', '=', LEGACY_DELIVERED_CODE),
             '&', ('state', '=', 'uncertain'), ('write_date', '>=', since),
-        ], order='id desc', limit=STATUS_MAX_CANDIDATES)   # DIKKAT: limitsiz yüklemede bellek/süre sınırsızdı; en yeni önce
+        ], order='id asc', limit=STATUS_MAX_CANDIDATES)
         chunks = defaultdict(list)
         for msg in candidates:
             for day in msg._status_days():

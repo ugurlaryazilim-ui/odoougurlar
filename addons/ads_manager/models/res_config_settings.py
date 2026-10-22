@@ -11,9 +11,9 @@ class ResConfigSettings(models.TransientModel):
         ('claude', 'Claude'),
         ('ollama', 'Ollama')
     ], default='gemini', config_parameter='ads_manager.default_ai_provider')
-    ads_gemini_api_key = fields.Char(config_parameter='ads_manager.gemini_api_key')
-    ads_openai_api_key = fields.Char(config_parameter='ads_manager.openai_api_key')
-    ads_claude_api_key = fields.Char(config_parameter='ads_manager.claude_api_key')
+    ads_gemini_api_key = fields.Char(config_parameter='ads_manager.gemini_api_key', groups='base.group_system')
+    ads_openai_api_key = fields.Char(config_parameter='ads_manager.openai_api_key', groups='base.group_system')
+    ads_claude_api_key = fields.Char(config_parameter='ads_manager.claude_api_key', groups='base.group_system')
     ads_ai_analysis_frequency = fields.Selection([
         ('1', 'Günlük'),
         ('3', 'Her 3 Günde Bir'),

@@ -20,16 +20,19 @@ class ResConfigSettings(models.TransientModel):
     ai_studio_fal_api_key = fields.Char(
         string='fal.ai API Anahtarı',
         config_parameter='ugurlar_ai_studio.fal_api_key',
+        groups='base.group_system',
         help='fal.ai dashboard\'tan alınan API key',
     )
     ai_studio_fashn_api_key = fields.Char(
         string='FASHN API Anahtarı',
         config_parameter='ugurlar_ai_studio.fashn_api_key',
+        groups='base.group_system',
         help='FASHN dashboard\'tan alınan API key (fa-XXXX formatında)',
     )
     ai_studio_gemini_api_key = fields.Char(
         string='Gemini API Anahtarı',
         config_parameter='ugurlar_ai_studio.gemini_api_key',
+        groups='base.group_system',
         help='Google Gemini API anahtarı. Boş bırakılırsa fal.ai (Proxy/any-llm) kullanılır.',
     )
 

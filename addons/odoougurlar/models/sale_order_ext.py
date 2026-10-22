@@ -171,6 +171,16 @@ class SaleOrder(models.Model):
 
     @api.depends('client_order_ref')
     def _compute_marketplace_info(self):
+        # NEDEN: Satış listesinde HB mağaza adı kayıt başına search yerine kayıt kümesi için tek
+        # sorguyla alınır (N+1). Aynı merchant_id'de çok mağaza varsa eski limit=1 davranışı
+        # korunur: varsayılan sırada ilk mağaza kazanır.
+        hb_stores = {}
+        if 'hb_store_id' in self._fields and 'hepsiburada.store' in self.env:
+            merchant_ids = {m for m in self.mapped('hb_store_id') if m}
+            if merchant_ids:
+                for hb_store in self.env['hepsiburada.store'].sudo().search(
+                        [('merchant_id', 'in', list(merchant_ids))]):
+                    hb_stores.setdefault(hb_store.merchant_id, hb_store)
         for order in self:
             mp_name = False
             store_name = False
@@ -202,8 +212,7 @@ class SaleOrder(models.Model):
             # hepsiburada.store modelinden mağaza adını çek
             if not store_name and 'hb_store_id' in order._fields and order.hb_store_id:
                 if 'hepsiburada.store' in order.env:
-                    hb_store = order.env['hepsiburada.store'].sudo().search(
-                        [('merchant_id', '=', order.hb_store_id)], limit=1)
+                    hb_store = hb_stores.get(order.hb_store_id)
                     if hb_store:
                         store_name = hb_store.name
                         seller_id = order.hb_store_id  # Merchant ID → seller_id

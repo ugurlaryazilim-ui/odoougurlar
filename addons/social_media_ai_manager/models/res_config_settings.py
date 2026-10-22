@@ -10,8 +10,8 @@ class ResConfigSettings(models.TransientModel):
         ('ollama', 'Ollama (Local/Open Source)'),
     ], string="AI Provider", default='openai', config_parameter='social_media_ai.provider')
 
-    social_openai_api_key = fields.Char(string="OpenAI API Key", config_parameter='social_media_ai.openai_key')
-    social_gemini_api_key = fields.Char(string="Gemini API Key", config_parameter='social_media_ai.gemini_key')
+    social_openai_api_key = fields.Char(string="OpenAI API Key", config_parameter='social_media_ai.openai_key', groups='base.group_system')
+    social_gemini_api_key = fields.Char(string="Gemini API Key", config_parameter='social_media_ai.gemini_key', groups='base.group_system')
     social_ollama_endpoint = fields.Char(string="Ollama Endpoint URL", default="http://localhost:11434/api/generate", config_parameter='social_media_ai.ollama_endpoint')
     social_ollama_model = fields.Char(string="Ollama Model Name", default="llama3", config_parameter='social_media_ai.ollama_model')
 
@@ -30,15 +30,15 @@ class ResConfigSettings(models.TransientModel):
 
     # Meta Integration Settings
     social_meta_app_id = fields.Char(string="Meta App ID", config_parameter='social_media_ai.meta_app_id')
-    social_meta_app_secret = fields.Char(string="Meta App Secret", config_parameter='social_media_ai.meta_app_secret')
+    social_meta_app_secret = fields.Char(string="Meta App Secret", config_parameter='social_media_ai.meta_app_secret', groups='base.group_system')
 
     # YouTube Integration Settings
     social_youtube_client_id = fields.Char(string="Google Client ID (YouTube)", config_parameter='social_media_ai.youtube_client_id')
-    social_youtube_client_secret = fields.Char(string="Google Client Secret", config_parameter='social_media_ai.youtube_client_secret')
+    social_youtube_client_secret = fields.Char(string="Google Client Secret", config_parameter='social_media_ai.youtube_client_secret', groups='base.group_system')
 
     # TikTok Integration Settings
-    social_tiktok_client_key = fields.Char(string="TikTok Client Key", config_parameter='social_media_ai.tiktok_client_key')
-    social_tiktok_client_secret = fields.Char(string="TikTok Client Secret", config_parameter='social_media_ai.tiktok_client_secret')
+    social_tiktok_client_key = fields.Char(string="TikTok Client Key", config_parameter='social_media_ai.tiktok_client_key', groups='base.group_system')
+    social_tiktok_client_secret = fields.Char(string="TikTok Client Secret", config_parameter='social_media_ai.tiktok_client_secret', groups='base.group_system')
 
     # WhatsApp Redirection
     # DIKKAT: WhatsApp webhook secret'ı BURAYA alan olarak eklenmez: res.config.settings alanı gerçek kolondur,
@@ -74,13 +74,16 @@ class ResConfigSettings(models.TransientModel):
     @api.model
     def get_values(self):
         res = super(ResConfigSettings, self).get_values()
+        # NEDEN: ayar ekranına erişen ama ir.cron okuma hakkı olmayan kullanıcıda get_values AccessError veriyordu
+        # (sms_system ayar testleri de bu zincirden kırılıyordu). Yalnız aralık sayısı okunur, sır değildir;
+        # set_values zaten sudo yazıyor, yazma yetkisi burada gevşetilmedi.
         cron = self.env.ref('social_media_ai_manager.ir_cron_publish_social_posts', raise_if_not_found=False)
         if cron:
-            res.update(social_post_cron_interval=cron.interval_number)
-            
+            res.update(social_post_cron_interval=cron.sudo().interval_number)
+
         yt_cron = self.env.ref('social_media_ai_manager.ir_cron_sync_youtube_comments', raise_if_not_found=False)
         if yt_cron:
-            res.update(social_youtube_cron_interval=yt_cron.interval_number)
+            res.update(social_youtube_cron_interval=yt_cron.sudo().interval_number)
             
         handoff_users = self.env['ir.config_parameter'].sudo().get_param('social_media_ai.handoff_user_ids')
         if handoff_users:

@@ -73,10 +73,50 @@ DEFAULT_CONFIG = {
     "main_image_index": "1",
     "match_field": "barcode",
     "overwrite_existing": True,
-    "scan_interval_seconds": 3,
+    "scan_interval_seconds": 30,
     "color_propagation": True,
     "color_attribute_name": "Renk",
 }
+
+SCAN_INTERVAL_ENV = 'SYNC_SCAN_INTERVAL_SECONDS'
+# NEDEN: eski sürümler config.json'a varsayılan olarak 3 yazdı; o dosyalar PC'lerde duruyor. Elle
+# ayarlanmış 3'ten ayırt edilemez, bu yüzden config'deki 3 "eski varsayılan" sayılıp 30'a çevrilir.
+# Gerçekten 3 sn isteyen ortam değişkeniyle verir.
+_LEGACY_SCAN_INTERVAL = 3
+
+
+def resolve_scan_interval(config, environ=None):
+    """Boş turdan sonra beklenecek saniye: ortam değişkeni > config.json > varsayılan (30)."""
+    environ = os.environ if environ is None else environ
+    default = DEFAULT_CONFIG['scan_interval_seconds']
+    try:
+        if environ.get(SCAN_INTERVAL_ENV):
+            return max(1, int(environ[SCAN_INTERVAL_ENV]))
+        value = int(config.get('scan_interval_seconds', default))
+    except (TypeError, ValueError):
+        return default
+    return default if value == _LEGACY_SCAN_INTERVAL else max(1, value)
+
+
+def poll_loop(run_once, interval, wait, should_stop=lambda: False, on_retry=None, error_wait=30):
+    """Yoklama döngüsü: iş bulan tur (run_once() doğru döner) beklemeden hemen tekrarlanır,
+    boş tur `interval` sn bekler. Hata turu `error_wait` sn bekler, ardından on_retry(hata) çağrılır.
+
+    wait(saniye) dışarıdan verilir: masaüstü uygulamalar durdurma olayını dinleyen bekleme kullanır,
+    testler bekleme yapmaz.
+    """
+    while not should_stop():
+        try:
+            if run_once():
+                continue
+        except Exception as e:  # KeyboardInterrupt BaseException'dır, geçer
+            _logger.error("⚠️ Tarama hatası (kaldığı yerden devam edecek): %s", e)
+            _logger.info("🔄 %d saniye bekleyip tekrar denenecek...", error_wait)
+            wait(error_wait)
+            if on_retry:
+                on_retry(e)
+            continue
+        wait(interval)
 
 
 def load_config(path='config.json'):
@@ -990,29 +1030,24 @@ def main():
 
     config = load_config()
     agent = OdooImageSync(config)
-    interval = config['scan_interval_seconds']
+    interval = resolve_scan_interval(config)
 
-    _logger.info("Klasör izleniyor: %s (her %d saniyede bir)", config['watch_folder'], interval)
+    _logger.info("Klasör izleniyor: %s (boş turda %d saniye bekler)", config['watch_folder'], interval)
+
+    def run_once():
+        agent.download_ai_exports()
+        return agent.process_folder()
+
+    def reconnect(_error):
+        # Odoo bağlantısını yenile
+        try:
+            agent._connect()
+            _logger.info("✅ Odoo bağlantısı yenilendi")
+        except Exception:
+            _logger.warning("Odoo bağlantısı henüz yenilenemiyor, beklenecek...")
 
     try:
-        while True:
-            try:
-                agent.download_ai_exports()
-                agent.process_folder()
-            except KeyboardInterrupt:
-                raise
-            except Exception as e:
-                _logger.error("⚠️ Tarama hatası (kaldığı yerden devam edecek): %s", e)
-                _logger.info("🔄 30 saniye bekleyip tekrar denenecek...")
-                time.sleep(30)
-                # Odoo bağlantısını yenile
-                try:
-                    agent._connect()
-                    _logger.info("✅ Odoo bağlantısı yenilendi")
-                except Exception:
-                    _logger.warning("Odoo bağlantısı henüz yenilenemiyor, beklenecek...")
-                continue
-            time.sleep(interval)
+        poll_loop(run_once, interval, time.sleep, on_retry=reconnect)
     except KeyboardInterrupt:
         agent._db.close()
         _logger.info("Agent durduruldu. SQLite kapatıldı.")

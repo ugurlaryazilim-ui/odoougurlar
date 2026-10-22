@@ -7,6 +7,9 @@ import { _t } from "@web/core/l10n/translation";
 import { user } from "@web/core/user";
 import { openCameraScanner } from "@ugurlar_barcode/js/camera_scanner";
 
+const CONV_PAGE = 100;
+const MSG_PAGE = 200;
+
 export class SocialInbox extends Component {
     setup() {
         this.orm = useService("orm");
@@ -29,6 +32,12 @@ export class SocialInbox extends Component {
             showProductSearch: false,
             productQuery: "",
             productResults: [],
+            // NEDEN: ilk sayfa eskisiyle aynı (100 görüşme / 200 mesaj); fazlası "daha fazla yükle" ile istenir.
+            // Yoklama mevcut sınırla yeniden okur, böylece yüklenmiş sayfalar kaybolmaz.
+            convLimit: CONV_PAGE,
+            msgLimit: MSG_PAGE,
+            hasMoreConvs: false,
+            hasMoreMsgs: false,
         });
 
         onWillStart(async () => {
@@ -55,8 +64,21 @@ export class SocialInbox extends Component {
         });
         
         onPatched(() => {
-            // Scroll to bottom after state changes if needed
-            this.scrollToBottom();
+            // NEDEN (A5 B1/B2): eskiden her yamada koşulsuz en alta kaydırılıyordu; "önceki mesajlar" yükleyince
+            // ve geçmişi okuyan kullanıcıda 10 sn'lik yoklama konumu bozuyordu. Artık kaydırma niyeti
+            // loadMessages'ta (mesajlar state'e yazıldığı AYNI anda) belirlenir; niyet yoksa konuma dokunulmaz.
+            const el = this.chatContainerRef.el;
+            const intent = this._scrollIntent;
+            if (!intent || !el) {
+                return;
+            }
+            this._scrollIntent = null;
+            if (intent.fromBottom !== undefined) {
+                // yeni içerik üste eklendi: alttan uzaklık sabit kalırsa okunan satır yerinde durur
+                el.scrollTop = el.scrollHeight - intent.fromBottom;
+            } else {
+                this.scrollToBottom();
+            }
         });
         
         onWillUnmount(() => {
@@ -102,28 +124,39 @@ export class SocialInbox extends Component {
     async _pollOnce() {
         await this.loadConversations();
         if (this.state.activeConversation) {
-            // Save scroll position before reload to see if we need to auto-scroll
-            const el = this.chatContainerRef.el;
-            const isAtBottom = el ? (el.scrollHeight - el.scrollTop <= el.clientHeight + 50) : false;
+            // kaydırma kararı (alttaysa alta, değilse konumu koru) loadMessages içinde verilir
             await this.loadMessages(this.state.activeConversation.id);
-            if (isAtBottom) {
-                setTimeout(() => this.scrollToBottom(), 50);
-            }
         }
     }
 
     async loadConversations() {
-        this.state.conversations = await this.orm.searchRead(
+        // NEDEN: limit+1 satır istenir; fazla gelen satır "devamı var" işaretidir, listeye girmez.
+        const rows = await this.orm.searchRead(
             "social.media.conversation",
             [],
             ["id", "name", "platform", "unread_count", "state", "user_id"],
-            { order: "last_message_date desc", limit: 100 }
+            { order: "last_message_date desc", limit: this.state.convLimit + 1 }
         );
+        this.state.hasMoreConvs = rows.length > this.state.convLimit;
+        this.state.conversations = rows.slice(0, this.state.convLimit);
+    }
+
+    async loadMoreConversations() {
+        this.state.convLimit += CONV_PAGE;
+        await this.loadConversations();
+    }
+
+    async loadMoreMessages() {
+        this.state.msgLimit += MSG_PAGE;
+        await this.loadMessages(this.state.activeConversation.id, { keepPosition: true });
     }
 
     async selectConversation(convId) {
         this.state.activeConversation = this.state.conversations.find(c => c.id === convId);
         this.state.showChatOnMobile = true;
+        if (this.state.activeConversation?.id !== this._msgConvId) {
+            this.state.msgLimit = MSG_PAGE;  // başka görüşme: sayfalama baştan
+        }
         
         // CRM: Mark as read
         await this.orm.call("social.media.conversation", "mark_as_read", [[convId]]);
@@ -166,15 +199,39 @@ export class SocialInbox extends Component {
         }
     }
 
-    async loadMessages(convId) {
-        // NEDEN: uzun görüşmede tüm geçmiş her 10 sn okunmasın; son 200 mesaj (en yeni → eski çekilip çevrilir).
+    async loadMessages(convId, { keepPosition = false } = {}) {
+        // NEDEN: uzun görüşmede tüm geçmiş her 10 sn okunmasın; son msgLimit mesaj (en yeni → eski çekilip çevrilir).
+        // Fazla gelen 1 satır eski mesaj olduğunu gösterir ("önceki mesajları yükle" düğmesi).
         const msgs = await this.orm.searchRead(
             "social.media.message",
             [["conversation_id", "=", convId]],
             ["id", "content", "message_type", "date", "is_read", "post_link", "has_attachment"],
-            { order: "date desc, id desc", limit: 200 }
+            { order: "date desc, id desc", limit: this.state.msgLimit + 1 }
         );
-        this.state.messages = msgs.reverse();
+        const next = msgs.slice(0, this.state.msgLimit).reverse();
+        this._decideScroll(convId, next, keepPosition);
+        this.state.hasMoreMsgs = msgs.length > this.state.msgLimit;
+        this.state.messages = next;
+        this._msgConvId = convId;
+    }
+
+    _decideScroll(convId, next, keepPosition) {
+        // DIKKAT: state yazılmadan hemen önce çağrılır; böylece niyeti tüketen yama mutlaka bu mesajları
+        // içeren yamadır (araya giren görüşme listesi yamaları niyeti harcayamaz).
+        const el = this.chatContainerRef.el;
+        if (this._msgConvId !== convId || !el) {
+            this._scrollIntent = { bottom: true };   // başka görüşme / ilk çizim: en alta
+            return;
+        }
+        if (keepPosition) {
+            this._scrollIntent = { fromBottom: el.scrollHeight - el.scrollTop };
+            return;
+        }
+        const atBottom = el.scrollHeight - el.scrollTop <= el.clientHeight + 50;
+        const prev = this.state.messages;
+        const hasNew = next.length > 0 && (prev.length === 0 || prev.at(-1).id !== next.at(-1).id);
+        // yeni mesaj yalnız kullanıcı zaten alttaysa alta kaydırır; geçmişi okuyanın konumu korunur
+        this._scrollIntent = atBottom && hasNew ? { bottom: true } : null;
     }
 
     autoResizeInput(ev) {

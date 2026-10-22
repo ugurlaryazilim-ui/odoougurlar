@@ -82,7 +82,8 @@ class NebimProductQueue(models.Model):
         # Day parametresi
         day_map = {'full': '36500', 'daily': '1', 'hourly': '1'}
         day_value = day_map.get(mode, '1')
-        _logger.info("Nebim'den ürünler çekiliyor (mod: %s, Day: %s)...", mode, day_value)
+        # NEDEN: Otomatik tur sık çalışır ve çoğu kez boş döner; iş yoksa INFO yazılmaz (log gürültüsü).
+        _logger.debug("Nebim'den ürünler çekiliyor (mod: %s, Day: %s)...", mode, day_value)
 
         items = connector.run_proc(sp_items, [{'Name': 'Day', 'Value': day_value}])
 
@@ -176,7 +177,7 @@ class NebimProductQueue(models.Model):
         if not pending:
             # Kuyruk bitti: log'u kapat
             self._finalize_sync_log()
-            _logger.info("Kuyruk boş, batch işleme tamamlandı.")
+            _logger.debug("Kuyruk boş, batch işleme tamamlandı.")
             return
 
         processor = self.env['odoougurlar.product.processor']
@@ -343,6 +344,7 @@ class NebimProductQueue(models.Model):
         # Zaten bekleyen kuyruk varsa tekrar çekme
         pending = self.sudo().search_count([('state', 'in', ['pending', 'processing'])])
         if pending > 0:
+            # NEDEN (A5 Ö-5): takılı kuyruk otomatik sync'i sessizce durduruyordu; günlükte görünsün
             _logger.info(
                 "Otomatik sync atlanıyor: %d kayıt hâlâ işleniyor.", pending
             )
@@ -353,10 +355,11 @@ class NebimProductQueue(models.Model):
         if mode == 'full':
             mode = 'daily'
 
-        _logger.info("Otomatik ürün senkronizasyonu başlatılıyor (mod: %s)...", mode)
+        _logger.debug("Otomatik ürün senkronizasyonu başlatılıyor (mod: %s)...", mode)
         try:
             result = self.enqueue_products(mode=mode)
-            _logger.info(
+            _logger.log(
+                logging.INFO if result['total_groups'] else logging.DEBUG,
                 "Otomatik sync: %d ürün kuyruğa eklendi (toplam %d satır)",
                 result['total_groups'], result['total_items']
             )

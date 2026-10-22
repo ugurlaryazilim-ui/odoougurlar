@@ -31,6 +31,7 @@
         'security/nebim_security.xml',
         'security/ir.model.access.csv',
         'data/cron_data.xml',
+        'data/shelf_export_cron.xml',
         'data/ugo_sequence.xml',
         'views/wizard_view.xml',
         'views/settings_view.xml',

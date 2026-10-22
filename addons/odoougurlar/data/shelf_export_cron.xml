@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <data noupdate="1">
+        <!-- K6: raf export Excel eklerini sil (ayar: odoougurlar.shelf_export_retention_days, varsayılan 30; 0 = kapalı) -->
+        <record id="cron_shelf_export_gc" model="ir.cron">
+            <field name="name">Uğurlar Nebim: Eski Raf Export Eklerini Temizle</field>
+            <field name="model_id" ref="base.model_ir_attachment"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_gc_shelf_exports()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">days</field>
+            <field name="active" eval="True"/>
+        </record>
+    </data>
+</odoo>

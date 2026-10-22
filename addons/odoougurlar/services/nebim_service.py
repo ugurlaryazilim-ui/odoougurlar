@@ -1,4 +1,5 @@
 import logging
+import time
 from collections import defaultdict
 from datetime import datetime
 
@@ -9,6 +10,16 @@ _logger = logging.getLogger(__name__)
 # Stok / maliyet senkronizasyonu tek seferde bir tane (pg advisory lock anahtarları)
 NEBIM_STOCK_SYNC_LOCK = 812345001
 NEBIM_COST_SYNC_LOCK = 812345002
+
+# NEDEN (A5 Ö-5): stok kilidi başka çalışma tarafından tutulduğunda her cron turu atlar; kısa
+# çakışma olağandır (DEBUG), ama kilit uzun süre bırakılmıyorsa (takılan iş) görünür olmalı.
+# {dbname: (art arda atlamanın ilk, son time.monotonic() değeri)}; kilit alınınca sıfırlanır. Süreç belleği.
+# NEDEN (A5 Ö-2): kilidi başka worker alınca bu sürecin kaydı silinemez; bayat kayıt günler sonra yanlış büyük
+# "N dk" WARNING'i üretirdi. DB'ye yazmak yerine (her 1 dk'lık atlamada yazma maliyeti) seri kuralı: iki atlama
+# arası STOCK_SKIP_RESET_SECONDS'tan uzunsa seri kopmuştur, sayaç yeniden başlar. Mesaj da "bu süreçte" der.
+_STOCK_SKIP_SINCE = {}
+STOCK_SKIP_WARN_SECONDS = 30 * 60
+STOCK_SKIP_RESET_SECONDS = 5 * 60   # cron 1 dk'da bir; 5 dk atlamasız geçtiyse seri bitmiştir
 
 # Maliyet tam taramasında her commit'te işlenen varyant sayısı
 COST_BATCH_SIZE = 500
@@ -47,7 +58,7 @@ class NebimService(models.AbstractModel):
         queue = self.env['odoougurlar.product.queue']
         # Çalışan batch'i silip veriyi ikinci kez çekmesin (otomatik sync cron'u ile çakışıyordu)
         if queue.sudo().search_count([('state', 'in', ['pending', 'processing'])]):
-            _logger.info("sync_products atlandı: kuyrukta işlenen kayıt var.")
+            _logger.debug("sync_products atlandı: kuyrukta işlenen kayıt var.")
             return {'processed': 0, 'created': 0, 'updated': 0, 'failed': 0}
         result = queue.enqueue_products(mode='daily')
         return {
@@ -76,9 +87,19 @@ class NebimService(models.AbstractModel):
         # Cron ile "Stok Güncelle" / "Tüm Stokları Çek" aynı anda çalışmasın (processor ara
         # commit yaptığından transaction kilidi yetmez: oturum kilidi)
         self.env.cr.execute("SELECT pg_try_advisory_lock(%s)", [NEBIM_STOCK_SYNC_LOCK])
+        dbname = self.env.cr.dbname
         if not self.env.cr.fetchone()[0]:
-            _logger.info("Stok güncelleme atlandı: başka bir stok senkronizasyonu çalışıyor.")
+            now = time.monotonic()
+            first, last = _STOCK_SKIP_SINCE.get(dbname, (now, now))
+            if now - last > STOCK_SKIP_RESET_SECONDS:
+                first = now
+            _STOCK_SKIP_SINCE[dbname] = (first, now)
+            waited = now - first
+            level = logging.WARNING if waited >= STOCK_SKIP_WARN_SECONDS else logging.DEBUG
+            _logger.log(level, "Stok güncelleme atlandı: başka bir stok senkronizasyonu çalışıyor "
+                               "(bu süreçte %d dk'dır art arda atlanıyor).", waited // 60)
             return
+        _STOCK_SKIP_SINCE.pop(dbname, None)
         try:
             self._sync_stock_prices_locked(mode, day_value, log_name)
         finally:
@@ -160,7 +181,9 @@ class NebimService(models.AbstractModel):
             stats = processor.process_invoices()
 
             self._finish_log(log, 'done', stats=stats)
-            _logger.info(
+            # NEDEN: iş yoksa (dakikalık cron) özet INFO yerine DEBUG
+            _logger.log(
+                logging.INFO if stats.get('processed', 0) or stats.get('failed', 0) else logging.DEBUG,
                 "Fatura gönderimi tamamlandı: %d işlendi, %d başarılı, %d hata",
                 stats.get('processed', 0), stats.get('updated', 0),
                 stats.get('failed', 0)

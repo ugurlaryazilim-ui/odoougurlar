@@ -21,6 +21,8 @@ class _ValidationIncomplete(Exception):
 _last_requests = {}  # key: user_id + endpoint + args_hash → timestamp
 MAX_BULK_ITEMS = 500  # toplu raflama / sayım tek istekte en fazla bu kadar kalem
 _DEBOUNCE_SECONDS = 0.5  # 500ms içinde aynı istek tekrarlanırsa atla
+# Çok worker'lı çift okutma kilidi (bkz. _check_duplicate_request); testte bozulabilsin diye sabit
+_SCAN_LOCK_SQL = 'SELECT pg_try_advisory_xact_lock(hashtextextended(%s, 0))'
 
 
 class BarcodeApiBase(http.Controller):
@@ -304,6 +306,27 @@ class BarcodeApiBase(http.Controller):
 
             _last_requests[key] = now
 
+            # NEDEN: yukarıdaki sözlük süreç belleğidir; çok worker'da (veya yeniden başlatmada)
+            # başka worker'a düşen çift okutmayı görmez. Aynı anahtar için işlemi kilitle:
+            # kilit bu isteğin transaction'ı bitene (commit/rollback) kadar tutulur, bu sürede
+            # başka worker'dan gelen aynı istek çift sayılır. Bekleme yok (try): kilitlenme
+            # riski yok. Kilit yalnız uçuştaki isteği yakalar; ilk istek commit olduktan sonra
+            # başka worker'a düşen 500ms içindeki ikinci istek bu kilitle yakalanmaz.
+            # EKIP-BORC: tam 500ms penceresi için ortak (DB) zaman damgası gerekir (yeni model =
+            # modül yükseltmesi); uçuştaki çift okutma asıl riskti, o yüzden yalnız kilit.
+            # NEDEN (A5 Ö-2): savepoint olmadan başarısız SQL transaction'ı abort eder, dıştaki
+            # except yutar ve isteğin geri kalanı "current transaction is aborted" ile düşerdi.
+            # Kilit alınamazsa (hata) istek geçer: çift okutma koruması en iyi çaba, işi engellemez.
+            try:
+                with request.env.cr.savepoint(flush=False):
+                    request.env.cr.execute(_SCAN_LOCK_SQL, ('ugurlar_scan:' + key,))
+                    locked = request.env.cr.fetchone()[0]
+            except Exception:
+                _logger.warning("Çift okutma kilidi alınamadı (%s); istek kilitsiz işleniyor.", endpoint, exc_info=True)
+                locked = True
+            if not locked:
+                return True  # başka worker aynı isteği işliyor
+
             # Bellek temizliği: 1000'den fazla kayıt varsa eski olanları sil
             if len(_last_requests) > 1000:
                 cutoff = now - 60
@@ -311,7 +334,7 @@ class BarcodeApiBase(http.Controller):
                 for k in expired:
                     del _last_requests[k]
         except Exception:
-            pass
+            _logger.warning("Çift istek denetimi atlandı (%s).", endpoint, exc_info=True)
         return False
 
     def _find_product(self, barcode):

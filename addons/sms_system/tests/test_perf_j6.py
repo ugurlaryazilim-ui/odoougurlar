@@ -12,7 +12,7 @@ MODEL = 'odoo.addons.sms_system.models.sms_message'
 @tagged('post_install', '-at_install')
 class TestStatusCandidateLimit(StatusMixin, SmsTestCase):
 
-    def test_status_cron_loads_at_most_limit_newest_first(self):
+    def test_status_cron_loads_at_most_limit_oldest_first(self):
         msgs = [self.make_tracked('053212300%02d' % i, message_id=str(900100 + i)) for i in range(3)]
         seen = []
         original = type(self.Message)._apply_status_rows
@@ -26,8 +26,8 @@ class TestStatusCandidateLimit(StatusMixin, SmsTestCase):
             self.cron_status()
         self.assertTrue(seen, 'durum sorgusu yapılmadı')
         queried = {i for ids in seen for i in ids}
-        # NEDEN: sınır aşılınca en yeni kayıtlar işlenir, en eskisi sonraki çalışmaya kalır
-        self.assertEqual(queried, {msgs[1].id, msgs[2].id})
+        # NEDEN (K4): sınır aşılınca en ESKİ kayıtlar işlenir (48 saat dolmak üzere, starvation olmasın); en yeni sonraki çalışmaya kalır
+        self.assertEqual(queried, {msgs[0].id, msgs[1].id})
 
 
 @tagged('post_install', '-at_install')

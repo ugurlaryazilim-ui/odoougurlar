@@ -2,6 +2,8 @@
 from odoo import models, fields, api
 from datetime import datetime, timedelta
 
+from ..tools import mask_secrets
+
 # NEDEN: Facebook/Instagram/token isteklerinde timeout yoktu; yanıt vermeyen sunucu cron işçisini sonsuza dek tutuyordu.
 _HTTP_TIMEOUT = 60
 # DIKKAT: cron her 3 dk çalışır; işçi ölürse ('posting' commit'lenmiş) gönderi sonsuza dek takılırdı.
@@ -223,14 +225,16 @@ class SocialMediaPostLine(models.Model):
                 return True
         except Exception as e:
             self.state = 'error'
-            self.error_message = str(e)
+            # NEDEN: requests bağlantı hatası metni URL'yi taşır; token hata alanına (herkesin okuduğu) yazılmasın.
+            self.error_message = mask_secrets(f"{type(e).__name__}: {e}", self.account_id.sudo().api_token)
             return False
 
     def _publish_to_facebook(self):
         import requests
         base_url = self.env['ir.config_parameter'].sudo().get_param('web.base.url')
         page_id = self.account_id.meta_page_id
-        token = self.account_id.api_token
+        # NEDEN: api_token yalnız yöneticiye açık; yayın cron'dan (root) gelir ama elle çağrı da çalışmalı.
+        token = self.account_id.sudo().api_token
         
         if not page_id or not token:
             raise ValueError("Facebook Page ID or Token is missing.")
@@ -340,11 +344,11 @@ class SocialMediaPostLine(models.Model):
     def _publish_to_instagram(self):
         import requests
         import time
-        import urllib.parse
-        
+
         base_url = self.env['ir.config_parameter'].sudo().get_param('web.base.url')
         ig_id = self.account_id.meta_ig_id
-        token = self.account_id.api_token
+        # NEDEN: api_token yalnız yöneticiye açık; yayın cron'dan (root) gelir ama elle çağrı da çalışmalı.
+        token = self.account_id.sudo().api_token
         
         if not ig_id or not token:
             raise ValueError("Instagram Account ID or Token is missing.")
@@ -365,28 +369,24 @@ class SocialMediaPostLine(models.Model):
             # Add a dummy extension to the URL because Instagram API requires it
             ext = "/video.mp4" if is_video else "/image.jpg"
             img_url = f"{base_url}/web/{route}/{img.id}{ext}"
-            encoded_url = urllib.parse.quote(img_url, safe='')
-            
+
             if is_video:
                 is_video_post = True
-                media_param = f"video_url={encoded_url}"
-            else:
-                media_param = f"image_url={encoded_url}"
 
-            # Is carousel item?
-            is_carousel = "true" if len(images) > 1 and self.post_id.post_type == 'post' else "false"
-            
-            cont_url = f"https://graph.facebook.com/v19.0/{ig_id}/media?{media_param}&is_carousel_item={is_carousel}&access_token={token}"
-            
+            # NEDEN: token ve metinler URL'ye değil gövdeye (data=) gider; bağlantı hatası metni URL'yi taşır.
+            payload = {'access_token': token}
+            payload['video_url' if is_video else 'image_url'] = img_url
             if self.post_id.post_type == 'story':
-                cont_url = f"https://graph.facebook.com/v19.0/{ig_id}/media?{media_param}&media_type=STORIES&access_token={token}"
+                payload['media_type'] = 'STORIES'
             elif self.post_id.post_type == 'reels':
-                cont_url = f"https://graph.facebook.com/v19.0/{ig_id}/media?{media_param}&media_type=REELS&access_token={token}"
-                
+                payload['media_type'] = 'REELS'
+            else:
+                # Is carousel item?
+                payload['is_carousel_item'] = "true" if len(images) > 1 and self.post_id.post_type == 'post' else "false"
             if len(images) == 1 and self.post_id.post_type != 'story':
-                 cont_url += f"&caption={urllib.parse.quote(message, safe='')}"
-                 
-            res = requests.post(cont_url, timeout=_HTTP_TIMEOUT).json()
+                payload['caption'] = message
+
+            res = requests.post(f"https://graph.facebook.com/v19.0/{ig_id}/media", data=payload, timeout=_HTTP_TIMEOUT).json()
             if 'error' in res:
                 raise ValueError(res['error']['message'])
             container_ids.append(res.get('id'))
@@ -396,15 +396,16 @@ class SocialMediaPostLine(models.Model):
         if len(images) > 1:
             # Create Carousel Container
             import json
-            children = "%2C".join(container_ids)
-            carousel_url = f"https://graph.facebook.com/v19.0/{ig_id}/media?media_type=CAROUSEL&children={children}&caption={urllib.parse.quote(message, safe='')}&access_token={token}"
-            res2 = requests.post(carousel_url, timeout=_HTTP_TIMEOUT).json()
+            res2 = requests.post(f"https://graph.facebook.com/v19.0/{ig_id}/media", data={
+                'media_type': 'CAROUSEL', 'children': ",".join(container_ids), 'caption': message, 'access_token': token,
+            }, timeout=_HTTP_TIMEOUT).json()
             if 'error' in res2:
                 raise ValueError(res2['error']['message'])
             publish_container_id = res2.get('id')
 
         # Publish the container (with retry for videos)
-        pub_url = f"https://graph.facebook.com/v19.0/{ig_id}/media_publish?creation_id={publish_container_id}&access_token={token}"
+        pub_url = f"https://graph.facebook.com/v19.0/{ig_id}/media_publish"
+        pub_data = {'creation_id': publish_container_id, 'access_token': token}
         
         max_retries = 18 if is_video_post else 1
         wait_time = 10  # wait 10 seconds between retries for video processing
@@ -413,7 +414,7 @@ class SocialMediaPostLine(models.Model):
             if is_video_post and attempt > 0:
                 time.sleep(wait_time)
                 
-            res3 = requests.post(pub_url, timeout=_HTTP_TIMEOUT).json()
+            res3 = requests.post(pub_url, data=pub_data, timeout=_HTTP_TIMEOUT).json()
             
             if 'error' not in res3:
                 self.platform_post_id = res3.get('id')
@@ -429,8 +430,9 @@ class SocialMediaPostLine(models.Model):
         return False
 
     def _publish_to_youtube(self):
-        self.account_id._refresh_youtube_token()
-        token = self.account_id.api_token
+        self.account_id.sudo()._refresh_youtube_token()
+        # NEDEN: api_token yalnız yöneticiye açık; yayın cron'dan (root) gelir ama elle çağrı da çalışmalı.
+        token = self.account_id.sudo().api_token
         
         if not token:
             raise ValueError("YouTube API Token is missing. Please re-authenticate.")
@@ -507,8 +509,9 @@ class SocialMediaPostLine(models.Model):
 
     def _publish_to_tiktok(self):
         """Publish video to TikTok using Content Posting API v2."""
-        self.account_id._refresh_tiktok_token()
-        token = self.account_id.api_token
+        self.account_id.sudo()._refresh_tiktok_token()
+        # NEDEN: api_token yalnız yöneticiye açık; yayın cron'dan (root) gelir ama elle çağrı da çalışmalı.
+        token = self.account_id.sudo().api_token
 
         if not token:
             raise ValueError("TikTok API Token eksik. Lütfen tekrar giriş yapın.")

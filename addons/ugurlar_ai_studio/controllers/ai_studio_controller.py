@@ -772,6 +772,14 @@ class AiStudioController(http.Controller):
     REVIEW_LOCK_TIMEOUT_MINUTES = 5
 
     @staticmethod
+    def _mask_token(token):
+        """Log için inceleme jetonunu maskele: ilk 4 karakter + '***'.
+
+        NEDEN: jeton, ekranın kilit sahibi olduğunu kanıtlar (J10); log okuyan biri onu kullanabilir.
+        """
+        return '%s***' % (token or '')[:4]
+
+    @staticmethod
     def _stale_review_screen(session, lock_token):
         """Onaycının eylemi, oturumun GÜNCEL inceleme kilidini tutan ekrandan mı gelmiyor?
 
@@ -852,7 +860,8 @@ class AiStudioController(http.Controller):
                     #    (Sayfa yenilemesi, tarayıcı çökmesi vb. sonrası kendi kilidinin takılmasını önler)
                     if session.review_locked_by.id == current_user.id:
                         _logger.info('Oturum %s: aynı kullanıcı (%s) kilidi devraldı (eski token: %s -> yeni: %s)',
-                                     session.id, current_user.name, lock_token_now, lock_token)
+                                     session.id, current_user.name, self._mask_token(lock_token_now),
+                                     self._mask_token(lock_token))
                         session.sudo().write({
                             'review_lock_time': now,
                             'review_lock_token': lock_token or '',
@@ -864,7 +873,8 @@ class AiStudioController(http.Controller):
                     lock_seconds = int(lock_age.total_seconds() % 60)
                     locker_name = session.review_locked_by.name or 'Başka bir kullanıcı'
                     _logger.warning('Oturum %s KİLİTLİ! İnceleyen: %s (token: %s). İsteyen: %s (token: %s)',
-                                    session.id, locker_name, lock_token_now, current_user.name, lock_token)
+                                    session.id, locker_name, self._mask_token(lock_token_now),
+                                    current_user.name, self._mask_token(lock_token))
                     return {
                         'success': False,
                         'locked': True,
@@ -875,7 +885,8 @@ class AiStudioController(http.Controller):
                 # Süresi dolmuş — kilidi devral
 
             # Kilidi al
-            _logger.info('Oturum %s kilidi ALINDI: kullanıcı %s (token: %s)', session.id, current_user.name, lock_token)
+            _logger.info('Oturum %s kilidi ALINDI: kullanıcı %s (token: %s)', session.id, current_user.name,
+                         self._mask_token(lock_token))
             session.sudo().write({
                 'review_locked_by': current_user.id,
                 'review_lock_time': now,
