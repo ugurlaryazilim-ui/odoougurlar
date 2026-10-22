@@ -72,5 +72,16 @@
             <field name="interval_type">months</field>
             <field name="active" eval="False"/>
         </record>
+
+        <!-- K6: eski senkron loglarını sil (ayar: ads_manager.log_retention_days, varsayılan 180; 0 = kapalı) -->
+        <record id="ir_cron_ads_sync_log_gc" model="ir.cron">
+            <field name="name">Ads Manager: Clean Old Sync Logs</field>
+            <field name="model_id" ref="model_ads_sync_log"/>
+            <field name="state">code</field>
+            <field name="code">model._cron_gc_old_logs()</field>
+            <field name="interval_number">1</field>
+            <field name="interval_type">days</field>
+            <field name="active" eval="True"/>
+        </record>
     </data>
 </odoo>
