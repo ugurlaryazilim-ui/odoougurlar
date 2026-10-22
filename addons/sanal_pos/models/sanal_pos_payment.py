@@ -1766,8 +1766,38 @@ class SanalPosPayment(models.Model):
             self._sync_status()
         else:
             return False
+        self._alert_long_pending_refunds(now)
         self.write({'sync_requested': False, 'last_checked_at': fields.Datetime.now()})
         return True
+
+    def _alert_long_pending_refunds(self, now):
+        """KK-12: 72 saatten uzun 'Onay bekliyor' iade için yönetici grubuna + iadeyi yapana tek uyarı.
+
+        Sorgu sonucuna bağlı değildir (sorgu başarısız olsa da çalışır); satırı sonuçlandırmaz.
+        Tek seferliktir: `pending_alert_sent` bayrağı mesajla aynı savepoint'te yazılır.
+        """
+        self.ensure_one()
+        rec = self.sudo()
+        # NEDEN: Paratika bekleyen iadeyi sonsuza dek bekletebilir ve satır "bulunamadı" ile
+        # hiç düşmez; tek güvence insanın Paratika panelinden bakmasıdır (bkz. KARARLAR K-12).
+        lines = rec.refund_ids.filtered(
+            lambda l: l.state == 'pending_approval' and not l.pending_alert_sent
+            and l.create_date and l.create_date <= now - REFUND_PENDING_ALERT_AGE)
+        if not lines:
+            return
+        managers = self.env.ref('sanal_pos.group_sanal_pos_manager').sudo().all_user_ids.partner_id
+        for line in lines:
+            partners = managers | self._creator_partner() | line.user_id.partner_id
+            body = ('%s – %s iade 72 saattir Paratika finans onayı bekliyor; '
+                    'Paratika panelinden kontrol edin.') % (rec.invoice_no, format_try(line.amount))
+            try:
+                with self.env.cr.savepoint():
+                    rec.message_post(body=body, message_type='comment',
+                                     subtype_xmlid='mail.mt_note', partner_ids=partners.ids)
+                    line.write({'pending_alert_sent': True})
+            except Exception as exc:  # noqa: BLE001 - uyarı hatası senkronu bozmaz; sonraki turda tekrar denenir
+                _logger.warning('sanal_pos: 72 saat uyarısı yazılamadı (%s), ödeme id=%s',
+                                type(exc).__name__, self.id)
 
     def _has_refund_to_reconcile(self, now):
         """KK-47: belirsiz, onay bekleyen (K-12) ya da yarıda kalmış ('İşleniyor', 5 dk+) satır var mı."""
