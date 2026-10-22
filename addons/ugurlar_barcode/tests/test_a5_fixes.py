@@ -70,6 +70,20 @@ class TestA5CountSaveTypes(BarcodeCase):
         self.assertTrue(res.get('success'), res)
         self.assertEqual(self._qty(prod, self.shelf), 2)
 
+    def test_missing_or_null_quantity_is_invalid_not_zero(self):
+        # B4: eksik/null/boş miktar rafı sıfırlamaz; açık 0 hâlâ geçerli
+        bc = self.prod.barcode
+        self.ctl.count_save(shelf_barcode='A5-CN-RAF-1', items=[{'barcode': bc, 'quantity': 5}])
+        self.assertEqual(self._qty(self.prod, self.shelf), 5)
+        for item in ({'barcode': bc}, {'barcode': bc, 'quantity': None}, {'barcode': bc, 'quantity': ''}):
+            res = self.ctl.count_save(shelf_barcode='A5-CN-RAF-1', items=[item])
+            self.assertEqual(res['results'][0]['status'], 'error', item)
+            self.assertEqual(res['results'][0]['message'], 'Geçersiz miktar', item)
+            self.assertEqual(self._qty(self.prod, self.shelf), 5, item)
+        res = self.ctl.count_save(shelf_barcode='A5-CN-RAF-1', items=[{'barcode': bc, 'quantity': 0}])
+        self.assertNotEqual(res['results'][0]['status'], 'error', res)
+        self.assertEqual(self._qty(self.prod, self.shelf), 0)
+
     def test_items_not_a_list_is_error(self):
         for items in ({'barcode': 'x'}, 5, 'abc'):
             self.assertIn('error', self.ctl.count_save(shelf_barcode='A5-CN-RAF-1', items=items))
