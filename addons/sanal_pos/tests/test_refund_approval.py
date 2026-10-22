@@ -541,12 +541,26 @@ class TestWaiting(ApprovalCase):
         self.query(payment, rt('IP', 2500.0, 'R-W1'))
         self.sync(payment)
         self.refresh(line)
-        chatter, write_date = self.chatter(payment), line.write_date
-        for _ in range(3):
-            self.sync(payment)
+        # Çapa: ilk sorgu ham durumu yazmış olmalı (özellik yokken test burada kırmızı)
+        self.assertEqual(line.provider_status, 'IP')
+        chatter = self.chatter(payment)
+        # write_date TransactionCase'te işlem zamanıdır (sabit); yazımı casusla say
+        from unittest.mock import patch
+        model = type(self.env[REFUND])
+        original_write = model.write
+        writes = []
+
+        def spy(records, vals):
+            if line.id in records.ids:
+                writes.append(dict(vals))
+            return original_write(records, vals)
+
+        with patch.object(model, 'write', spy):
+            for _ in range(3):
+                self.sync(payment)
         self.refresh(line)
         self.assertEqual(self.chatter(payment), chatter, 'bekleyen satır için chatter notu düşülmez')
-        self.assertEqual(line.write_date, write_date, 'ham durum yalnız değişince yazılır')
+        self.assertEqual(writes, [], 'ham durum yalnız değişince yazılır')
 
     def test_kk7_durum_degisince_ham_durum_guncellenir(self):
         payment, line = self.pending_payment(2500.0, ref='R-W2')
@@ -577,6 +591,8 @@ class TestWaiting(ApprovalCase):
         with self.capture_logs() as records:
             self.sync(payment)
         self.assertFalse([r for r in records if 'tanınmayan' in r], records)
+        _line.invalidate_recordset()
+        self.assertEqual(_line.provider_status, 'IP', 'tanınan kod da ham durum olarak saklanır')
 
     def test_kk8_bulunamadi_hicbir_sayi_ve_yasta_basarisiz_yapmaz(self):
         payment, line = self.pending_payment(2500.0, ref='R-N1')
@@ -718,10 +734,12 @@ class TestMatching(ApprovalCase):
         self.query(payment, rt('AP', 2500.0, 'R-USED'))
         # ilk iade onaylı; ikinci (aynı tutar) iade istenir
         line = self.request_refund(payment, 2500.0, ref=None)
+        # Boşta aday R-FREE: R-USED aday sayılsaydı iki aday olur, belirsiz kalır ve bağlanmazdı
+        self.query(payment, rt('AP', 2500.0, 'R-USED'), rt('IP', 2500.0, 'R-FREE'))
         self.sync(payment)
         self.refresh(line, done)
         self.assertEqual(line.state, 'pending_approval', 'R-USED başka satıra ait; bu satıra bağlanmaz')
-        self.assertFalse(line.provider_ref)
+        self.assertEqual(line.provider_ref, 'R-FREE', 'tek geçerli aday (R-FREE) bağlanır')
         self.assertEqual(done.provider_ref, 'R-USED')
 
 

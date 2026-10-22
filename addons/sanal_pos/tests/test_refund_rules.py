@@ -49,8 +49,11 @@ class TestUnknownRefundNotFound(RefundCase):
         for _ in range(3):
             self.run_cron(CRON_SYNC)
         line.invalidate_recordset()
-        self.assertEqual((line.state, line.not_found_count), ('unknown', 0),
+        # K-12 / KK-13: aynı tutarlı bekleyen (IP) işlem belirsiz satırın kendisidir; satır
+        # 'Onay bekliyor'a geçer. Asıl güvence aynı: başarısız sayılmaz, sayaç artmaz.
+        self.assertEqual((line.state, line.not_found_count), ('pending_approval', 0),
                          'bekleyen işlem varken sayaç artmamalı')
+        self.assertEqual(line.provider_ref, 'R-PEND')
         self.assertEqual(len(self.lines(payment)), 1, 'bekleyen işlem panel satırı açmamalı')
         # bekleyen işlem onaylanınca eşleşir
         self.set_query_transactions(tran('AP', 'SALE', '9000.00', 'T1'),
