@@ -14,13 +14,13 @@ Ortak sonuç anahtarları: ``ok``, ``timeout``, ``error_code``, ``error_message`
 * ``create_session`` -> ``token`` (Mail Order: Direct POST oturumu; hata/zaman aşımı/token yok ->
   ``ok=False``, belirsizlik yoktur)
 * ``direct_post_url`` -> kart formunun gönderileceği adres ya da ``None`` (çağrı yapmaz)
-* ``query_installments`` -> ``options`` (``[{'count': int, 'networks': [str], 'rate': float}]``;
-  hata -> ``ok=False``, ``options=[]``)
+* ``query_installments`` -> ``options`` (``[{'count': int, 'networks': [str], 'rate': float,
+  'systems': [{'keys': [str], 'rate': float}]}]``; hata -> ``ok=False``, ``options=[]``)
 * ``resend``       -> -
 * ``cancel_link``  -> ``already_closed``
 * ``find_link``    -> ``found``, ``token``, ``status`` (+ ``ambiguous``)
 * ``query_status`` -> ``transactions`` (``ref, kind, status, amount, currency, time,
-  installment_count, card_last4``)
+  installment_count, payment_system, card_last4``)
 * ``void`` / ``refund`` -> ``ref``
 * ``parse_notification(params)`` -> ödeme numarası ya da ``None``
 

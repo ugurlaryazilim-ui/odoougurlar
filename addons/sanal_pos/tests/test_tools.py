@@ -156,6 +156,22 @@ class TestInstallmentTable(TransactionCase):
         self.assertEqual(t.installment_totals(Decimal('0.50'), 1, 1)[0], Decimal('0.51'))
         self.assertEqual(t.installment_totals(1450, 0, 3), (Decimal('1450.00'), Decimal('483.33')))
 
+    def test_vade_farki_orani_eslesmesi(self):
+        """Çekilen tutar = tutar x (1 + oran/100) ± taksit sayısı kadar kuruş; oran 0 eşleşmez."""
+        t = _tools()
+        m = t.match_surcharge_rate
+        self.assertEqual(m('9000', '10221.30', 7, [13.57]), Decimal('13.57'))
+        self.assertEqual(m('9000', '10221.37', 7, [13.57]), Decimal('13.57'))
+        self.assertIsNone(m('9000', '10221.38', 7, [13.57]))
+        self.assertIsNone(m('9000', '10221.30', 1, [13.57]))           # tek çekim
+        self.assertIsNone(m('9000', '9000.00', 7, [13.57]))            # fark yok
+        self.assertIsNone(m('9000', '8999.00', 7, [13.57]))            # eksik
+        self.assertIsNone(m('9000', '9000.05', 7, [0]))                # oran 0
+        self.assertIsNone(m('9000', '10221.30', 7, []))                # oran bilinmiyor
+        # Birden çok oran: en yakın toplam seçilir
+        self.assertEqual(m('9000', '10350.00', 7, [13.57, 15.0]), Decimal('15.0'))
+        self.assertEqual(t.format_rate(13.57), '%13,57')
+
     def test_ortak_program_tek_satir_unknown_gizli(self):
         t = _tools()
         options = [{'count': 2, 'networks': ['PARAF', 'UNKNOWN', 'KVY_NTW'], 'rate': 0},

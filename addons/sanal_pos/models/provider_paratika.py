@@ -569,6 +569,10 @@ class SanalPosProviderParatika(models.AbstractModel):
             if not isinstance(system, dict):
                 continue
             network = str(system.get('paymentSystemNetwork') or system.get('name') or '').strip()
+            # Vade farkı eşleşmesi için (_installment_surcharge_note): QUERYTRANSACTION'ın
+            # ``paymentSystem`` değeri bu üç kimlikten biriyle karşılaştırılır.
+            keys = sorted({str(system.get(k)).strip() for k in ('name', 'paymentSystemNetwork', 'paymentSystem')
+                           if system.get(k) not in (None, '')})
             for item in system.get('installmentList') or []:
                 try:
                     count = int(str(item.get('count')).strip())      # 'NOT_ON_US' atlanır
@@ -576,13 +580,15 @@ class SanalPosProviderParatika(models.AbstractModel):
                     continue
                 if count < 2:
                     continue
-                option = merged.setdefault(count, {'count': count, 'networks': [], 'rate': 0.0})
+                option = merged.setdefault(count, {'count': count, 'networks': [], 'rate': 0.0,
+                                                   'systems': []})
                 if network and network not in option['networks']:
                     option['networks'].append(network)
                 try:
                     rate = float(item.get('customerCostCommissionRate') or 0)
                 except (TypeError, ValueError):
                     rate = 0.0
+                option['systems'].append({'keys': keys, 'rate': rate})
                 # Aynı sayı birden çok ağda farklı oranlıysa en yüksek oran gösterilir (güvenli taraf)
                 option['rate'] = max(option['rate'], rate)
         res['options'] = [merged[count] for count in sorted(merged)]
@@ -722,6 +728,9 @@ class SanalPosProviderParatika(models.AbstractModel):
             'currency': currency,
             'time': _parse_time(item.get('timeCreated')),
             'installment_count': installments,
+            # G0: biçimi doğrulanmadı (belge örneği sistem adı: 'ISBANK TEST'); vade farkı oranını
+            # ağa göre seçmek için kullanılır, eşleşmezse tüm oranlara bakılır.
+            'payment_system': str(item.get('paymentSystem') or '').strip() or None,
             'card_last4': item.get('panLast4') or None,
             'raw_type': ttype,
             'raw_status': code,
