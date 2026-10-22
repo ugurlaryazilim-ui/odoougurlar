@@ -19,3 +19,6 @@ from . import test_connection_test
 from . import test_refund_approval
 from . import test_refund_migration
 from . import test_refund_migration_rules
+from . import test_mail_order
+from . import test_mail_order_http
+from . import test_mail_order_pci

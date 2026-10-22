@@ -26,7 +26,7 @@ from odoo.tools import html2plaintext
 
 from .mocks import (  # noqa: F401  (testler buradan alır)
     LIVE_URL_PREFIX, TEST_URL_PREFIX, ParatikaMock, RawResponse, connection_exc,
-    err_body, make_send_patch, ok_body, qt_body, timeout_exc, tran,
+    err_body, installment_body, make_send_patch, ok_body, qt_body, timeout_exc, tran,
 )
 
 INV_NO = 'UGR2026000012587'
@@ -61,6 +61,20 @@ CRON_DAILY = 'sanal_pos.cron_sanal_pos_daily'
 OPEN_STATES = ('sending', 'sent', 'unknown')
 PAID_STATES = ('paid', 'partial_refund', 'review', 'refund_pending')   # K-12
 REUSABLE_STATES = ('expired', 'link_cancelled', 'error', 'voided', 'refunded')
+
+# Mail Order (KK-17): Odoo'dan Paratika'ya giden HİÇBİR istek kart verisi taşımamalı.
+# Kart bilgisi tarayıcıdan doğrudan Paratika'ya gider; sunucu tarafında bu anahtarlar bulunamaz.
+CARD_PARAM_NAMES = frozenset({
+    'PAN', 'CVV', 'CVC', 'CARDPAN', 'CARDCVV', 'CARDEXPIRY', 'EXPIRYMONTH', 'EXPIRYYEAR',
+    'NAMEONCARD', 'CARDOWNER', 'CARDTOKEN', 'CARDHOLDER', 'CARDNUMBER',
+})
+MAIL_ORDER_PAY_PATH = '/sanal_pos/mail_order/pay/%d'
+MAIL_ORDER_RETURN_PATH = '/sanal_pos/paratika/mo_return'
+MAIL_ORDER_RESULT_PATH = '/sanal_pos/mail_order/result'
+# Test kart değerleri (Luhn geçerli test PAN'ı; sızıntı aramasında benzersiz iğne olarak kullanılır)
+LEAK_PAN = '4355084355084358'
+LEAK_CVV = '000'
+LEAK_OWNER = 'ZZQXKART TESTI'
 
 
 def invoice_rows(invoice_no=INV_NO, total='9000.00', currency='TRY', lines=3, **overrides):
@@ -168,6 +182,12 @@ class SanalPosMixin:
     def _check_unexpected_actions(self):
         self.assertEqual(self.mock.unexpected, [],
                          'Testte tanımlı olmayan Paratika action çağrıldı')
+        # KK-17 değişmezi: hiçbir testte Paratika'ya giden istekte kart verisi parametresi olmaz
+        for call in self.mock.calls:
+            leaked = [k for k in call.params
+                      if k.upper() in CARD_PARAM_NAMES or k.upper().startswith('CARD')]
+            self.assertEqual(leaked, [], 'Paratika %s isteği kart parametresi taşıyor: %s'
+                             % (call.action, leaked))
 
     def _probe(self):
         """Paratika çağrısı anındaki durum: commit sayısı ve DB'deki (flush'sız) satırlar."""
@@ -267,6 +287,39 @@ class SanalPosMixin:
             [payment.user_id.id or self.user_sp.id, payment.id])
         payment.invalidate_recordset()
         return payment
+
+    def make_mail_order(self, **vals):
+        """Doğrudan (sudo) Mail Order kaydı: Gönderildi (= kart sayfası açık), kanal yok, 1 saat."""
+        n = next(self._payment_seq)
+        now = datetime.utcnow().replace(microsecond=0)
+        data = {
+            'payment_method': 'mail_order',
+            'channel_sms': False,
+            'channel_email': False,
+            'expiry_hours': 1,
+            'provider_token': 'MOT-SEED-%d' % n,
+            'expires_at': now + timedelta(minutes=55),
+        }
+        data.update(vals)
+        return self.make_payment(**data)
+
+    def mail_order_wizard(self, user=None, invoice_no=INV_NO, fetch=True, email=EMAIL, **vals):
+        """Yeni Mail Order sihirbazı (create.wizard'ı miras alır): oluştur, faturayı getir, alanları yaz."""
+        env = self.env(user=user or self.user_sp)
+        wiz = env['sanal.pos.mail.order.wizard'].create({'invoice_no': invoice_no})
+        if fetch:
+            wiz.action_fetch_invoice()
+        if email is not None and 'customer_email' not in vals:
+            vals['customer_email'] = email
+        if vals:
+            wiz.write(vals)
+        return wiz
+
+    def create_mail_order(self, **kw):
+        """Sihirbazı kurup 'Kart Sayfasını Aç'a basar; oluşan ödeme kaydını döndürür."""
+        wiz = self.mail_order_wizard(**kw)
+        wiz.action_create_mail_order()
+        return self.last_payment()
 
     def make_paid(self, payment=None, paid_at=None, tran_ref='T1', **vals):
         """Ödenmiş kayıt (state='paid')."""
@@ -410,5 +463,7 @@ __all__ = [
     'PAID_STATES', 'REUSABLE_STATES', 'invoice_rows', 'field_for_param',
     'SanalPosCase', 'SanalPosHttpCase',
     'LIVE_URL_PREFIX', 'TEST_URL_PREFIX', 'RawResponse', 'connection_exc', 'err_body',
-    'ok_body', 'qt_body', 'timeout_exc', 'tran', 'ParatikaMock',
+    'ok_body', 'qt_body', 'timeout_exc', 'tran', 'ParatikaMock', 'installment_body',
+    'CARD_PARAM_NAMES', 'MAIL_ORDER_PAY_PATH', 'MAIL_ORDER_RETURN_PATH',
+    'MAIL_ORDER_RESULT_PATH', 'LEAK_PAN', 'LEAK_CVV', 'LEAK_OWNER', 'CRON_SYNC_FLAGGED',
 ]
