@@ -146,10 +146,10 @@
                                     <div class="mo-field">
                                         <label for="pan">Kart numarası</label>
                                         <input id="pan" name="pan" class="mo-input mo-pan" type="text" inputmode="numeric"
-                                               pattern="[0-9]{13,19}" maxlength="19" autocomplete="off"
+                                               pattern="[0-9]{12,19}" maxlength="19" autocomplete="off"
                                                placeholder="0000 0000 0000 0000" aria-describedby="pan-hint"
                                                required="required"/>
-                                        <p id="pan-hint" class="mo-hint">Yalnız rakam, boşluksuz (13-19 hane).</p>
+                                        <p id="pan-hint" class="mo-hint">Yalnız rakam, boşluksuz (12-19 hane).</p>
                                     </div>
                                     <div class="mo-row">
                                         <div class="mo-field">

@@ -215,7 +215,7 @@ class TestCardPage(MoHttpCase):
             self.assertTrue(src.startswith('/sanal_pos/static/src/img/card-'), src)
             self.assertEqual(self.url_open(src).status_code, 200, src)
         pan = main.xpath('.//input[@name="pan"]')[0]
-        self.assertEqual(pan.get('pattern'), '[0-9]{13,19}')
+        self.assertEqual(pan.get('pattern'), '[0-9]{12,19}')
         self.assertEqual(pan.get('maxlength'), '19')
         self.assertEqual(pan.get('autocomplete'), 'off')
         self.assertEqual(pan.get('placeholder'), '0000 0000 0000 0000')
