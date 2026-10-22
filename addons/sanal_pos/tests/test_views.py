@@ -66,7 +66,7 @@ class TestScreens(SanalPosCase):
 
     def test_kk33_hazir_filtreler(self):
         arch = self.views(PAYMENT, self.user_sp)['search']
-        for name in ('open', 'paid', 'partial_refund', 'refunded', 'voided', 'expired',
+        for name in ('open', 'paid', 'refund_pending', 'partial_refund', 'refunded', 'voided', 'expired',
                      'link_cancelled', 'error', 'review', 'mine'):
             self.assertIn('name="%s"' % name, arch, 'hazır filtre eksik: %s' % name)
 
