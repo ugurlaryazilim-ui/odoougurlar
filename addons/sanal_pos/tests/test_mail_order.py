@@ -234,6 +234,48 @@ class TestProviderSession(MailOrderCase):
         self.assertEqual([k for k in p if k.startswith('CARD')], [])
         self.assertTrue(call.url.startswith(TEST_URL_PREFIX))
 
+    def test_create_session_orderitems_tek_kalem(self):
+        # Canlı hata: ORDERITEMS yok -> ERR10010 "zorunlu parametre bulunamadı". Doküman örneği
+        # (SESSIONTOKEN PAYMENTSESSION) her istekte ORDERITEMS taşır; tek kalem, toplam = AMOUNT.
+        payment = self.sending_mo()
+        self.env[PROVIDER].create_session(payment)
+        raw = self.mock.last('SESSIONTOKEN').params.get('ORDERITEMS')
+        self.assertTrue(raw, 'ORDERITEMS gönderilmeli')
+        items = json.loads(raw)
+        self.assertEqual(len(items), 1)
+        item = items[0]
+        self.assertEqual(item['quantity'], 1)
+        self.assertEqual(item['amount'], 9000.0)
+        self.assertIn(payment.invoice_no, item['name'])
+        # productCode verilmezse Paratika üretir; verilirse tekil olmalı (yeniden denemede çakışır)
+        self.assertNotIn('productCode', item)
+
+    def test_create_session_orderitems_eposta_bos_olsa_da_gider(self):
+        payment = self.sending_mo(customer_email=False, customer_phone=False)
+        self.env[PROVIDER].create_session(payment)
+        params = self.mock.last('SESSIONTOKEN').params
+        self.assertNotIn('CUSTOMEREMAIL', params)
+        self.assertTrue(params.get('ORDERITEMS'))
+
+    def test_hata_mesaji_ihlal_eden_alani_gosterir(self):
+        # Paratika her hata yanıtında ``violatorParam`` döndürür; zorunlu alan hatasında hangi
+        # alanın eksik olduğu kullanıcıya (ve günlüğe) açıkça yazılmalı.
+        self.mock.queue('SESSIONTOKEN', err_body('ERR10010', 'Missing', violatorParam='CUSTOMEREMAIL'))
+        res = self.env[PROVIDER].create_session(self.sending_mo())
+        self.assertEqual(res['error_code'], 'ERR10010')
+        self.assertIn('zorunlu bir alanın boş', res['error_message'])
+        self.assertIn('CUSTOMEREMAIL', res['error_message'])
+
+    def test_hata_mesaji_ihlal_eden_alan_sanitize(self):
+        # violatorParam sağlayıcıdan gelir; yalnız parametre adı biçimi kabul edilir
+        for bad in ('4111111111111111', 'a b<script>', 'x' * 80, ''):
+            with self.subTest(bad=bad):
+                self.mock.queue('SESSIONTOKEN', err_body('ERR10010', 'Missing', violatorParam=bad))
+                res = self.env[PROVIDER].create_session(self.sending_mo(
+                    invoice_no='VP-%d' % len(bad), merchant_payment_id='VP-%d-1' % len(bad)))
+                self.assertNotIn(bad or 'zzz', res['error_message'])
+                self.assertNotIn('alan:', res['error_message'])
+
     def test_create_session_islem_kaydi_yazar(self):
         payment = self.sending_mo()
         self.env[PROVIDER].create_session(payment)

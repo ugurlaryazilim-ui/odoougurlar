@@ -49,6 +49,8 @@ CARD_LIKE_KEY_RE = re.compile(
 # ayardaki API adresi başka host gösterirse kart sayfası açılmaz (kart başka adrese gönderilmesin).
 DIRECT_POST_HOSTS = ('vpos.paratika.com.tr', 'test.paratika.com.tr')
 
+VIOLATOR_RE = re.compile(r'[A-Za-z][A-Za-z0-9_.]{0,63}')    # Paratika parametre adı biçimi
+
 _ISTANBUL = ZoneInfo('Europe/Istanbul')
 _UTC = timezone.utc
 
@@ -255,11 +257,16 @@ class SanalPosProviderParatika(models.AbstractModel):
             url, data=body, headers={'Content-Type': CONTENT_TYPE},
             timeout=TIMEOUT, allow_redirects=False)
 
-    def _error_message(self, code, message):
+    def _error_message(self, code, message, violator=''):
         text = ERROR_MESSAGES.get(code)
         if not text:
             detail = message or 'Bilinmeyen hata'
             text = '%s (%s)' % (detail, code) if code else detail
+        # NEDEN: ERR10010 "zorunlu alan yok" hangi alan olduğunu söylemez; Paratika bunu
+        # ``violatorParam``'da döndürür. Sağlayıcıdan geldiği için yalnız parametre adı biçimi
+        # (harfle başlar, 64 karakter) kabul edilir; kart numarası/serbest metin geçmez.
+        if violator and VIOLATOR_RE.fullmatch(violator):
+            text = '%s (alan: %s)' % (text, violator)
         # DIKKAT: errorMsg sağlayıcıdan gelir ve kayda/sohbete yazılır; kart numarası sızarsa maskelenir
         return tools.scrub(tools.mask_card_data(text), self._secrets())
 
@@ -349,7 +356,8 @@ class SanalPosProviderParatika(models.AbstractModel):
         message = str(data.get('errorMsg') or data.get('responseMsg') or '')
         return self._result(
             error_code=code, raw_code=response_code,
-            error_message=self._error_message(code, message))
+            error_message=self._error_message(
+                code, message, str(data.get('violatorParam') or '')))
 
     # ---------------------------------------------------------------- arayüz: bağlantı testi
     @api.private
@@ -456,6 +464,16 @@ class SanalPosProviderParatika(models.AbstractModel):
             'BILLTOCOUNTRY': 'TUR' if (address or city or zip_code) else '',
         }
 
+    def _order_items(self, payment):
+        """Tek kalemli ORDERITEMS (JSON metni; URL kodlamasını ``_call`` gövdeyi kurarken yapar).
+
+        DIKKAT: kalem tutarı AMOUNT ile aynı biçimde (``_amount_text``) yazılır; Paratika kalem
+        toplamı ile AMOUNT'u karşılaştırır (ERR10022/10023/10150). Tutar sayı olarak (tırnaksız).
+        """
+        name = ('Fatura %s' % payment.invoice_no)[:64]
+        return '[{"name":%s,"quantity":1,"amount":%s}]' % (
+            json.dumps(name), _amount_text(payment.amount))
+
     # ---------------------------------------------------------------- arayüz: mail order
     @api.private
     def create_session(self, payment):
@@ -475,8 +493,10 @@ class SanalPosProviderParatika(models.AbstractModel):
                               "yöneticinize başvurun.")
         # NEDEN: yasak anahtarlar bilinçli yok: NAMEONCARD/CARD* (kart verisi Odoo'ya girmez),
         # NOTIFICATIONCHANNELS (SMS/e-posta göndermez), EXTRA (bkz. KARARLAR K-13).
-        # G0: ORDERITEMS gönderilmiyor; Paratika zorunlu tutarsa (spike Q6) tek kalemle eklenecek.
-        # EKIP-BORC: ORDERITEMS yok; zorunluysa tek kalem (productCode'suz) eklenmeli.
+        # NEDEN: canlıda ORDERITEMS'sız SESSIONTOKEN ERR10010 verdi (tasarım varsayımı yanlış çıktı).
+        # Doküman ORDERITEMS'ı "conditional" yazar, ama PAYMENTSESSION örneği her zaman gönderir; ödeme
+        # sayfası da sipariş özetini gösterir. Tek kalem, toplam = AMOUNT (indirim yok).
+        # productCode bilerek yok: verilirse tekil olmalı, aynı faturanın yeniden denemesi çakışırdı.
         params = {
             'SESSIONTYPE': 'PAYMENTSESSION',
             'MERCHANTPAYMENTID': payment.merchant_payment_id,
@@ -488,6 +508,7 @@ class SanalPosProviderParatika(models.AbstractModel):
             'SESSIONEXPIRY': '%dh' % MAIL_ORDER_EXPIRY_HOURS,
             'RETURNURL': return_url,
             'MERCHANTNOTE': self._note(payment),
+            'ORDERITEMS': self._order_items(payment),
         }
         params.update(self._customer_params(payment))
         res = self._call(payment, 'SESSIONTOKEN', params)
