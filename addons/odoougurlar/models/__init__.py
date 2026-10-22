@@ -1,5 +1,6 @@
 from . import product
 from . import stock
+from . import shelf_export_cleanup
 from . import invoice
 from . import nebim_settings
 from . import nebim_log
