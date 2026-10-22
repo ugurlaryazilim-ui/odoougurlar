@@ -57,7 +57,9 @@ class MarketplaceQuestion(models.Model):
     report_reason = fields.Text('Raporlama Sebebi')
     reported_date = fields.Datetime('Raporlama Tarihi')
     
-    question_date = fields.Datetime('Soru Tarihi', required=True, index=True)
+    # NEDEN: index burada değil, aşağıdaki _question_date_idx ile tek yerden tanımlı; ikisi birden
+    # aynı sütunda iki özdeş btree üretip her yazmayı iki kez indeksliyordu.
+    question_date = fields.Datetime('Soru Tarihi', required=True)
     is_public = fields.Boolean('Herkese Açık')
     show_user_name = fields.Boolean('Kullanıcı Adı Görünsün')
     
@@ -271,7 +273,8 @@ class MarketplaceQuestion(models.Model):
     @api.model
     def _cron_sync_all_questions(self):
         """Tüm pazaryerlerinden soruları çek (Cron job)."""
-        _logger.info("═══ Pazaryeri Soru Cron Başlatıldı ═══")
+        # NEDEN: 5 dakikalık cron; iş yoksa tüm satırlar DEBUG, iş varsa yalnız sonda INFO özet.
+        _logger.debug("═══ Pazaryeri Soru Cron Başlatıldı ═══")
         
         try:
             # Trendyol — sudo ile multi-company sorununu önle
@@ -281,7 +284,7 @@ class MarketplaceQuestion(models.Model):
                 ('question_sync_enabled', '=', True),
             ])
             
-            _logger.info("Aktif mağaza sayısı (question_sync_enabled=True): %d", len(stores))
+            _logger.debug("Aktif mağaza sayısı (question_sync_enabled=True): %d", len(stores))
             
             if not stores:
                 _logger.warning("Soru sync için aktif mağaza bulunamadı! "
@@ -290,13 +293,13 @@ class MarketplaceQuestion(models.Model):
             
             total_results = {'created': 0, 'updated': 0, 'errors': 0}
             for store in stores:
-                _logger.info("Mağaza sync başlıyor: %s (seller_id: %s)", store.name, store.seller_id)
+                _logger.debug("Mağaza sync başlıyor: %s (seller_id: %s)", store.name, store.seller_id)
                 try:
                     result = TrendyolConnector.sync_questions_for_store(store)
                     total_results['created'] += result.get('created', 0)
                     total_results['updated'] += result.get('updated', 0)
-                    _logger.info("Mağaza sync tamamlandı: %s | Yeni: %d | Güncellenen: %d",
-                               store.name, result.get('created', 0), result.get('updated', 0))
+                    _logger.debug("Mağaza sync tamamlandı: %s | Yeni: %d | Güncellenen: %d",
+                                  store.name, result.get('created', 0), result.get('updated', 0))
                 except Exception as e:
                     total_results['errors'] += 1
                     _logger.error("Trendyol soru sync hatası (mağaza: %s): %s", store.name, e, exc_info=True)
@@ -304,8 +307,10 @@ class MarketplaceQuestion(models.Model):
             # Kalan süreleri güncelle
             self._cron_update_remaining_time()
             
-            _logger.info("═══ Pazaryeri Soru Cron Tamamlandı | Yeni: %d | Güncellenen: %d | Hata: %d ═══",
-                         total_results['created'], total_results['updated'], total_results['errors'])
+            _logger.log(
+                logging.INFO if any(total_results.values()) else logging.DEBUG,
+                "═══ Pazaryeri Soru Cron Tamamlandı | Yeni: %d | Güncellenen: %d | Hata: %d ═══",
+                total_results['created'], total_results['updated'], total_results['errors'])
         except Exception as e:
             _logger.error("═══ Pazaryeri Soru Cron HATA: %s ═══", e, exc_info=True)
 
