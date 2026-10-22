@@ -16,3 +16,6 @@ from . import test_security
 from . import test_hardening
 from . import test_views
 from . import test_connection_test
+from . import test_refund_approval
+from . import test_refund_migration
+from . import test_refund_migration_rules

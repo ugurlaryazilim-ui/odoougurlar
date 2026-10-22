@@ -68,7 +68,13 @@ ERROR_MESSAGES = {
     'ERR10032': 'Geçersiz iade tutarı ya da işlem zaten iade edilmiş.',
     'ERR10262': 'Bu işlem için kısmi iade yapılamıyor.',
     'ERR10030': 'İşlem Paratika\'da bulunamadı.',
+    'ERR10153': 'İade işlemi Paratika Finans ekibi tarafından reddedildi.',
+    'ERR10038': 'İlgili ödeme Paratika onayı bekliyor; işlem şu an yapılamaz.',
+    'ERR10106': 'İşlem tutarı üye iş yeri hesabına geçmemiş; iade yapılamaz.',
 }
+# NEDEN: iade/iptal işleminde bu kodlar Paratika'nın açık red kanıtıdır; transactionStatus
+# AP görünse bile işlem 'failed' sayılır. Sağlayıcıya özgü red kodları yalnız burada (K-5, K-12).
+REFUND_REJECT_CODES = ('ERR10153',)
 # Bağlantı testi: kimlik reddi ve yetki eksikliği kodları
 AUTH_ERROR_CODES = ('ERR10020',)
 PERMISSION_ERROR_CODES = ('ERR10047', 'ERR10053', 'ERR10266')
@@ -524,6 +530,19 @@ class SanalPosProviderParatika(models.AbstractModel):
         code = str(item.get('transactionStatus') or '').upper()
         kind = _KIND_BY_TYPE.get(ttype, ttype.lower())
         status = _STATUS_BY_CODE.get(code, code.lower())
+        if code and code not in _STATUS_BY_CODE:
+            # Gerçek "onay bekliyor" kodu böyle yakalanır; gövde/kart verisi loglanmaz (K-12).
+            _logger.warning('sanal_pos: tanınmayan transactionStatus %s (transactionType %s, pgTranId %s)',
+                            code, ttype, item.get('pgTranId'))
+        return_code = str(item.get('pgTranReturnCode') or '').strip() or None
+        error_code = str(item.get('errorCode') or item.get('pgTranErrorCode') or '').strip() or None
+        raw_message = (item.get('errorMsg') or item.get('pgTranErrorText')
+                       or item.get('responseMsg') or None)
+        if raw_message:
+            raw_message = tools.scrub(str(raw_message), self._secrets())
+        if kind in ('refund', 'void') and (
+                error_code in REFUND_REJECT_CODES or return_code in REFUND_REJECT_CODES):
+            status = 'failed'
         if kind == 'sale' and status == 'voided':
             # Satışın iptali (VD): iptal işlemi olarak da okunur (P-10, iki biçim desteklenir)
             kind, status = 'void', 'approved'
@@ -543,6 +562,10 @@ class SanalPosProviderParatika(models.AbstractModel):
             'card_last4': item.get('panLast4') or None,
             'raw_type': ttype,
             'raw_status': code,
+            'return_code': return_code,
+            'error_code': error_code,
+            'raw_message': raw_message,
+            'error_message': self._error_message(error_code, raw_message) if error_code else None,
         }
 
     # ---------------------------------------------------------------- arayüz: iptal / iade

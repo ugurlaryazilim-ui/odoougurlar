@@ -20,6 +20,9 @@ from .common import (
 WIZARD = 'sanal.pos.payment.refund.wizard'
 BUSY_MSG = 'Bu ödeme için devam eden bir iade/iptal işlemi var.'
 NOTHING_LEFT = 'İade edilebilir tutar kalmadı.'
+# K-12: REFUND 00 artık onay bekler (pending_approval / refund_pending)
+REFUND_PENDING_MSG = ('Bu ödemede Paratika finans onayı bekleyen bir iade var; sonuçlanmadan '
+                      'yeni iade/iptal yapılamaz.')
 UNKNOWN_MSG = ('Paratika yanıt vermedi; iade gerçekleşmiş olabilir. '
                'Durum otomatik kontrol edilecek, tekrar denemeyin.')
 END_OF_DAY_MSG = 'Gün sonu geçtiği için iptal edilemedi; iade (REFUND) yapın.'
@@ -59,6 +62,20 @@ class RefundCase(SanalPosCase):
 
     def void(self, payment, reason='Müşteri vazgeçti', **kw):
         return self.attempt(payment, 'action_void', reason, **kw)
+
+    def approve_refund(self, payment):
+        """Yalnız test: Paratika finans onayını taklit eder (bekleyen satırlar 'done').
+
+        K-12 sonrası REFUND 00 satırı 'pending_approval' bırakır; kesin onayı QUERYTRANSACTION
+        senkronu verir. Onaylanmış iade ön koşulu isteyen testler senkron eşleşmesine bağlı
+        kalmasın diye satır doğrudan (sudo) onaylanır. Üretimde böyle bir kısayol yoktur.
+        """
+        payment.invalidate_recordset()
+        pending = payment.refund_ids.filtered(lambda l: l.state == 'pending_approval')
+        pending.sudo().write({'state': 'done', 'done_at': datetime.utcnow().replace(microsecond=0)})
+        payment.sudo()._recompute_refund_state()
+        payment.invalidate_recordset()
+        return pending
 
     def lines(self, payment, **filters):
         payment.invalidate_recordset()
@@ -189,26 +206,34 @@ class TestRefundSuccess(RefundCase):
         self.assertEqual(call.params['AMOUNT'], '9000.00')
         self.assertEqual(call.params['CURRENCY'], 'TRY')
         self.assertNotIn('REFLECTCOMMISSION', call.params)
+        # K-12: REFUND 00 = istek kabul edildi; iade Paratika finans onayına kadar bekler
         payment.invalidate_recordset()
-        self.assertEqual(payment.state, 'refunded')
-        self.assertEqual(payment.refunded_amount, 9000.0)
+        self.assertEqual(payment.state, 'refund_pending')
+        self.assertEqual(payment.refunded_amount, 0.0)
         self.assertEqual(payment.refundable_amount, 0.0)
         line = self.lines(payment)
         self.assertEqual((line.kind, line.state, line.source, line.amount, line.reason, line.user_id),
-                         ('refund', 'done', 'odoo', 9000.0, 'Ürün iadesi', self.user_mgr))
+                         ('refund', 'pending_approval', 'odoo', 9000.0, 'Ürün iadesi', self.user_mgr))
         self.assertTrue(line.provider_ref)
+        self.approve_refund(payment)
+        self.assertEqual(payment.state, 'refunded')
+        self.assertEqual(payment.refunded_amount, 9000.0)
+        self.assertEqual(payment.refundable_amount, 0.0)
+        self.assertEqual(line.state, 'done')
 
     def test_kk43_kismi_sonra_kalan_iade(self):
         payment = self.paid()
         self.refund(payment, 2500.0)
         self.assertEqual(self.mock.last('REFUND').params['AMOUNT'], '2500.00')
         payment.invalidate_recordset()
+        self.assertEqual(payment.refundable_amount, 6500.0, 'bekleyen iade de kalandan düşer')
+        self.approve_refund(payment)                    # K-12: Paratika onayı
         self.assertEqual(payment.state, 'partial_refund')
         self.assertEqual(payment.refunded_amount, 2500.0)
         self.assertEqual(payment.refundable_amount, 6500.0)
         self.refund(payment, 6500.0, 'Kalan iade')
         self.assertEqual(self.mock.last('REFUND').params['AMOUNT'], '6500.00')
-        payment.invalidate_recordset()
+        self.approve_refund(payment)
         self.assertEqual(payment.state, 'refunded')
         self.assertEqual(payment.refunded_amount, 9000.0)
         self.assertEqual(len(self.lines(payment, state='done')), 2)
@@ -217,9 +242,10 @@ class TestRefundSuccess(RefundCase):
         payment = self.paid()
         self.refund(payment, 2500.5)
         self.assertEqual(self.mock.last('REFUND').params['AMOUNT'], '2500.50')
+        self.approve_refund(payment)                    # K-12: bekleyen varken yeni iade engelli
         self.refund(payment, 0.01)
         self.assertEqual(self.mock.last('REFUND').params['AMOUNT'], '0.01')
-        payment.invalidate_recordset()
+        self.approve_refund(payment)
         self.assertEqual(payment.refunded_amount, 2500.51)
 
     def test_kk43_iade_sonrasi_senkron_durumu_bozmaz(self):
@@ -246,7 +272,7 @@ class TestRefundSuccess(RefundCase):
                             text='İade tutarı 0,01 ile 6.000,00 TL arasında olmalı.')
         _, message = self.refund(payment, 6000.0)
         self.assertIsNone(message)
-        payment.invalidate_recordset()
+        self.approve_refund(payment)                    # K-12: Paratika onayı
         self.assertEqual(payment.state, 'refunded')
         self.assertEqual(payment.refunded_amount, 9000.0)
 
@@ -279,7 +305,9 @@ class TestRefundSuccess(RefundCase):
         payment = self.paid()
         self.refund(payment, 2500.0)
         text = self.notification_texts(payment, self.user_sp.partner_id)
-        self.assertIn('%s – 2.500,00 TL iade edildi' % INV_NO, text)
+        # K-12: bildirim iadenin Paratika'ya iletildiğini ve onay beklendiğini söyler
+        self.assertIn('%s – 2.500,00 TL iade talebi' % INV_NO, text)
+        self.assertIn('finans onayı bekleniyor', text)
         self.assertNotIn(self.user_sp2.partner_id, self.notified_partners(payment))
 
     def test_kk51_basarisiz_iadede_bildirim_yok(self):
@@ -325,6 +353,7 @@ class TestRefundAmountValidation(RefundCase):
         super().setUp()
         self.payment = self.paid()
         self.refund(self.payment, 2500.0)       # kalan 6500
+        self.approve_refund(self.payment)       # K-12: onaylanmış iade ön koşulu
         self.mock.calls.clear()
         self.set_query_transactions(tran('AP', 'SALE', '9000.00', 'T1'),
                                     tran('AP', 'REFUND', '2500.00', self.lines(self.payment).provider_ref))
@@ -339,15 +368,16 @@ class TestRefundAmountValidation(RefundCase):
     def test_kk44_sinir_degerleri_gecerli(self):
         _, message = self.refund(self.payment, 0.01)
         self.assertIsNone(message)
+        self.approve_refund(self.payment)
         _, message = self.refund(self.payment, 6499.99)
         self.assertIsNone(message)
-        self.payment.invalidate_recordset()
+        self.approve_refund(self.payment)
         self.assertEqual(self.payment.state, 'refunded')
 
     def test_kk44_tam_kalan_tutar(self):
         _, message = self.refund(self.payment, 6500.0)
         self.assertIsNone(message)
-        self.payment.invalidate_recordset()
+        self.approve_refund(self.payment)
         self.assertEqual(self.payment.state, 'refunded')
 
     def test_kk44_iki_ondalik_siniri(self):
@@ -363,6 +393,9 @@ class TestRefundAmountValidation(RefundCase):
     def test_kk45_kalan_yoksa_mesaj(self):
         _, message = self.refund(self.payment, 6500.0)
         self.assertIsNone(message)
+        # K-12: onay beklerken önce bekleyen iade engeli, onaydan sonra "kalmadı" mesajı
+        self.assertRejected(self.payment, 'action_refund', 1.0, 'Tekrar', text=REFUND_PENDING_MSG)
+        self.approve_refund(self.payment)
         self.assertRejected(self.payment, 'action_refund', 1.0, 'Tekrar', text=NOTHING_LEFT)
 
     def test_kk45_iptal_edilmis_kayitta_iade_yok(self):
@@ -410,7 +443,7 @@ class TestRefundFailures(RefundCase):
         self.refund(payment, 1000.0)
         _, message = self.refund(payment, 1000.0)
         self.assertIsNone(message)
-        payment.invalidate_recordset()
+        self.approve_refund(payment)                    # K-12: Paratika onayı
         self.assertEqual(payment.refunded_amount, 1000.0)
         self.assertEqual(len(self.lines(payment)), 2)
 
@@ -544,7 +577,9 @@ class TestDuplicateRefund(RefundCase):
         first = self.refund(payment, 9000.0)
         second = self.refund(payment, 9000.0)
         self.assertIsNone(first[1])
-        self.assertIn(NOTHING_LEFT, second[1] or '')
+        # K-12: ilk iade onay beklerken ikinci tıklama bekleyen iade engeline takılır (eskiden
+        # "kalmadı"); güvenlik niyeti aynı: Paratika'ya tek istek, tek satır.
+        self.assertIn(REFUND_PENDING_MSG, second[1] or '')
         self.assertEqual(self.mock.count('REFUND'), 1)
         self.assertEqual(len(self.lines(payment)), 1)
 
@@ -577,7 +612,7 @@ class TestDuplicateRefund(RefundCase):
         payment = self.paid()
         for amount in (4000.0, 4000.0, 1000.0):
             self.refund(payment, amount)
-            payment.invalidate_recordset()
+            self.approve_refund(payment)                # K-12: her iade Paratika onayıyla kesinleşir
             self.set_query_transactions(
                 tran('AP', 'SALE', '9000.00', 'T1'),
                 *[tran('AP', 'REFUND', '%.2f' % l.amount, l.provider_ref) for l in self.lines(payment, state='done')])
@@ -668,7 +703,7 @@ class TestRefundWizard(RefundCase):
         self.confirm(wiz)
         self.assertEqual(self.mock.last('REFUND').params['AMOUNT'], '2500.00')
         payment.invalidate_recordset()
-        self.assertEqual(payment.state, 'partial_refund')
+        self.assertEqual(payment.state, 'refund_pending')    # K-12: onay bekler
 
     def test_kk50_onay_iptal_yapar(self):
         payment = self.paid()

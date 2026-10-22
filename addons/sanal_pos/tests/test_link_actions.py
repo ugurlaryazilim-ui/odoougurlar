@@ -10,7 +10,7 @@ from .common import (
 )
 
 RESEND_WIZARD = 'sanal.pos.payment.resend.wizard'
-NOT_SENT = ('sending', 'unknown', 'error', 'expired', 'link_cancelled', 'paid', 'review',
+NOT_SENT = ('sending', 'unknown', 'error', 'expired', 'link_cancelled', 'paid', 'review', 'refund_pending',
             'partial_refund', 'refunded', 'voided')
 
 

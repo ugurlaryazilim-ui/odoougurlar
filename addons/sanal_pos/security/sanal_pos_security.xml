@@ -36,6 +36,11 @@
         <field name="model_id" ref="model_sanal_pos_payment_review_close_wizard"/>
         <field name="domain_force">[('create_uid', '=', user.id)]</field>
     </record>
+    <record id="rule_refund_approval_wizard_own" model="ir.rule">
+        <field name="name">Sanal POS iade onay geçişi: yalnız oluşturan</field>
+        <field name="model_id" ref="model_sanal_pos_refund_approval_wizard"/>
+        <field name="domain_force">[('create_uid', '=', user.id)]</field>
+    </record>
     <record id="rule_connection_test_wizard_own" model="ir.rule">
         <field name="name">Sanal POS bağlantı testi sonucu: yalnız oluşturan</field>
         <field name="model_id" ref="model_sanal_pos_connection_test_wizard"/>

@@ -9,6 +9,7 @@ kapsamda) yapılır. Chatter'a not yazabilmek için ``_mail_post_access = 'read'
 Dış çağrı kuralı: çağrıdan ÖNCE "işlemde" durumu yazılıp ``_sp_commit()`` edilir;
 ``_sp_commit`` asla bir ``cr.savepoint()`` bloğunun içinden çağrılmaz.
 """
+import json
 import logging
 import time
 from datetime import datetime, timedelta
@@ -28,7 +29,8 @@ _logger = logging.getLogger(__name__)
 
 # Durum kümeleri: tüm kontroller bunları kullanır (tek yerde sabit).
 OPEN_STATES = ('sending', 'sent', 'unknown')
-PAID_STATES = ('paid', 'partial_refund', 'review')
+# refund_pending: ödeme alınmış, iade Paratika finans onayında; yeni link engellenir (K-12).
+PAID_STATES = ('paid', 'partial_refund', 'review', 'refund_pending')
 REUSABLE_STATES = ('expired', 'link_cancelled', 'error', 'voided', 'refunded')
 REFUNDED_STATES = ('voided', 'refunded')
 
@@ -41,6 +43,7 @@ PAYMENT_STATES = [
     ('link_cancelled', 'Link iptal edildi'),
     ('paid', 'Ödendi'),
     ('review', 'İnceleme gerekli'),
+    ('refund_pending', 'İade onay bekliyor'),
     ('partial_refund', 'Kısmen iade edildi'),
     ('refunded', 'İade edildi'),
     ('voided', 'Ödeme iptal edildi'),
@@ -73,7 +76,7 @@ SYNC_DEFERRED_WINDOW = timedelta(minutes=15)  # daha eski ertelenmişleri periyo
 UNKNOWN_SYNC_DELAY = timedelta(minutes=2)
 
 # G8: durum senkronu (tasarım §6.2, §6.3; 08-sozlesme-G8.md)
-IRREVERSIBLE_STATES = ('paid', 'partial_refund', 'refunded', 'voided')
+IRREVERSIBLE_STATES = ('paid', 'partial_refund', 'refunded', 'voided', 'refund_pending')
 LATE_PAYMENT_STATES = ('expired', 'link_cancelled', 'error')
 STALE_SENDING_AGE = timedelta(minutes=5)
 CHECK_STATUS_MAX_AGE = timedelta(days=30)
@@ -134,6 +137,18 @@ REFUND_NOT_FOUND_MIN_AGE = timedelta(minutes=15)
 REFUND_SECOND_CHECK_DELAY = timedelta(minutes=16)
 REFUND_MATCH_TOLERANCE = timedelta(minutes=5)    # işlem zamanı satırdan bu kadar önce olabilir
 REFUND_KIND_LABELS = {'void': 'Ödeme iptali', 'refund': 'İade'}
+# Paratika iade onayı (K-12, 02-tasarim §4.2)
+REFUND_PENDING_MSG = ('Bu ödemede Paratika finans onayı bekleyen bir iade var; sonuçlanmadan '
+                      'yeni iade/iptal yapılamaz.')
+REFUND_PENDING_ALERT_AGE = timedelta(hours=72)    # G3: uzun bekleme uyarısı eşiği
+REFUND_TERMINAL_STATUSES = ('approved', 'failed', 'cancelled', 'voided')   # G2: sonuçlanmış işlem
+# _expected_refund_state yalnız bu durumlarda çalışır (voided/diğerleri dokunulmaz)
+REFUND_RECOMPUTE_STATES = ('paid', 'partial_refund', 'refunded', 'refund_pending')
+REFUND_REJECT_DEFAULT_MSG = 'Paratika iadeyi reddetti (durum: %s)'
+# provider_status_detail'e yazılan izinli anahtarlar (tasarım §5.4); kart verisi yok
+REFUND_DETAIL_KEYS = ('raw_type', 'raw_status', 'return_code', 'error_code', 'raw_message',
+                      'amount', 'time', 'ref')
+REFUND_DETAIL_MAX = 1000
 
 _ISTANBUL = ZoneInfo('Europe/Istanbul')
 _UTC = ZoneInfo('UTC')
@@ -315,10 +330,13 @@ class SanalPosPayment(models.Model):
             rec.refunded_amount = sum(
                 line.amount for line in rec.refund_ids if line.state == 'done')
 
-    @api.depends('paid_amount', 'refunded_amount')
+    @api.depends('paid_amount', 'refunded_amount', 'refund_ids.state', 'refund_ids.amount')
     def _compute_refundable_amount(self):
+        # NEDEN: onay bekleyen iade de iade edilebilirden düşer; red olursa satır 'rejected'
+        # olur ve tutar kendiliğinden geri döner (bkz. KARARLAR K-12).
         for rec in self:
-            rec.refundable_amount = (rec.paid_amount or 0.0) - (rec.refunded_amount or 0.0)
+            pending = sum(line.amount for line in rec.refund_ids if line.state == 'pending_approval')
+            rec.refundable_amount = (rec.paid_amount or 0.0) - (rec.refunded_amount or 0.0) - pending
 
     @api.depends('state', 'paid_at', 'refund_ids.state')
     def _compute_can_void(self):
@@ -341,9 +359,9 @@ class SanalPosPayment(models.Model):
                 and not rec._has_blocking_refund_line(include_done=False))
 
     def _has_blocking_refund_line(self, include_done):
-        """Devam eden (processing/unknown) ya da istenirse tamamlanmış iade/iptal satırı var mı."""
+        """Devam eden (processing/unknown/pending_approval) ya da istenirse tamamlanmış satır var mı."""
         self.ensure_one()
-        blocking = {'processing', 'unknown'}
+        blocking = {'processing', 'unknown', 'pending_approval'}
         if include_done:
             blocking.add('done')
         return any(line.state in blocking for line in self.refund_ids)
@@ -690,8 +708,10 @@ class SanalPosPayment(models.Model):
         """Sorgudaki iade/iptal işlemlerini satırlara yansıtır (KK-27, KK-47; sözleşme §6).
 
         Çağıran kilidi tutar ve commit eder; yalnız başarılı sorgu sonucuyla çağrılır.
-        Sıra: yarıda kalmış istek -> belirsiz satır eşleşmesi -> ref benimseme (R-3) ->
-        uçuştaki istek -> tek iptal -> panel satırı; ardından eşleşmeyen belirsiz satırlar.
+        Kendisi kilit almaz, commit etmez ve Paratika'yı çağırmaz (K-6).
+        Sıra (tasarım §5.2): yarıda kalmış istek -> bekleyen/red/belirsiz satır geçişi (K-12) ->
+        onaylı işlemler (belirsiz eşleşme, ref benimseme R-3, uçuştaki istek, tek iptal, panel
+        satırı) -> eşleşmeyen belirsiz satırlar -> durum yeniden hesabı -> olay bildirimleri.
         """
         self.ensure_one()
         rec = self.sudo()
@@ -703,19 +723,247 @@ class SanalPosPayment(models.Model):
                         'error_code': 'STALE', 'error_message': REFUND_UNKNOWN_MSG})
             rec._post_note('%s (%s): %s' % (REFUND_KIND_LABELS[line.kind],
                                             format_try(line.amount), REFUND_STALE_MSG))
-        financial = [t for t in transactions if t.get('kind') in ('refund', 'void')]
-        approved = [t for t in financial if t.get('status') == 'approved'
-                    and rec._to_amount2(t.get('amount')) is not None]
-        pending = [t for t in financial if t.get('status') == 'pending']
+        all_financial = [t for t in transactions if t.get('kind') in ('refund', 'void')]
+        financial = [t for t in all_financial if rec._to_amount2(t.get('amount')) is not None]
+        events = rec._sync_refund_lines(financial, now)
+        approved = [t for t in financial if t.get('status') == 'approved']
         listed = {t.get('ref') for t in approved if t.get('ref')}
+        query_refs = {t.get('ref') for t in financial if t.get('ref')}
         for tran in approved:
-            rec._sync_refund_transaction(tran, listed, now)
-        if not pending:
+            rec._sync_refund_transaction(tran, listed, now, query_refs)
+        # NEDEN: sorguda sonuçlanmamış (IP, MR, tanınmayan...) iade/iptal işlemi varken belirsiz
+        # satır "bulunamadı" sayılmaz; o işlem bizim isteğimiz olabilir. 'Onay bekliyor' satır ise
+        # bulunamadı diye hiç düşürülmez: sayaç yalnız 'unknown' satıra uygulanır (bkz. KARARLAR K-12).
+        if not any(t.get('status') not in REFUND_TERMINAL_STATUSES for t in all_financial):
             rec._count_refund_not_found(now)
         rec._recompute_refund_state()
+        rec._post_refund_events(events)                  # güncel ödeme durumu metne girer
         return True
 
-    def _sync_refund_transaction(self, tran, listed, now):
+    def _sync_refund_lines(self, financial, now):
+        """Bekleyen, reddedilmiş ve belirsiz iade satırları (tasarım §5.2 adım 3). Olay listesi döner."""
+        events = []
+
+        def used_refs(line):
+            return {l.provider_ref for l in self.refund_ids if l != line and l.provider_ref}
+
+        # a) Onay bekleyen satırlar: AP -> done, açık red -> rejected, diğer her durum bekler
+        for line in self.refund_ids.sorted('id').filtered(lambda l: l.state == 'pending_approval'):
+            tran, how = self._match_refund_transaction(line, financial, used_refs(line))
+            if not tran:
+                continue                                 # 'none'/'ambiguous': hiçbir şey yapılmaz
+            status = tran.get('status')
+            if how != 'ref' and self._refund_tran_before_line(line, tran):
+                continue                                 # önceki denemenin/başka isteğin işlemi
+            if status != 'approved' and not self._refund_match_decisive(line, tran, how):
+                # DIKKAT (inceleme Ö-1, güvenlik D-2): kararsız eşleşme ref BAĞLAMAZ. Bağlanan ref
+                # sonraki turda 'ref' eşleşmesi olur ve o işlemin FA'sı satırı reddeder (R1 sınıfı).
+                # Satırın kendi nosu varsa başka nolu işlemin durumu da satıra yazılmaz.
+                if status != 'failed' and not line.provider_ref:
+                    # zamansız bekleyen işlem: ham durum görünür, ref bağlanmaz
+                    vals = self._refund_bind_vals(line, tran)
+                    vals.pop('provider_ref', None)
+                    if vals:
+                        line.write(vals)
+                continue
+            # NEDEN: onaylı eşleşme zamansız da olsa kabul edilir (P-10: biçim belgesiz; yoksa ref'siz
+            # satır hiç sonuçlanmazdı) ve satırın farklı nosu varsa benimsenir (R-3, _refund_bind_vals
+            # notu). Onay tutarı iade edilebilire döndürmez; yanlış eşleşme çift iade yolu açmaz.
+            vals = self._refund_bind_vals(line, tran)
+            if status == 'approved':
+                vals.update(self._refund_done_vals(tran, now))
+                events.append(('approved', line))
+            elif status == 'failed':
+                # NEDEN: yalnız açık red kanıtı (FA ya da REFUND_REJECT_CODES; sağlayıcı 'failed'
+                # yapar) satırı reddeder; ref'siz eşleşmede işlem satırdan sonra tarihli olmalı
+                # (_refund_match_decisive). Tutar iade edilebilire döner (bkz. KARARLAR K-12).
+                code, message = self._refund_reject_reason(tran)
+                vals.update(state='rejected', error_code=code, error_message=message)
+                events.append(('rejected', line))
+            if vals:
+                line.write(vals)                         # bekleyende yalnız değişince yazılır
+        # b) NEDEN: güvenlik ağı. Reddedildi sanılan iade sonradan aynı işlem noyla onaylı
+        # görünürse para iade edilmiştir; satır 'done' olur ve yöneticiler uyarılır (bkz. KARARLAR K-12).
+        for line in self.refund_ids.filtered(lambda l: l.state == 'rejected' and l.provider_ref):
+            tran = next((t for t in financial if t.get('ref') == line.provider_ref
+                         and t.get('kind') == line.kind and t.get('status') == 'approved'), None)
+            if tran:
+                vals = self._refund_bind_vals(line, tran)
+                vals.update(self._refund_done_vals(tran, now))
+                line.write(vals)
+                _logger.warning('sanal_pos: reddedilmiş iade Paratika\'da onaylı görünüyor, '
+                                'ödeme id=%s, satır id=%s', self.id, line.id)
+                events.append(('approved_after_reject', line))
+        # c) Belirsiz iade + sonuçlanmamış eşleşme: istek Paratika'ya ulaşmış, onay bekliyor.
+        # Onaylı/redli eşleşmede bugünkü yollar (onaylı döngüsü, bulunamadı sayacı) çalışır.
+        for line in self.refund_ids.filtered(lambda l: l.state == 'unknown' and l.kind == 'refund'):
+            tran, how = self._match_refund_transaction(line, financial, used_refs(line))
+            if not tran or tran.get('status') in REFUND_TERMINAL_STATUSES:
+                continue
+            decisive = self._refund_match_decisive(line, tran, how)
+            if not decisive and (line.provider_ref or self._refund_tran_before_line(line, tran)):
+                continue
+            vals = self._refund_bind_vals(line, tran)
+            if not decisive:
+                # DIKKAT (inceleme Ö-1): zamansız eşleşme satırı bekletir ama ref BAĞLAMAZ; bağlanan
+                # ref o işlemin sonraki FA'sına red yetkisi verirdi.
+                vals.pop('provider_ref', None)
+            vals.update(state='pending_approval', unknown_since=False,
+                        not_found_count=0, error_code=False, error_message=False)
+            line.write(vals)
+            self._post_note('%s iade Paratika\'da finans onayı bekliyor görünüyor.'
+                            % format_try(line.amount))
+        return events
+
+    def _match_refund_transaction(self, line, financial, used_refs):
+        """Satırın sorgudaki işlemi (tasarım §5.1; saf, veri yazmaz). Geçiş sihirbazı da kullanır.
+
+        Dönüş ``(tran, neden)``; neden: 'ref', 'unique', 'ambiguous' ya da 'none'.
+        """
+        if line.provider_ref:
+            same = [t for t in financial if t.get('ref') == line.provider_ref]
+            if same:
+                # NEDEN (inceleme Ö-2): aynı işlem no birden çok listelenebilir (ör. önce IP/FA,
+                # sonra AP satırı). Kesin sonuç kazanır: onay > red > diğer; listedeki ilk değil.
+                rank = {'approved': 0, 'failed': 1}
+                return min(same, key=lambda t: rank.get(t.get('status'), 2)), 'ref'
+        cents = self._to_amount2(line.amount)
+        created = line.create_date
+
+        def after(tran, tolerance):
+            when = tran.get('time')
+            return not when or not created or when >= created - tolerance
+
+        candidates, seen = [], set()
+        for tran in financial:
+            ref = tran.get('ref')
+            if (ref and ref not in seen and ref not in used_refs and tran.get('kind') == line.kind
+                    and self._to_amount2(tran.get('amount')) == cents
+                    and after(tran, REFUND_MATCH_TOLERANCE)):
+                seen.add(ref)
+                candidates.append(tran)
+        if len(candidates) > 1:
+            # DIKKAT: önceki (başarısız) denemenin işlemi toleransa girebilir; FA'sı bu satırı
+            # reddetmesin diye çok adayda toleranssız (satırdan sonra) daraltılır.
+            candidates = [t for t in candidates if after(t, timedelta(0))]
+            if len(candidates) != 1:
+                _logger.warning('sanal_pos: iade satırı eşleştirmesi belirsiz (%d aday), ödeme id=%s, '
+                                'satır id=%s', len(candidates), self.id, line.id)
+                return None, 'ambiguous'
+        if candidates:
+            return candidates[0], 'unique'
+        return None, 'none'
+
+    @api.model
+    def _refund_match_decisive(self, line, tran, how):
+        """Eşleşme satırı reddedebilir/ref bağlayabilir mi (güvenlik bulgusu R1, Ö-1, D-2)?
+
+        DIKKAT: REFUND hata yanıtı satırı ref'siz 'failed' yapar; o denemenin Paratika işlemi
+        used_refs'e girmez ve 5 dk toleransla yeni satırın tek adayı olabilir. Ona dayanıp
+        red vermek tutarı iade edilebilire döndürür; ilk istek sonra onaylanırsa çift iade olur.
+        Bu yüzden ref'siz eşleşmede yalnız satırdan SONRA tarihli işlem karar verir (toleranssız).
+        Ref bağlama da aynı şarta bağlıdır: bağlanan ref sonraki turda 'ref' eşleşmesi olur.
+        AP için de geçerli: ön senkron, satır açılmadan görünen her AP'yi bir satıra bağlar;
+        satırdan önce tarihli boşta AP başka bir isteğindir (panel yarışı, hata yanıtı alıp
+        Paratika'da işlenmiş önceki deneme). Onunla 'done' bekleme engelini erken kaldırır
+        (onaylı eşleşmede çağıran yalnız ``_refund_tran_before_line`` ile eler).
+        Zaman yoksa sıra kanıtlanamaz: red verilmez, ref bağlanmaz (satır bekler, 72 saat uyarısı).
+        Satırın kendi işlem nosu varsa ve sorguda görünmüyorsa aynı tutarlı başka nolu işlem onun
+        yerine karar vermez (D-2: panelden yapılıp reddedilen başka iade).
+        """
+        if how == 'ref':
+            return True
+        if line.provider_ref:
+            return False
+        when, created = tran.get('time'), line.create_date
+        # NEDEN: ikisi de naive UTC (_parse_time saat dilimsiz metni Europe/Istanbul sayar).
+        # create_date saniyeye kırpılır: timeCreated saniye hassasiyetinde gelebilir; önceki
+        # deneme aynı saniyede olamaz (hata yanıtı + sihirbazı yeniden açma arada).
+        return bool(when and created and when >= created.replace(microsecond=0))
+
+    @staticmethod
+    def _refund_tran_before_line(line, tran):
+        """İşlem satırdan önce tarihli mi (zaman yoksa False: sıra bilinmiyor)."""
+        when, created = tran.get('time'), line.create_date
+        return bool(when and created and when < created.replace(microsecond=0))
+
+    @staticmethod
+    def _refund_done_vals(tran, now):
+        return {'state': 'done', 'done_at': tran.get('time') or now,
+                'error_code': False, 'error_message': False}
+
+    @staticmethod
+    def _refund_raw_status(tran):
+        return tran.get('raw_status') or str(tran.get('status') or '').upper()
+
+    def _refund_bind_vals(self, line, tran):
+        """Ham durum/ayrıntı ve (değiştiyse) işlem no; yalnız farklı alanlar döner."""
+        status = self._refund_raw_status(tran)
+        detail = self._refund_status_detail(tran)
+        vals = {}
+        if line.provider_status != status:
+            vals['provider_status'] = status
+        if line.provider_status_detail != detail:
+            vals['provider_status_detail'] = detail
+        ref = tran.get('ref')
+        if ref and line.provider_ref != ref:
+            vals['provider_ref'] = ref
+            if line.provider_ref:                        # R-3 gibi: eski no farklıydı
+                self._post_note('%s (%s) işlem no Paratika sorgusuyla eşleştirildi: %s' % (
+                    REFUND_KIND_LABELS[line.kind], format_try(line.amount), ref))
+        return vals
+
+    @api.model
+    def _refund_status_detail(self, tran):
+        """İzinli alanlardan kısa JSON (tasarım §5.4); kart son 4/BIN/kart sahibi yazılmaz."""
+        data = {}
+        for key in REFUND_DETAIL_KEYS:
+            value = tran.get(key)
+            if value in (None, '', False):
+                continue
+            if key == 'time':
+                value = fields.Datetime.to_string(value)
+            elif key == 'raw_message':
+                value = str(value)[:500]
+            data[key] = str(value)
+        return json.dumps(data, ensure_ascii=False, sort_keys=True)[:REFUND_DETAIL_MAX]
+
+    @api.model
+    def _refund_reject_reason(self, tran):
+        """Ret kodu ve sebebi: tanınan kodda Türkçe, tanınmayanda Paratika'nın ham metni."""
+        status = tran.get('raw_status') or 'FA'
+        code = tran.get('error_code') or tran.get('return_code') or status
+        message = (tran.get('error_message') or tran.get('raw_message')
+                   or REFUND_REJECT_DEFAULT_MSG % status)
+        return str(code)[:250], str(message)[:250]
+
+    def _post_refund_events(self, events):
+        """Onay/red/red sonrası onay bildirimleri: chatter + ilgili kullanıcılar. Müşteriye gitmez."""
+        if not events:
+            return
+        state_label = dict(PAYMENT_STATES).get(self.state, self.state)
+        for event, line in events:
+            amount = format_try(line.amount)
+            partners = self._creator_partner() | line.user_id.partner_id
+            if event == 'approved':
+                body = '%s – %s iade Paratika tarafından onaylandı (işlem no %s).' % (
+                    self.invoice_no, amount, line.provider_ref or '-')
+            elif event == 'rejected':
+                body = ("%s – %s iade Paratika finans ekibince REDDEDİLDİ. Ret sebebi: %s – %s. "
+                        "Ödeme '%s' durumuna döndü; gerekirse yeniden iade yapın veya Paratika ile "
+                        "görüşün.") % (self.invoice_no, amount, line.error_code, line.error_message,
+                                       state_label)
+            else:
+                body = ("DİKKAT: %s – %s iade daha önce reddedildi olarak işaretlenmişti ama "
+                        "Paratika'da ONAYLI görünüyor; iade başarılı sayıldı. Bu arada yeniden iade "
+                        "yapıldıysa Paratika panelinden çift iadeyi kontrol edin.") % (
+                    self.invoice_no, amount)
+                partners |= self.env.ref('sanal_pos.group_sanal_pos_manager').sudo() \
+                    .all_user_ids.partner_id
+            self.message_post(body=body, message_type='comment', subtype_xmlid='mail.mt_note',
+                              partner_ids=partners.ids)
+
+    def _sync_refund_transaction(self, tran, listed, now, query_refs):
         """Onaylı tek iade/iptal işlemi (sözleşme §6 a-f)."""
         ref = tran.get('ref') or False
         if ref and ref in set(self.refund_ids.mapped('provider_ref')):
@@ -749,7 +997,12 @@ class SanalPosPayment(models.Model):
             self._post_note('%s (%s) işlem no Paratika sorgusuyla eşleştirildi: %s' % (
                 label, format_try(line.amount), ref))
             return 'adopted'
-        if self.refund_ids.filtered(lambda l: l.state == 'processing' and same(l)):
+        # Uçuştaki istek: işleniyor satırı ya da işlem nosu sorguda görünmeyen onay bekleyen
+        # satır (eşleştirme belirsiz/aday dışı kaldıysa) bu işlemin sahibi olabilir; panel satırı
+        # açılırsa aynı iade iki kez sayılır.
+        if self.refund_ids.filtered(lambda l: same(l) and (l.state == 'processing' or (
+                l.state == 'pending_approval'
+                and (not l.provider_ref or l.provider_ref not in query_refs)))):
             return 'in_flight'
         if kind == 'void' and self.refund_ids.filtered(
                 lambda l: l.kind == 'void' and l.state == 'done'):
@@ -1099,7 +1352,9 @@ class SanalPosPayment(models.Model):
         self._check_sanal_pos_user()
         rec = self.sudo()
         now = fields.Datetime.now()
-        if rec.state not in OPEN_STATES + ('review',) and rec.create_date < now - CHECK_STATUS_MAX_AGE:
+        # Onay bekleyen iade Paratika'da 30 günden uzun sürebilir; kullanıcı yine sorgulayabilmeli.
+        if (rec.state not in OPEN_STATES + ('review', 'refund_pending')
+                and rec.create_date < now - CHECK_STATUS_MAX_AGE):
             raise UserError('30 günden eski kapanmış kayıt sorgulanamaz.')
         if rec.state == 'sending' and rec.create_date >= now - STALE_SENDING_AGE:
             raise UserError(BUSY_MSG)
@@ -1322,15 +1577,19 @@ class SanalPosPayment(models.Model):
         return int(cents)
 
     def _refundable_cents(self):
-        """Ödenen − başarılı − devam eden (kuruş)."""
+        """Ödenen − başarılı − devam eden − onay bekleyen (kuruş)."""
         self.ensure_one()
         used = sum(int(self._to_amount2(l.amount) * 100) for l in self.refund_ids
-                   if l.state in ('done', 'processing', 'unknown'))
+                   if l.state in ('done', 'processing', 'unknown', 'pending_approval'))
         return int((self._to_amount2(self.paid_amount or 0) or 0) * 100) - used
 
     def _refund_validate(self, kind, cents):
         """Durum, devam eden satır ve tutar/iptal kuralları (kilitten önce ve sonra)."""
         self.ensure_one()
+        # NEDEN: ilk kontrol; onay bekleyen iade sonuçlanmadan yeni iade/iptal Paratika'ya
+        # hiç gitmez (senkron sorgusu da yapılmaz) ve kullanıcı nedenini görür (K-12).
+        if self.state == 'refund_pending':
+            raise UserError(REFUND_PENDING_MSG)
         if self.state in REFUNDED_STATES:
             raise UserError(NOTHING_LEFT_MSG)
         if self.state not in ('paid', 'partial_refund'):
@@ -1468,14 +1727,31 @@ class SanalPosPayment(models.Model):
         now = fields.Datetime.now()
         label = REFUND_KIND_LABELS[line.kind]
         amount_text = format_try(line.amount)
+        if result.get('ok') and line.kind == 'refund':
+            # NEDEN: REFUND responseCode=00 yalnız "Paratika isteği kabul etti" demektir; iade
+            # Paratika finans onayından sonra kesinleşir. Satır onay bekler, kesin sonucu
+            # QUERYTRANSACTION senkronu verir (AP -> done, açık red -> rejected) (bkz. KARARLAR K-12).
+            ref = self._safe_refund_ref(line, result.get('ref'))
+            line.write({'state': 'pending_approval', 'provider_ref': ref, 'done_at': False,
+                        'error_code': False, 'error_message': False})
+            self._recompute_refund_state()
+            body = ('%s – %s iade talebi Paratika\'ya iletildi; Paratika finans onayı bekleniyor '
+                    '(yönetici: %s). Neden: %s') % (
+                self.invoice_no, amount_text, self.env.user.name, reason)
+            if not ref:
+                body += ' İşlem no Paratika sorgusuyla eşleştirilecek.'
+            self._notify_creator(body)                   # KK-51
+            # DIKKAT: savepoint içindeyiz; tetik yalnız ir.cron.trigger kaydı ekler, commit yapmaz (K-6).
+            self._trigger_sync_cron()
+            return body, 'info'
         if result.get('ok'):
+            # VOID onay beklemez (KK-2): bugünkü gibi kesin sonuç.
             ref = self._safe_refund_ref(line, result.get('ref'))
             line.write({'state': 'done', 'provider_ref': ref, 'done_at': now,
                         'error_code': False, 'error_message': False})
             self._recompute_refund_state()
-            done = 'ödeme iptal edildi' if line.kind == 'void' else 'iade edildi'
-            body = '%s – %s %s (yönetici: %s). Neden: %s' % (
-                self.invoice_no, amount_text, done, self.env.user.name, reason)
+            body = '%s – %s ödeme iptal edildi (yönetici: %s). Neden: %s' % (
+                self.invoice_no, amount_text, self.env.user.name, reason)
             if not ref:
                 body += ' İşlem no Paratika sorgusuyla eşleştirilecek.'
             self._notify_creator(body)                   # KK-51
@@ -1513,8 +1789,10 @@ class SanalPosPayment(models.Model):
             (flagged, []),
             ("SELECT id FROM sanal_pos_payment WHERE state = 'sending' AND create_date < %s "
              'ORDER BY id LIMIT %s', [stale_before]),
-            ("SELECT DISTINCT payment_id FROM sanal_pos_refund WHERE state = 'unknown' "
-             "OR (state = 'processing' AND create_date < %s) ORDER BY payment_id LIMIT %s",
+            # pending_approval: tetik kaybolsa da onay bekleyen iade her turda sorgulanır (K-12)
+            ("SELECT DISTINCT payment_id FROM sanal_pos_refund WHERE state IN ('unknown', "
+             "'pending_approval') OR (state = 'processing' AND create_date < %s) "
+             "ORDER BY payment_id LIMIT %s",
              [now - REFUND_STALE_AGE]),
             ("SELECT id FROM sanal_pos_payment WHERE state IN ('unknown', 'sent') "
              'ORDER BY last_checked_at ASC NULLS FIRST, id LIMIT %s', []),
@@ -1555,13 +1833,43 @@ class SanalPosPayment(models.Model):
             self._sync_status()
         else:
             return False
+        self._alert_long_pending_refunds(now)
         self.write({'sync_requested': False, 'last_checked_at': fields.Datetime.now()})
         return True
 
-    def _has_refund_to_reconcile(self, now):
-        """KK-47: belirsiz ya da yarıda kalmış ('İşleniyor', 5 dk+) iade/iptal satırı var mı."""
+    def _alert_long_pending_refunds(self, now):
+        """KK-12: 72 saatten uzun 'Onay bekliyor' iade için yönetici grubuna + iadeyi yapana tek uyarı.
+
+        Sorgu sonucuna bağlı değildir (sorgu başarısız olsa da çalışır); satırı sonuçlandırmaz.
+        Tek seferliktir: `pending_alert_sent` bayrağı mesajla aynı savepoint'te yazılır.
+        """
         self.ensure_one()
-        return any(l.state == 'unknown' or (
+        rec = self.sudo()
+        # NEDEN: Paratika bekleyen iadeyi sonsuza dek bekletebilir ve satır "bulunamadı" ile
+        # hiç düşmez; tek güvence insanın Paratika panelinden bakmasıdır (bkz. KARARLAR K-12).
+        lines = rec.refund_ids.filtered(
+            lambda l: l.state == 'pending_approval' and not l.pending_alert_sent
+            and l.create_date and l.create_date <= now - REFUND_PENDING_ALERT_AGE)
+        if not lines:
+            return
+        managers = self.env.ref('sanal_pos.group_sanal_pos_manager').sudo().all_user_ids.partner_id
+        for line in lines:
+            partners = managers | self._creator_partner() | line.user_id.partner_id
+            body = ('%s – %s iade 72 saattir Paratika finans onayı bekliyor; '
+                    'Paratika panelinden kontrol edin.') % (rec.invoice_no, format_try(line.amount))
+            try:
+                with self.env.cr.savepoint():
+                    rec.message_post(body=body, message_type='comment',
+                                     subtype_xmlid='mail.mt_note', partner_ids=partners.ids)
+                    line.write({'pending_alert_sent': True})
+            except Exception as exc:  # noqa: BLE001 - uyarı hatası senkronu bozmaz; sonraki turda tekrar denenir
+                _logger.warning('sanal_pos: 72 saat uyarısı yazılamadı (%s), ödeme id=%s',
+                                type(exc).__name__, self.id)
+
+    def _has_refund_to_reconcile(self, now):
+        """KK-47: belirsiz, onay bekleyen (K-12) ya da yarıda kalmış ('İşleniyor', 5 dk+) satır var mı."""
+        self.ensure_one()
+        return any(l.state in ('unknown', 'pending_approval') or (
             l.state == 'processing' and l.create_date and l.create_date < now - REFUND_STALE_AGE)
             for l in self.refund_ids)
 
@@ -1628,25 +1936,36 @@ class SanalPosPayment(models.Model):
             Payment._sp_commit()
         return True
 
-    def _recompute_refund_state(self):
-        """İade satırlarından durumu yeniden hesaplar (yalnız paid/partial_refund kayıtlara).
-
-        done void satırı -> voided; iade toplamı ödenene ulaştıysa refunded;
-        >0 ise partial_refund; yoksa paid.
+    def _expected_refund_state(self):
+        """İade satırlarına göre olması gereken durum (saf; veri yazmaz). Kural sırası:
+        done void -> voided; onay bekleyen -> refund_pending; done toplamı >= ödenen -> refunded;
+        > 0 -> partial_refund; yoksa paid. Kapsam dışı durumda ``self.state`` döner.
         """
+        self.ensure_one()
+        # NEDEN: kapsam paid/partial_refund/refunded/refund_pending; refunded da son durum
+        # değildir (yeni bekleyen ya da red sonrası dönüş). voided ve diğerleri dokunulmaz (K-12).
+        if self.state not in REFUND_RECOMPUTE_STATES:
+            return self.state
+        lines = self.refund_ids
+        if any(line.kind == 'void' and line.state == 'done' for line in lines):
+            return 'voided'
+        if any(line.state == 'pending_approval' for line in lines):
+            return 'refund_pending'
+        # DIKKAT: done satırı olmayan 'refunded' (eski/test verisi) sessizce paid'e düşmez.
+        if self.state == 'refunded' and not any(line.state == 'done' for line in lines):
+            return self.state
+        rounding = self.currency_id.rounding or 0.01
+        refunded = self.refunded_amount
+        if self.paid_amount and float_compare(
+                refunded, self.paid_amount, precision_rounding=rounding) >= 0:
+            return 'refunded'
+        if float_compare(refunded, 0.0, precision_rounding=rounding) > 0:
+            return 'partial_refund'
+        return 'paid'
+
+    def _recompute_refund_state(self):
+        """``_expected_refund_state`` farklıysa durumu yazar."""
         for rec in self:
-            if rec.state not in ('paid', 'partial_refund'):
-                continue
-            rounding = rec.currency_id.rounding or 0.01
-            refunded = rec.refunded_amount
-            if any(line.kind == 'void' and line.state == 'done' for line in rec.refund_ids):
-                new_state = 'voided'
-            elif rec.paid_amount and float_compare(
-                    refunded, rec.paid_amount, precision_rounding=rounding) >= 0:
-                new_state = 'refunded'
-            elif float_compare(refunded, 0.0, precision_rounding=rounding) > 0:
-                new_state = 'partial_refund'
-            else:
-                new_state = 'paid'
+            new_state = rec._expected_refund_state()
             if new_state != rec.state:
                 rec.sudo().write({'state': new_state})

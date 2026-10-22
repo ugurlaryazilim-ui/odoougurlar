@@ -20,7 +20,7 @@
                 <field name="state" widget="badge"
                        decoration-success="state == 'paid'"
                        decoration-info="state in ('sending', 'sent')"
-                       decoration-warning="state in ('unknown', 'review', 'partial_refund')"
+                       decoration-warning="state in ('unknown', 'review', 'refund_pending', 'partial_refund')"
                        decoration-danger="state == 'error'"
                        decoration-muted="state in ('expired', 'link_cancelled', 'voided', 'refunded')"/>
                 <field name="environment" widget="badge"
@@ -69,7 +69,7 @@
                             class="btn-danger" groups="sanal_pos.group_sanal_pos_manager"
                             invisible="not can_refund"/>
                     <field name="state" widget="statusbar"
-                           statusbar_visible="sent,paid,partial_refund,refunded"/>
+                           statusbar_visible="sent,paid,refund_pending,partial_refund,refunded"/>
                 </header>
                 <sheet>
                     <field name="is_test" invisible="1"/>
@@ -80,6 +80,12 @@
                     <div class="alert alert-danger text-center fw-bold" role="alert"
                          invisible="not is_test">
                         TEST ORTAMI – gerçek tahsilat yapılmaz
+                    </div>
+                    <!-- K-12: Paratika REFUND 00 yalnız "talep kabul edildi" demektir; kesin sonuç senkronla gelir -->
+                    <div class="alert alert-warning" role="alert"
+                         invisible="state != 'refund_pending'">
+                        İade Paratika finans onayı bekliyor. Onaylanınca 'İade edildi', reddedilirse
+                        önceki duruma döner; bu sırada yeni iade ve yeni link açılamaz.
                     </div>
                     <div class="alert alert-warning" role="alert"
                          invisible="not last_error_message or state not in ('sent', 'error', 'unknown', 'review')">
@@ -97,7 +103,7 @@
                             <field name="state" widget="badge"
                                    decoration-success="state == 'paid'"
                                    decoration-info="state in ('sending', 'sent')"
-                                   decoration-warning="state in ('unknown', 'review', 'partial_refund')"
+                                   decoration-warning="state in ('unknown', 'review', 'refund_pending', 'partial_refund')"
                                    decoration-danger="state == 'error'"/>
                         </group>
                         <group string="Link">
@@ -152,13 +158,19 @@
                                     <field name="create_date" string="Oluşturulma"/>
                                     <field name="kind"/>
                                     <field name="amount"/>
-                                    <field name="state"/>
+                                    <field name="state" widget="badge"
+                                           decoration-success="state == 'done'"
+                                           decoration-warning="state in ('pending_approval', 'unknown', 'processing')"
+                                           decoration-danger="state in ('rejected', 'failed')"/>
                                     <field name="source"/>
                                     <field name="reason"/>
                                     <field name="user_id"/>
                                     <field name="provider_ref"/>
                                     <field name="error_code" optional="show"/>
-                                    <field name="error_message" optional="hide"/>
+                                    <field name="error_message" optional="show"/>
+                                    <field name="provider_status" optional="show"/>
+                                    <field name="provider_status_detail" optional="hide"/>
+                                    <field name="pending_alert_sent" optional="hide"/>
                                     <field name="done_at" optional="hide"/>
                                 </list>
                             </field>
@@ -203,6 +215,8 @@
                 <filter name="paid" string="Ödendi" domain="[('state', '=', 'paid')]"/>
                 <filter name="partial_refund" string="Kısmen iade edildi"
                         domain="[('state', '=', 'partial_refund')]"/>
+                <filter name="refund_pending" string="İade onay bekliyor"
+                        domain="[('state', '=', 'refund_pending')]"/>
                 <filter name="refunded" string="İade edildi" domain="[('state', '=', 'refunded')]"/>
                 <filter name="voided" string="Ödeme iptal edildi" domain="[('state', '=', 'voided')]"/>
                 <filter name="expired" string="Süresi doldu" domain="[('state', '=', 'expired')]"/>

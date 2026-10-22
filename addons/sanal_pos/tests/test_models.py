@@ -16,7 +16,7 @@ from odoo.tools import mute_logger
 from .common import INV_NO, OPEN_STATES, PAID_STATES, REUSABLE_STATES, SanalPosCase
 
 ALL_STATES = {'sending', 'sent', 'unknown', 'error', 'expired', 'link_cancelled', 'paid',
-              'review', 'partial_refund', 'refunded', 'voided'}
+              'review', 'refund_pending', 'partial_refund', 'refunded', 'voided'}
 
 
 class ModelCase(SanalPosCase):
@@ -30,7 +30,7 @@ class ModelCase(SanalPosCase):
 class TestPaymentModel(ModelCase):
 
     def test_durum_degerleri(self):
-        """§4: 11 durum."""
+        """§4: 12 durum (K-12: + refund_pending)."""
         keys = {k for k, _label in self.env['sanal.pos.payment']._fields['state'].selection}
         self.assertEqual(keys, ALL_STATES)
 
@@ -377,7 +377,7 @@ class TestRefundModel(ModelCase):
                      'provider_ref', 'error_code', 'error_message', 'done_at'):
             self.assertIn(name, fields)
         self.assertEqual({k for k, _l in fields['state'].selection},
-                         {'processing', 'done', 'failed', 'unknown'})
+                         {'processing', 'pending_approval', 'done', 'rejected', 'failed', 'unknown'})
         self.assertEqual({k for k, _l in fields['kind'].selection}, {'void', 'refund'})
         self.assertEqual({k for k, _l in fields['source'].selection}, {'odoo', 'panel'})
 

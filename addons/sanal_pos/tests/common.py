@@ -59,7 +59,7 @@ CRON_SYNC_FLAGGED = 'sanal_pos.cron_sanal_pos_sync_flagged'
 CRON_DAILY = 'sanal_pos.cron_sanal_pos_daily'
 
 OPEN_STATES = ('sending', 'sent', 'unknown')
-PAID_STATES = ('paid', 'partial_refund', 'review')
+PAID_STATES = ('paid', 'partial_refund', 'review', 'refund_pending')   # K-12
 REUSABLE_STATES = ('expired', 'link_cancelled', 'error', 'voided', 'refunded')
 
 
@@ -296,6 +296,10 @@ class SanalPosMixin:
             'provider_ref': provider_ref,
         }
         data.update(vals)
+        # Kısmi benzersiz indeks DB durumunu görür; ORM create bekleyen UPDATE'leri flush etmez.
+        # Testte kardeş satırın önbellekteki durum değişikliği (ör. pending_approval -> rejected)
+        # sahte indeks çakışması üretmesin (üretimde satır oluşturma savepoint içinde, flush'lı).
+        self.env['sanal.pos.refund'].flush_model(['state'])
         return self.env['sanal.pos.refund'].sudo().create(data)
 
     def set_query_transactions(self, *transactions):
