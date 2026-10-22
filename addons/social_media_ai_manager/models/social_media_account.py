@@ -3,6 +3,8 @@ from odoo import models, fields, exceptions, api
 import logging
 import time
 
+from ..tools import mask_secrets
+
 _logger = logging.getLogger(__name__)
 
 # NEDEN: token son kullanma zamanını saklayacak yeni stored alan yasak; (db, hesap) -> (token, bitiş)
@@ -27,8 +29,11 @@ class SocialMediaAccount(models.Model):
     active = fields.Boolean(default=True)
     
     # API Credentials / Webhook tokens
-    api_token = fields.Char(string="API Token / Access Token")
-    webhook_secret = fields.Char(string="Webhook Secret (Verify Token)")
+    # NEDEN: sırlar yalnız sistem yöneticisine açık (K4, kullanıcı kararı). Gönderim/cron/webhook yolları sudo() ile okur;
+    # formda bu alanlar da groups taşımalı, yoksa normal kullanıcıda form yüklenmez.
+    # DIKKAT: yeni token/secret alanı eklenirse groups='base.group_system' unutulmasın (test_k4 alan listesini sınar).
+    api_token = fields.Char(string="API Token / Access Token", groups='base.group_system')
+    webhook_secret = fields.Char(string="Webhook Secret (Verify Token)", groups='base.group_system')
     phone_number = fields.Char(string="Phone Number (WhatsApp)")
     
     # Meta Specific IDs
@@ -36,11 +41,11 @@ class SocialMediaAccount(models.Model):
     meta_ig_id = fields.Char(string="Instagram Account ID")
 
     # YouTube Specific
-    youtube_refresh_token = fields.Char(string="YouTube Refresh Token")
+    youtube_refresh_token = fields.Char(string="YouTube Refresh Token", groups='base.group_system')
     youtube_channel_id = fields.Char(string="YouTube Channel ID")
 
     # TikTok Specific
-    tiktok_refresh_token = fields.Char(string="TikTok Refresh Token")
+    tiktok_refresh_token = fields.Char(string="TikTok Refresh Token", groups='base.group_system')
     tiktok_open_id = fields.Char(string="TikTok Open ID")
     
     # WhatsApp Specific (Evolution API)
@@ -189,6 +194,7 @@ class SocialMediaAccount(models.Model):
 
     def _refresh_tiktok_token(self):
         """ Refresh TikTok Access Token using the refresh token """
+        self = self.sudo()  # NEDEN: token alanları yalnız yöneticiye açık; çağıran (yayın/elle) yetkisiz olabilir
         self.ensure_one()
         if self.platform != 'tiktok' or not self.tiktok_refresh_token:
             return False
@@ -242,6 +248,7 @@ class SocialMediaAccount(models.Model):
 
     def _refresh_youtube_token(self):
         """ Refresh YouTube Access Token using the refresh token """
+        self = self.sudo()  # NEDEN: token alanları yalnız yöneticiye açık; çağıran (yayın/elle) yetkisiz olabilir
         self.ensure_one()
         if self.platform != 'youtube' or not self.youtube_refresh_token:
             return False
@@ -315,11 +322,11 @@ class SocialMediaAccount(models.Model):
             'part': 'snippet',
             'allThreadsRelatedToChannelId': self.youtube_channel_id,
             'maxResults': 50,
-            'access_token': self.api_token
         }
-        
+
         try:
-            res = requests.get(url, params=params, timeout=10)
+            # NEDEN: token URL'de değil başlıkta; bağlantı hatası metni URL'yi taşır ve aşağıda loglanır.
+            res = requests.get(url, params=params, headers={'Authorization': f'Bearer {self.api_token}'}, timeout=10)
             if not res.ok:
                 return
                 
@@ -384,11 +391,12 @@ class SocialMediaAccount(models.Model):
                 # AI Routing logic moved to Cron job
         except Exception as e:
             import logging
-            logging.getLogger(__name__).error(f"YouTube Sync Error: {e}")
+            logging.getLogger(__name__).error("YouTube Sync Error: %s: %s", type(e).__name__, mask_secrets(e, self.api_token))
 
     def _send_youtube_comment_reply(self, comment_id, reply_text, account):
         import requests
         import logging
+        account = account.sudo()  # NEDEN: insan yanıtı normal kullanıcı oturumunda gider; api_token yalnız yöneticiye açık
         url = "https://www.googleapis.com/youtube/v3/comments?part=snippet"
         headers = {
             'Authorization': f'Bearer {account.api_token}',
@@ -405,10 +413,11 @@ class SocialMediaAccount(models.Model):
             if not res.ok:
                 logging.getLogger(__name__).error(f"Failed to reply to YouTube comment {comment_id}: {res.status_code} - {res.text}")
         except Exception as e:
-            logging.getLogger(__name__).error(f"Exception replying to YouTube comment: {e}")
+            logging.getLogger(__name__).error("Exception replying to YouTube comment: %s", mask_secrets(e, account.api_token))
 
     def _send_meta_comment_reply(self, comment_id, message_text):
         """ Send a public reply to a Meta comment """
+        self = self.sudo()  # NEDEN: insan yanıtı normal kullanıcı oturumunda gider; api_token yalnız yöneticiye açık
         if not self.api_token: return
         import requests, logging
         endpoint = "replies" if self.platform == 'instagram' else "comments"
@@ -417,10 +426,11 @@ class SocialMediaAccount(models.Model):
         try:
             requests.post(url, data=payload, timeout=10)
         except Exception as e:
-            logging.getLogger(__name__).error(f"Exception replying to Meta comment: {e}")
+            logging.getLogger(__name__).error("Exception replying to Meta comment: %s", mask_secrets(e, self.api_token))
 
     def _send_meta_private_reply(self, comment_id, message_text, attachment=None, attachment_name=None):
         """ Send a private DM reply based on a comment """
+        self = self.sudo()  # NEDEN: bkz. _send_meta_comment_reply
         if not self.api_token: return False
         import requests, logging, json, base64
         url = "https://graph.facebook.com/v19.0/me/messages"
@@ -435,12 +445,12 @@ class SocialMediaAccount(models.Model):
                 'filedata': (attachment_name or 'image.jpg', base64.b64decode(attachment), 'image/jpeg')
             }
             try:
-                res = requests.post(url, data=payload, files=files, params={"access_token": self.api_token}, timeout=20)
+                res = requests.post(url, data=payload, files=files, headers={"Authorization": f"Bearer {self.api_token}"}, timeout=20)
                 if not res.ok:
                     logging.getLogger(__name__).error(f"Meta Private Image Error: {res.status_code} - {res.text}")
                     success = False
             except Exception as e:
-                logging.getLogger(__name__).error(f"Exception sending Meta private image: {e}")
+                logging.getLogger(__name__).error("Exception sending Meta private image: %s", mask_secrets(e, self.api_token))
                 success = False
 
         if message_text and message_text.strip():
@@ -452,12 +462,13 @@ class SocialMediaAccount(models.Model):
                     logging.getLogger(__name__).error(f"Meta Private Text Error: {res.status_code} - {res.text}")
                     success = False
             except Exception as e:
-                logging.getLogger(__name__).error(f"Exception sending Meta private text: {e}")
+                logging.getLogger(__name__).error("Exception sending Meta private text: %s", mask_secrets(e, self.api_token))
                 success = False
         return success
 
     def _send_meta_message(self, recipient_id, message_text, attachment=None, attachment_name=None):
         """ Send a DM using Meta Graph API """
+        self = self.sudo()  # NEDEN: bkz. _send_meta_comment_reply
         if not self.api_token: return
         import requests, logging, json, base64
         url = "https://graph.facebook.com/v19.0/me/messages"
@@ -471,11 +482,11 @@ class SocialMediaAccount(models.Model):
                 'filedata': (attachment_name or 'image.jpg', base64.b64decode(attachment), 'image/jpeg')
             }
             try:
-                res = requests.post(url, data=payload, files=files, params={"access_token": self.api_token}, timeout=20)
+                res = requests.post(url, data=payload, files=files, headers={"Authorization": f"Bearer {self.api_token}"}, timeout=20)
                 if not res.ok:
                     logging.getLogger(__name__).error(f"Meta Image Error: {res.status_code} - {res.text}")
             except Exception as e:
-                logging.getLogger(__name__).error(f"Exception sending Meta image: {e}")
+                logging.getLogger(__name__).error("Exception sending Meta image: %s", mask_secrets(e, self.api_token))
                 
         if message_text and message_text.strip():
             headers = {"Content-Type": "application/json", "Authorization": f"Bearer {self.api_token}"}
@@ -485,10 +496,11 @@ class SocialMediaAccount(models.Model):
                 if not res.ok:
                     logging.getLogger(__name__).error(f"Meta Text Error: {res.status_code} - {res.text}")
             except Exception as e:
-                logging.getLogger(__name__).error(f"Exception sending Meta text: {e}")
+                logging.getLogger(__name__).error("Exception sending Meta text: %s", mask_secrets(e, self.api_token))
 
     def _send_whatsapp_message(self, recipient_id, message_text, attachment=None, attachment_name=None):
         """ Send WhatsApp message via Evolution API """
+        self = self.sudo()  # NEDEN: bkz. _send_meta_comment_reply
         if not self.api_token or not self.whatsapp_api_url or not self.whatsapp_instance_name:
             import logging
             logging.getLogger(__name__).warning("WhatsApp credentials missing (API Token, URL or Instance Name)")
@@ -642,8 +654,8 @@ class SocialMediaAccount(models.Model):
                 new_reply = f"Detaylı bilgi için WhatsApp üzerinden ulaşabilirsiniz: {wa_link}"
             
             # Fetch replies from YouTube
-            url = f"https://www.googleapis.com/youtube/v3/comments?parentId={parent_id}&part=snippet&access_token={self.api_token}"
-            res = requests.get(url, timeout=20).json()
+            url = f"https://www.googleapis.com/youtube/v3/comments?parentId={parent_id}&part=snippet"
+            res = requests.get(url, headers={'Authorization': f'Bearer {self.api_token}'}, timeout=20).json()
             reply_id_to_update = None
             
             for item in res.get('items', []):

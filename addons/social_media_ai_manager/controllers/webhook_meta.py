@@ -54,7 +54,8 @@ class WebhookMeta(http.Controller):
                 return http.Response("Invalid signature", status=403)
             try:
                 data = json.loads(raw_body.decode('utf-8'))
-                _logger.debug("Incoming Meta Webhook: %s", data)
+                # NEDEN: tam gövde müşteri adı/mesajı taşır (KVKK) ve her olayda log şişirir; yalnız DEBUG'da ve kısaltılmış.
+                _logger.debug("Incoming Meta Webhook (ilk 500 bayt): %s", raw_body[:500])
                 
                 # Check if it's an Instagram or Facebook page event
                 if data.get('object') in ['instagram', 'page']:
@@ -160,7 +161,7 @@ class WebhookMeta(http.Controller):
         if enable_comments != 'True':
             return
             
-        _logger.info(f"Processing feed change: {change}")
+        _logger.debug("Processing feed change: %s", str(change)[:500])
         value = change.get('value', {})
         
         # Determine if it's a comment

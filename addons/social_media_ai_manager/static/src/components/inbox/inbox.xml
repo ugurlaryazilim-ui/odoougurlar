@@ -49,6 +49,9 @@
                             </div>
                         </div>
                     </t>
+                    <div t-if="state.hasMoreConvs" class="text-center p-3">
+                        <button class="btn btn-outline-secondary btn-sm rounded-pill" t-on-click="loadMoreConversations">Daha fazla görüşme yükle</button>
+                    </div>
                     <t t-if="state.conversations.length === 0">
                         <div class="text-center text-muted p-5">
                             <i class="fa fa-inbox fa-3x mb-3 text-light"></i>
@@ -88,6 +91,9 @@
 
                     <!-- Chat Messages -->
                     <div class="p-4 flex-grow-1 overflow-auto d-flex flex-column gap-3 custom-scrollbar" t-ref="chatMessagesContainer">
+                        <div t-if="state.hasMoreMsgs" class="text-center">
+                            <button class="btn btn-outline-secondary btn-sm rounded-pill" t-on-click="loadMoreMessages">Önceki mesajları yükle</button>
+                        </div>
                         <t t-foreach="state.messages" t-as="msg" t-key="msg.id">
                             <div t-att-class="'d-flex w-100 ' + (msg.message_type === 'outgoing' ? 'justify-content-end' : 'justify-content-start')">
                                 <div t-attf-class="msg-bubble #{msg.message_type === 'outgoing' ? 'msg-outgoing' : 'msg-incoming'}" style="max-width: 75%;">
