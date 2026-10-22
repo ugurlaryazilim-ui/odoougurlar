@@ -39,6 +39,10 @@
                         <field name="amount" invisible="not fetched" class="fw-bold"/>
                     </group>
                 </group>
+                <!-- Y-5 (K-15): yeniden açmada müşteri alanları önceki denemeden alınır -->
+                <div class="alert alert-info" role="alert" invisible="not reuse_notice">
+                    <field name="reuse_notice" readonly="1" nolabel="1"/>
+                </div>
                 <group string="Müşteri" invisible="not fetched">
                     <group>
                         <field name="customer_name" required="fetched"/>

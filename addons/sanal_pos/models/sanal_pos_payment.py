@@ -123,6 +123,12 @@ MO_REUSE_PENDING_MSG = ("Önceki mail order denemesinde Paratika'da devam eden b
                         'tekrar deneyin.')
 MO_REUSE_QUERY_FAILED_MSG = ("Önceki mail order denemesi Paratika'dan sorgulanamadı; yeni deneme "
                              'açılmadı. Birazdan tekrar deneyin.')
+# Y-5: yeniden açmada önceki denemeden korunan (sihirbaz değeri kullanılmayan) müşteri alanları
+MO_REUSE_CUSTOMER_FIELDS = ('customer_name', 'customer_phone', 'customer_email', 'customer_address',
+                            'customer_city', 'customer_zip')
+MO_REUSE_NOTICE = ('Bu faturanın Paratika oturumu hâlâ açık olabilecek önceki mail order denemesi '
+                   'var (%s). Yeni deneme aynı ödeme numarasıyla açılır; müşteri bilgileri önceki '
+                   'denemeden alınır, burada yaptığınız değişiklikler kullanılmaz.')
 # G10: yeniden gönder / link iptali (KK-31, KK-32)
 CHANNEL_MSG = 'En az bir gönderim kanalı seçin.'                                         # KK-9
 RESEND_CHANNELS = ('sms', 'email')
@@ -925,6 +931,9 @@ class SanalPosPayment(models.Model):
         sonuçta kayıt yeniden açılır. Çağıran commit eder (``_create_sending_payment``).
         """
         self.ensure_one()
+        # DIKKAT: sudo kasıtlı (K-15): MPID kullanıcıdan bağımsız yeniden kullanılır; başka bir
+        # Sanal POS kullanıcısının kapattığı deneme de aynı numarayla açılmalı (yeni MPID çift
+        # tahsilat riskidir). Hesap verebilirlik: önceki sahip nota yazılır ve bilgilendirilir.
         rec = self.sudo()
         # DIKKAT: Paratika aynı MPID'de yeni token için amount/customer/currency/sessionType/returnUrl
         # aynılığını şart koşar; müşteri alanları bu yüzden önceki denemeden korunur.
@@ -955,20 +964,33 @@ class SanalPosPayment(models.Model):
             self._trigger_sync_cron(flagged=True)
             self._sp_commit()
             raise UserError(MO_REUSE_PENDING_MSG)
+        new_uid = values.get('user_id') or self.env.uid
+        prev_user = rec.user_id or rec.create_uid
+        ignored = [rec._fields[key].string for key in MO_REUSE_CUSTOMER_FIELDS
+                   if key in values and (values[key] or False) != (rec[key] or False)]
         try:
             with self.env.cr.savepoint():
                 rec.write({
                     'state': 'sending', 'provider_token': False, 'expires_at': False,
                     'last_error_code': False, 'last_error_message': False,
                     'failed_attempt_count': len(failed), 'last_checked_at': now,
-                    'user_id': values.get('user_id') or self.env.uid,
+                    'user_id': new_uid,
                 })
                 rec.flush_recordset()
         except pg_errors.UniqueViolation:
             raise UserError(self._open_link_message_sql(rec.invoice_no)) from None
-        rec._post_note('Aynı ödeme numarasıyla (%s) yeni mail order denemesi: %s. Tutar ve müşteri '
-                       'bilgileri önceki denemeyle aynı kalır.' % (
-                           rec.merchant_payment_id, self.env.user.name or '-'))
+        body = ('Aynı ödeme numarasıyla (%s) yeni mail order denemesi: %s. Tutar ve müşteri '
+                'bilgileri önceki denemeyle aynı kalır.' % (
+                    rec.merchant_payment_id, rec.env['res.users'].browse(new_uid).name or '-'))
+        if ignored:
+            # Y-5: sihirbazdaki farklı müşteri bilgisi sessizce yok sayılmaz
+            body += ' Sihirbazda girilen farklı bilgiler kullanılmadı: %s.' % ', '.join(ignored)
+        partners = self.env['res.partner']
+        if prev_user and prev_user.id != new_uid:
+            body += ' Önceki deneme %s tarafından başlatılmıştı.' % (prev_user.name or '-')
+            partners = prev_user.partner_id
+        rec.message_post(body=body, message_type='comment', subtype_xmlid='mail.mt_note',
+                         partner_ids=partners.ids)
         return rec
 
     def _mail_order_reuse_notification(self):
@@ -1566,6 +1588,10 @@ class SanalPosPayment(models.Model):
         başka yazım yaşı yalnız uzatır (güvenli taraf). Yeni stored alan gerekmez.
         """
         self.ensure_one()
+        # DIKKAT: 'sending' kayda periyodik/tekrarlanan bir yazım eklemek (ör. her bildirimde
+        # bayrak, sayaç, zaman damgası) write_date'i sürekli yeniler ve kaydın bayatlamasını
+        # engeller. Bugün yalnız bayrak False->True geçişi yazar (_request_sync); bkz.
+        # test_bildirim_bayragi_bayatlamayi_engellemez.
         return self.write_date or self.create_date
 
     def _mark_stale_sending(self):

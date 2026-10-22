@@ -10,10 +10,10 @@ adım 1-6 (``_create_sending_payment``) ortaktır. Farklar:
 * Kart bilgisi bu sihirbazda ALINMAZ ve hiçbir modelde saklanmaz: kart sayfası ayrı bir
   sayfadır ve kart alanlarını tarayıcı doğrudan Paratika'ya gönderir (K-13).
 """
-from odoo import models
+from odoo import api, fields, models
 from odoo.exceptions import UserError
 
-from ..models.sanal_pos_payment import FIELD_MAX_LENGTH, MAIL_ORDER_EXPIRY_HOURS
+from ..models.sanal_pos_payment import FIELD_MAX_LENGTH, MAIL_ORDER_EXPIRY_HOURS, MO_REUSE_NOTICE
 from ..tools import normalize_phone, validate_email
 from .payment_create_wizard import PHONE_MSG
 
@@ -23,6 +23,16 @@ class SanalPosMailOrderWizard(models.TransientModel):
     _inherit = 'sanal.pos.payment.create.wizard'
     _description = 'Sanal POS: Mail Order'
     _sanal_pos_payment_method = 'mail_order'
+
+    reuse_notice = fields.Char(string='Önceki deneme', compute='_compute_reuse_notice')
+
+    @api.depends('invoice_no', 'fetched', 'fetched_invoice_no')
+    def _compute_reuse_notice(self):
+        """Y-5: K-15 yeniden açmada müşteri alanları önceki denemeden gelir; önceden söylenir."""
+        Payment = self.env['sanal.pos.payment']
+        for wiz in self:
+            prior = Payment._live_mail_order_prior(wiz._invoice_key()) if wiz.fetched else None
+            wiz.reuse_notice = MO_REUSE_NOTICE % prior.name if prior else False
 
     def _reopen_action(self):
         action = super()._reopen_action()

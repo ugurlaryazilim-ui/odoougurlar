@@ -191,7 +191,15 @@ Menü, sihirbaz, kart sayfası ve sonuç sayfası **Sanal POS / Kullanıcı** (v
 Redeploy ile `-u` arasında `payment_method` sütunu yoktur: Sanal POS cron'ları ve ödeme listesi "column does not exist" hatası verir. Cron'ların pasif olması ve pencerenin kısa tutulması bu yüzdendir. `web.base.url` HTTPS ve **ASCII** olmalıdır (Paratika dönüş adresi bundan türer). Paratika paneline yeni ayar gerekmez (bildirim adresi aynı).
 
 ### 9.5 Geri alma
-1. **Önkoşul:** açık Mail Order olmamalı (en fazla 60 dakika bekleyin ya da Mail Order'ı Kapat): `SELECT count(*) FROM sanal_pos_payment WHERE payment_method='mail_order' AND state IN ('sending','sent');` sonucu 0.
+1. **Önkoşul:** Paratika oturumu canlı olabilecek Mail Order kalmamalı. "Kapat" Paratika oturumunu sonlandırmaz (K-15): kapatılmış veya hatalı ama son oturumu 60 dakikadan yeni ve ödenmemiş kayıtlar da sayılır; sıfır değilse en fazla 60 dakika bekleyin. Sorgu (`sent_at` UTC saklanır):
+   ```sql
+   SELECT count(*) FROM sanal_pos_payment
+    WHERE payment_method = 'mail_order'
+      AND (state IN ('sending', 'sent')
+           OR (state IN ('expired', 'error') AND paid_at IS NULL
+               AND sent_at > (now() AT TIME ZONE 'UTC') - interval '1 hour'));
+   ```
+   sonucu 0 olmalı.
 2. **Eski koda dönmeden ÖNCE** veritabanında çalıştırın:
    `ALTER TABLE sanal_pos_payment ALTER COLUMN payment_method SET DEFAULT 'link';`
    NEDEN: `payment_method` NOT NULL'dır ama DB varsayılanı yoktur; eski kod bu sütunu INSERT'e koymaz ve bu satır olmadan geri dönüşten sonra **hiçbir yeni link oluşturulamaz** (`NotNullViolation`).

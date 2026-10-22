@@ -918,6 +918,9 @@ class TestMpidReuse(MailOrderCase):
         self.assertEqual(call.probe['rows'].get('%s-1' % INV_NO), 'sending')
         self.assertGreaterEqual(call.probe['commits'], 1, 'dış çağrıdan önce kayıt commit edilmeli')
         self.assertIn('Aynı ödeme numarasıyla', self.chatter(payment))
+        # aynı kullanıcı, aynı müşteri bilgisi: önceki sahip / yok sayılan alan notu yok
+        self.assertNotIn('Önceki deneme', self.chatter(payment))
+        self.assertNotIn('kullanılmadı', self.chatter(payment))
 
     def test_eski_mpidde_onay_token_yok_odendi(self):
         payment = self.closed()
@@ -1030,6 +1033,67 @@ class TestMpidReuse(MailOrderCase):
         self.set_create_date(payment, self.past(minutes=10))
         self.run_cron(CRON_SYNC)
         self.assertEqual((self.reload(payment).state, payment.last_error_code), ('error', 'STALE_SENDING'))
+
+    def age(self, payment, minutes):
+        """Zaman geçer: kayıt yazımı ve son sorgu ``minutes`` dakika önce."""
+        when = self.past(minutes=minutes)
+        self.set_create_date(payment, when)
+        self.env.cr.execute('UPDATE sanal_pos_payment SET last_checked_at = %s WHERE id = %s',
+                            [when, payment.id])
+        payment.invalidate_recordset()
+        return when
+
+    def test_bildirim_bayragi_bayatlamayi_engellemez(self):
+        # Y-1: yarıda kalmış yeniden açma; Paratika dönüş bildirimleri bayrak yazar
+        payment = self.closed()
+        self.mail_order_wizard()._create_sending_payment('mail_order')
+        self.assertEqual(self.reload(payment).state, 'sending')
+        mpid = payment.merchant_payment_id
+        Payment = self.env['sanal.pos.payment']
+        self.age(payment, 10)
+        Payment._mark_sync_requested(mpid)                     # ilk bildirim: bayrak yazımı
+        self.assertTrue(self.reload(payment).sync_requested)
+        self.run_cron(CRON_SYNC)
+        self.assertEqual(self.reload(payment).state, 'sending')  # yazım yaşı yeniledi (DIKKAT)
+        when = self.age(payment, 10)
+        Payment._mark_sync_requested(mpid)                     # tekrarlanan bildirim yazmaz
+        self.assertEqual(self.reload(payment).write_date, when)
+        self.run_cron(CRON_SYNC)
+        self.assertEqual((self.reload(payment).state, payment.last_error_code),
+                         ('error', 'STALE_SENDING'))
+
+    def test_baska_kullanicinin_denemesi_hesap_verebilir(self):
+        # güvenlik önerisi: sudo ile başkasının denemesi açılır; önceki sahip yazılır ve bildirilir
+        payment = self.closed()
+        self.assertEqual(payment.user_id, self.user_sp)
+        self.assertIsNone(self.mo_attempt(user=self.user_sp2))
+        self.reload(payment)
+        self.assertEqual((payment.state, payment.user_id), ('sent', self.user_sp2))
+        note = 'Önceki deneme %s tarafından başlatılmıştı' % self.user_sp.name
+        self.assertIn(note, self.chatter(payment))
+        self.assertIn(note, self.notification_texts(payment, self.user_sp.partner_id))
+        self.assertNotIn(self.user_sp2.partner_id, self.notified_partners(payment))
+        # kardeş: aynı kullanıcı yeniden açınca önceki sahip notu/bildirimi yok
+        payment.with_user(self.user_sp2).action_mail_order_close()
+        self.assertIsNone(self.mo_attempt(user=self.user_sp2))
+        self.assertEqual(self.reload(payment).state, 'sent')
+        self.assertEqual(self.chatter(payment).count('Önceki deneme'), 1)
+        self.assertNotIn(self.user_sp2.partner_id, self.notified_partners(payment))
+
+    def test_yeniden_acmada_musteri_bilgisi_sessiz_degil(self):
+        # Y-5: sihirbaz önceden uyarır; farklı girilen alanlar notta listelenir
+        fresh = self.mail_order_wizard(invoice_no=self.new_invoice('REUSE-Y5'))
+        self.assertFalse(fresh.reuse_notice)                   # önceki deneme yok -> uyarı yok
+        payment = self.closed()
+        old_name = payment.customer_name
+        wiz = self.mail_order_wizard(customer_name='Başka Müşteri')
+        self.assertIn(payment.name, wiz.reuse_notice)
+        self.assertIn('burada yaptığınız değişiklikler kullanılmaz', wiz.reuse_notice)
+        wiz.action_create_mail_order()
+        self.reload(payment)
+        self.assertEqual((payment.state, payment.customer_name), ('sent', old_name))
+        self.assertIn('Sihirbazda girilen farklı bilgiler kullanılmadı: Müşteri Adı.',
+                      self.chatter(payment))
 
 
 # ======================================================================================
