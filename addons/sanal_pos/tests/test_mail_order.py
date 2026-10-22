@@ -325,10 +325,11 @@ class TestProviderSession(MailOrderCase):
         self.assertNotIn('BIN', params)
 
     def test_query_installments_hata_bos_liste(self):
-        for response in (timeout_exc(), RawResponse(500, 'x'), err_body('ERR1', 'x')):
+        for i, response in enumerate((timeout_exc(), RawResponse(500, 'x'), err_body('ERR1', 'x'))):
             with self.subTest(response=type(response).__name__):
                 self.mock.queue('QUERYINSTALLMENT', response)
-                res = self.env[PROVIDER].query_installments(self.make_mail_order())
+                payment = self.make_mail_order(invoice_no='QI-%d' % i, merchant_payment_id='QI-%d-1' % i)
+                res = self.env[PROVIDER].query_installments(payment)
                 self.assertEqual(res['options'], [])
                 self.assertFalse(res['ok'])
 
