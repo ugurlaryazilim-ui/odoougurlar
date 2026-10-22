@@ -20,6 +20,7 @@ from odoo.exceptions import AccessError, MissingError, UserError
 from odoo.http import request
 
 from ..models.provider_paratika import DIRECT_POST_HOSTS
+from ..tools import installment_table
 from .main import MO_RESULT_PATH, MPID_RE, PAYMENT_LIST_PATH
 
 _logger = logging.getLogger(__name__)
@@ -76,9 +77,9 @@ class SanalPosMailOrderController(http.Controller):
             return self._error_page('Ödeme adresi yapılandırması geçersiz; yöneticinize başvurun.',
                                     status=500, payment_id=payment_id)
         this_year = datetime.now().year
-        for option in values.get('installments') or []:
-            # NEDEN: biçimleme burada; şablon ifadesindeki '%%' kaçışı görünüm kaydında korunmadı
-            option['rate_text'] = '%' + ('%.2f' % (option.get('rate') or 0)).replace('.', ',')
+        # NEDEN: biçimleme/hesap burada (tools); şablon ifadesindeki '%%' kaçışı görünüm kaydında korunmadı
+        values['installment_table'] = installment_table(
+            values.get('amount'), values.get('installments'))
         values.update({
             'record_url': RECORD_PATH % payment.id,
             'expiry_months': ['%02d' % m for m in range(1, 13)],

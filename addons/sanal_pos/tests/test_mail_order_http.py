@@ -190,6 +190,25 @@ class TestCardPage(MoHttpCase):
         self.assertEqual(self.mock.count('SESSIONTOKEN'), 0)
         self.assertEqual(self.link_calls(), 0)
 
+    def test_taksit_tablosu_okunur_adlar_tek_program_satiri_ve_toplam(self):
+        self.mock.queue('QUERYINSTALLMENT', installment_body(
+            ('A', 'PARAF', [(2, 0), (3, 1.5)]), ('B', 'UNKNOWN', [(2, 0), (3, 1.5)]),
+            ('C', 'KVY_NTW', [(2, 0), (3, 1.5)])))
+        payment = self.make_mail_order()
+        doc = self.doc(self.page(payment))
+        text = ' '.join(doc.xpath('//main')[0].text_content().split())
+        self.assertIn('Taksit yapılabilen kartlar: Paraf, Kuveyt Türk (Sağlam Kart)', text)
+        self.assertNotIn('UNKNOWN', text)
+        self.assertNotIn('KVY_NTW', text)
+        self.assertEqual(text.count('Taksit yapılabilen kartlar'), 1)
+        headers = [' '.join(th.text_content().split()) for th in doc.xpath('//table/thead//th')]
+        self.assertEqual(headers, ['Taksit', 'Vade farkı (%)', 'Çekilecek toplam (TL)', 'Aylık taksit (TL)'])
+        self.assertEqual(len(doc.xpath('//table/tbody/tr')), 3)       # tek çekim + 2 + 3
+        options = doc.xpath('//select[@name="installmentCount"]/option')
+        self.assertEqual([o.get('value') for o in options], ['1', '2', '3'])
+        self.assertIn('3 taksit — toplam ', options[2].text)
+        self.assertIn('Vade farkı banka/Paratika tarafından', text)
+
     def test_taksit_sorgusu_hatasinda_tek_cekim(self):
         self.mock.queue('QUERYINSTALLMENT', timeout_exc())
         response = self.page(self.make_mail_order())
