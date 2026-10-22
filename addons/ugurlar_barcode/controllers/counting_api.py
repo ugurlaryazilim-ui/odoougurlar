@@ -41,13 +41,15 @@ class CountingApiController(BarcodeApiBase):
         # 1) Kalemleri çözümle (yanıt sırası korunur)
         counted = []  # (results indeksi, ürün, barkod, sayılan)
         for item in items:
-            bc = item.get('barcode', '').strip()
+            # NEDEN: istemci barcode:null gönderebilir; .get varsayılanı null'u yakalamaz
+            bc = (item.get('barcode') or '').strip()
             new_qty = self._parse_qty(item.get('quantity', 0), default=0, allow_zero=True)
             if new_qty is None:
                 results.append({'barcode': bc, 'status': 'error', 'message': 'Geçersiz miktar'})
                 continue
 
-            product = self._find_product(bc)
+            # boş barkod aranmaz: `default_code = ''` kodsuz bir ürünle eşleşebilirdi
+            product = self._find_product(bc) if bc else None
             if not product:
                 results.append({'barcode': bc, 'status': 'not_found'})
                 continue

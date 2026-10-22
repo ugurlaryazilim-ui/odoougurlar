@@ -9,6 +9,25 @@ from odoo.http import request, content_disposition
 _logger = logging.getLogger(__name__)
 
 
+def _subtree_totals(parent_paths, direct_qty):
+    """{parent_path öneki: o önek altındaki lokasyonların doğrudan miktar toplamı}.
+
+    parent_paths: {lokasyon_id: parent_path}. Odoo parent_path her zaman '/' ile biter
+    ('1/5/9/'), bu yüzden önekler segment sınırındadır. Boş parent_path her lokasyonun öneki
+    sayılır (eski `startswith('')` davranışı).
+    """
+    totals = {}
+    for loc_id, path in parent_paths.items():
+        qty = direct_qty.get(loc_id, 0)
+        totals[''] = totals.get('', 0.0) + qty
+        pos = path.find('/')
+        while pos != -1:
+            prefix = path[:pos + 1]
+            totals[prefix] = totals.get(prefix, 0.0) + qty
+            pos = path.find('/', pos + 1)
+    return totals
+
+
 class ShelfExportController(http.Controller):
 
     @http.route('/odoougurlar/shelf_detail_export', type='http', auth='user')
@@ -131,14 +150,15 @@ class ShelfExportController(http.Controller):
                 'parent_path': parent_path,
             }
 
+        # NEDEN: her satır için tüm lokasyonları gezmek (startswith) O(n²) idi; her lokasyonun
+        # miktarı kendi parent_path'inin üst-yol öneklerine bir kez eklenir (O(n·derinlik)),
+        # satır başına toplam sözlükten okunur. Sonuç eski startswith toplamıyla aynıdır.
+        subtree_qty = _subtree_totals(
+            {lid: d['parent_path'] for lid, d in loc_data.items()}, quant_direct_map)
+
         def calc_total_qty(loc_id):
             """Bir lokasyon ve tüm alt lokasyonlarının toplam miktarı."""
-            pp = loc_data[loc_id]['parent_path']
-            total = 0.0
-            for other_id, other in loc_data.items():
-                if other['parent_path'].startswith(pp):
-                    total += quant_direct_map.get(other_id, 0)
-            return total
+            return subtree_qty.get(loc_data[loc_id]['parent_path'], 0.0)
 
         # ─── Lokasyon → Warehouse eşleme ───
         def find_warehouse(parent_path):

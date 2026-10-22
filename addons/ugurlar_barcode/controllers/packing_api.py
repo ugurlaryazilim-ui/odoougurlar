@@ -1,12 +1,11 @@
 """Paketleme & Faturalama API — batch bazlı ürün eşleştirme, fatura, etiket."""
+import base64
 import json
 import logging
 import os
 import subprocess
 import tempfile
 import time
-from urllib.parse import quote
-
 import re
 
 from markupsafe import Markup, escape
@@ -1266,9 +1265,20 @@ class PackingApiController(BarcodeApiBase):
         ]
         return request.make_response(pdf, headers=headers)
 
-    def _get_base_url(self):
-        """Barcode image URL'leri için Odoo base URL döndür."""
-        return request.env['ir.config_parameter'].sudo().get_param('web.base.url', 'http://localhost:8069')
+    def _barcode_data_uri(self, barcode_type, value, **params):
+        """Barkod/QR görselini Odoo içinde üretip data URI döndür; üretilemezse ''.
+
+        NEDEN: eskiden <img src="{web.base.url}/report/barcode/..."> yazılıp wkhtmltopdf aynı
+        Odoo'ya HTTP isteği atıyordu (worker meşgulken kilitlenme, base url yanlışsa kırık
+        görsel). /report/barcode ucu da aynı `ir.actions.report.barcode` fonksiyonunu çağırır,
+        bu yüzden Code128 çıktısı görsel olarak aynıdır.
+        """
+        try:
+            png = request.env['ir.actions.report'].barcode(barcode_type, value, **params)
+        except (ValueError, AttributeError):
+            _logger.warning('Etiket barkodu üretilemedi (tür=%s)', barcode_type, exc_info=True)
+            return ''
+        return 'data:image/png;base64,' + base64.b64encode(png).decode()
 
     def _get_field_text(self, el_type, content, data):
         """Frontend _getFieldValue eşdeğeri — element tipine göre veri döndür."""
@@ -1296,7 +1306,6 @@ class PackingApiController(BarcodeApiBase):
 
     def _build_cargo_label_html(self, width_mm, height_mm, elements, data):
         """Kargo etiketi HTML'i — mm bazlı, wkhtmltopdf uyumlu."""
-        base_url = self._get_base_url()
 
         elements_html = ''
         for el in elements:
@@ -1336,16 +1345,15 @@ class PackingApiController(BarcodeApiBase):
             # ── Kargo Barkodu ──
             if el_type == 'cargo_barcode':
                 barcode_value = data.get('cargo_tracking', '')
-                if barcode_value:
-                    encoded = quote(barcode_value)
-                    img_w = round(w * 12)
-                    img_h = round(h * 12)
+                src = self._barcode_data_uri(
+                    'Code128', barcode_value, width=round(w * 12), height=round(h * 12),
+                    humanreadable=1) if barcode_value else ''
+                if src:
                     elements_html += (
                         f'<div style="position:absolute; left:{x}mm; top:{y}mm; '
                         f'width:{w}mm; height:{h}mm; transform:rotate({rotation}deg); '
                         f'text-align:center;">'
-                        f'<img src="{base_url}/report/barcode/Code128/{encoded}'
-                        f'?width={img_w}&height={img_h}&humanreadable=1" '
+                        f'<img src="{src}" '
                         f'style="width:100%;height:100%;object-fit:contain;" />'
                         f'</div>'
                     )
@@ -1354,13 +1362,15 @@ class PackingApiController(BarcodeApiBase):
             # ── QR Kod ──
             if el_type == 'cargo_qr_code':
                 qr_value = content or data.get('cargo_tracking', '')
-                if qr_value:
+                # NEDEN: eski URL `?type=QR&value=` idi; çekirdek /report/barcode ucunun
+                # parametresi `barcode_type` (`type` tanınmaz). Türü açık veriyoruz.
+                src = self._barcode_data_uri(
+                    'QR', qr_value, width=round(w * 12), height=round(h * 12)) if qr_value else ''
+                if src:
                     elements_html += (
                         f'<div style="position:absolute; left:{x}mm; top:{y}mm; '
                         f'width:{w}mm; height:{h}mm; transform:rotate({rotation}deg);">'
-                        f'<img src="{base_url}/report/barcode/?type=QR'
-                        f'&value={quote(qr_value)}'
-                        f'&width={round(w * 12)}&height={round(h * 12)}" '
+                        f'<img src="{src}" '
                         f'style="width:100%;height:100%;object-fit:contain;" />'
                         f'</div>'
                     )
@@ -1432,14 +1442,14 @@ class PackingApiController(BarcodeApiBase):
 
     def _build_default_cargo_html(self, data):
         """Şablon yokken varsayılan kargo etiketi HTML'i."""
-        base_url = self._get_base_url()
         cargo_barcode = data.get('cargo_tracking', '')
         barcode_html = ''
-        if cargo_barcode:
+        src = self._barcode_data_uri(
+            'Code128', cargo_barcode, width=840, height=200, humanreadable=1) if cargo_barcode else ''
+        if src:
             barcode_html = (
                 f'<div style="text-align:center;margin:2mm 0;">'
-                f'<img src="{base_url}/report/barcode/Code128/{quote(cargo_barcode)}'
-                f'?width=840&height=200&humanreadable=1" '
+                f'<img src="{src}" '
                 f'style="width:70mm;height:18mm;object-fit:contain;" />'
                 f'</div>'
             )
