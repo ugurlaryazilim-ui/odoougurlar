@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 from lxml import etree
 from psycopg2 import IntegrityError
 
-from odoo.exceptions import AccessError, UserError
+from odoo.exceptions import UserError
 from odoo.tests import tagged
 from odoo.tools import file_open, mute_logger
 from odoo.tools import html2plaintext
@@ -1201,11 +1201,11 @@ class TestK6Pattern(ApprovalCase):
         for record in (line, rejected):
             for user in (self.user_mgr, self.user_sp):
                 with self.subTest(satir=record.state, kullanici=user.login):
-                    with self.assertRaises((UserError, AccessError)):
+                    with self.assertRaises(UserError):  # AccessError de UserError alt sınıfı; Odoo assertRaises demet almaz
                         record.with_user(user).write({'state': 'done'})
-                    with self.assertRaises((UserError, AccessError)):
+                    with self.assertRaises(UserError):  # AccessError de UserError alt sınıfı; Odoo assertRaises demet almaz
                         record.with_user(user).write({'provider_status': 'AP'})
-                    with self.assertRaises((UserError, AccessError)):
+                    with self.assertRaises(UserError):  # AccessError de UserError alt sınıfı; Odoo assertRaises demet almaz
                         record.with_user(user).unlink()
         line.invalidate_recordset()
         self.assertEqual(line.state, 'pending_approval')

@@ -194,9 +194,9 @@ class TestRefundApprovalMigration(RefundCase):
         before = self.snapshot()
         for user in (self.user_sp, self.user_plain):
             with self.subTest(kullanici=user.login):
-                with self.assertRaises((UserError, AccessError)):
+                with self.assertRaises(UserError):  # AccessError de UserError alt sınıfı; Odoo assertRaises demet almaz
                     wiz.with_user(user).action_compare()
-                with self.assertRaises((UserError, AccessError)):
+                with self.assertRaises(UserError):  # AccessError de UserError alt sınıfı; Odoo assertRaises demet almaz
                     wiz.with_user(user).action_apply()
         self.assertEqual(self.snapshot(), before)
 
@@ -344,7 +344,7 @@ class TestRefundApprovalMigration(RefundCase):
         wiz = self.env[WIZ].sudo().create({})
         wiz.sudo().action_compare()
         before = self.compact()
-        with self.assertRaises((UserError, AccessError)):
+        with self.assertRaises(UserError):  # AccessError de UserError alt sınıfı; Odoo assertRaises demet almaz
             wiz.with_user(self.user_sp).action_apply()
         self.assertEqual(self.compact(), before)
         self.assertFalse(self.env['ir.config_parameter'].sudo().get_param(ICP_KEY))
