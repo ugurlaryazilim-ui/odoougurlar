@@ -64,7 +64,8 @@ class TestImageSyncLogRetention(TransactionCase):
         for _i in range(5):
             recs |= self._log(400)
         cron_model = type(self.env['ir.cron'])
-        with patch(LOG_MOD + '._GC_BATCH', 2),                 patch.object(cron_model, '_commit_progress', return_value=100.0) as commit:
+        with patch(LOG_MOD + '._GC_BATCH', 2), \
+                patch.object(cron_model, '_commit_progress', return_value=100.0) as commit:
             self.assertEqual(self.Log.with_context(cron_id=1)._cron_gc_old_logs(), 5)
         self.assertFalse(recs.exists())
         self.assertEqual(commit.call_count, 2)  # son (kısa) partiden sonra commit yok
@@ -83,7 +84,9 @@ class TestImageSyncLogRetention(TransactionCase):
             seen.append(str(query))
             return real(query, params, *a, **kw)
         cron_model = type(self.env['ir.cron'])
-        with patch(LOG_MOD + '._GC_BATCH', 2),                 patch.object(cron_model, '_commit_progress', return_value=100.0),                 patch.object(self.env.cr, 'execute', spy):
+        with patch(LOG_MOD + '._GC_BATCH', 2), \
+                patch.object(cron_model, '_commit_progress', return_value=100.0), \
+                patch.object(self.env.cr, 'execute', spy):
             self.Log.with_context(cron_id=1)._cron_gc_old_logs()
         self.assertFalse(old.exists())
         self.assertEqual(young.exists(), young)
@@ -95,7 +98,8 @@ class TestImageSyncLogRetention(TransactionCase):
         for _i in range(5):
             recs |= self._log(400)
         cron_model = type(self.env['ir.cron'])
-        with patch(LOG_MOD + '._GC_BATCH', 2), patch(LOG_MOD + '._GC_TIME_BUDGET', -1),                 patch.object(cron_model, '_commit_progress', return_value=100.0):
+        with patch(LOG_MOD + '._GC_BATCH', 2), patch(LOG_MOD + '._GC_TIME_BUDGET', -1), \
+                patch.object(cron_model, '_commit_progress', return_value=100.0):
             self.assertEqual(self.Log.with_context(cron_id=1)._cron_gc_old_logs(), 2)
         self.assertEqual(len(recs.exists()), 3)
 
