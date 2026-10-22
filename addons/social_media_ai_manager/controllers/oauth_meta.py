@@ -5,6 +5,8 @@ import requests
 import werkzeug
 import logging
 
+from ..tools import mask_secrets
+
 _logger = logging.getLogger(__name__)
 
 class MetaOAuthController(http.Controller):
@@ -29,6 +31,7 @@ class MetaOAuthController(http.Controller):
 
     @http.route('/social_media_ai/facebook/callback', type='http', auth='user')
     def facebook_callback(self, **kw):
+        app_secret = user_access_token = long_user_token = None  # except bloğunda maskelemek için
         try:
             code = kw.get('code')
             if not code:
@@ -44,8 +47,10 @@ class MetaOAuthController(http.Controller):
             redirect_uri = f"{base_url}/social_media_ai/facebook/callback"
 
             # 1. Exchange code for user access token
-            token_url = f"https://graph.facebook.com/v19.0/oauth/access_token?client_id={app_id}&redirect_uri={redirect_uri}&client_secret={app_secret}&code={code}"
-            token_resp = requests.get(token_url, timeout=30).json()
+            # NEDEN: client_secret URL'de gitmez; bağlantı hatası metni (MaxRetryError) URL'yi taşır. Graph API bu uçta POST gövdesini kabul eder.
+            token_resp = requests.post("https://graph.facebook.com/v19.0/oauth/access_token", data={
+                'client_id': app_id, 'redirect_uri': redirect_uri, 'client_secret': app_secret, 'code': code,
+            }, timeout=30).json()
             
             user_access_token = token_resp.get('access_token')
             if not user_access_token:
@@ -53,8 +58,10 @@ class MetaOAuthController(http.Controller):
                 return f"Error getting access token: {token_resp}"
 
             # 2. Get Long-lived User Token
-            long_token_url = f"https://graph.facebook.com/v19.0/oauth/access_token?grant_type=fb_exchange_token&client_id={app_id}&client_secret={app_secret}&fb_exchange_token={user_access_token}"
-            long_token_resp = requests.get(long_token_url, timeout=30).json()
+            long_token_resp = requests.post("https://graph.facebook.com/v19.0/oauth/access_token", data={
+                'grant_type': 'fb_exchange_token', 'client_id': app_id, 'client_secret': app_secret,
+                'fb_exchange_token': user_access_token,
+            }, timeout=30).json()
             long_user_token = long_token_resp.get('access_token')
             if not long_user_token:
                 return f"Error getting long-lived token: {long_token_resp}"
@@ -72,8 +79,11 @@ class MetaOAuthController(http.Controller):
                     continue
                     
                 # Query the page directly using the user token
-                page_url = f"https://graph.facebook.com/v19.0/{page_id}?fields=name,access_token,instagram_business_account&access_token={long_user_token}"
-                page_resp = requests.get(page_url, timeout=30).json()
+                # NEDEN: kullanıcı token'ı URL'ye değil Authorization başlığına konur (Graph API Bearer'ı kabul eder).
+                page_resp = requests.get(
+                    f"https://graph.facebook.com/v19.0/{page_id}",
+                    params={'fields': 'name,access_token,instagram_business_account'},
+                    headers={'Authorization': f'Bearer {long_user_token}'}, timeout=30).json()
                 responses_log.append(f"Page {page_id}: {page_resp}")
                 
                 page_token = page_resp.get('access_token')
@@ -98,7 +108,7 @@ class MetaOAuthController(http.Controller):
                     sub_resp = requests.post(subscribe_url, data=sub_data, timeout=30).json()
                     _logger.info("Webhook Subscribe Response for Page %s: %s", page_id, sub_resp)
                 except Exception as e:
-                    _logger.error("Error subscribing webhook: %s", e)
+                    _logger.error("Error subscribing webhook: %s: %s", type(e).__name__, mask_secrets(e, page_token))
                 
                 # Check for linked Instagram Account
                 ig_account = page_resp.get('instagram_business_account')
@@ -125,5 +135,6 @@ class MetaOAuthController(http.Controller):
 
             return request.redirect('/web#action=social_media_ai_manager.action_social_media_account')
         except Exception as e:
-            _logger.error("Facebook Callback Error: %s", str(e), exc_info=True)
-            return f"An internal error occurred: {str(e)}"
+            # DIKKAT: exc_info=True kullanma; traceback maskesiz istisna metnini (URL/token) loga basar.
+            _logger.error("Facebook Callback Error: %s: %s", type(e).__name__, mask_secrets(e, app_secret, user_access_token, long_user_token))
+            return f"Facebook bağlantısı sırasında bir hata oluştu ({type(e).__name__}). Ayrıntı sunucu logundadır."

@@ -7,6 +7,9 @@ import { _t } from "@web/core/l10n/translation";
 import { user } from "@web/core/user";
 import { openCameraScanner } from "@ugurlar_barcode/js/camera_scanner";
 
+const CONV_PAGE = 100;
+const MSG_PAGE = 200;
+
 export class SocialInbox extends Component {
     setup() {
         this.orm = useService("orm");
@@ -29,6 +32,12 @@ export class SocialInbox extends Component {
             showProductSearch: false,
             productQuery: "",
             productResults: [],
+            // NEDEN: ilk sayfa eskisiyle aynı (100 görüşme / 200 mesaj); fazlası "daha fazla yükle" ile istenir.
+            // Yoklama mevcut sınırla yeniden okur, böylece yüklenmiş sayfalar kaybolmaz.
+            convLimit: CONV_PAGE,
+            msgLimit: MSG_PAGE,
+            hasMoreConvs: false,
+            hasMoreMsgs: false,
         });
 
         onWillStart(async () => {
@@ -55,6 +64,13 @@ export class SocialInbox extends Component {
         });
         
         onPatched(() => {
+            const el = this.chatContainerRef.el;
+            if (this._anchorHeight !== undefined && el) {
+                // "Önceki mesajlar" yüklendi: kullanıcı okuduğu yerde kalsın, alta atlamasın
+                el.scrollTop = el.scrollHeight - this._anchorHeight;
+                this._anchorHeight = undefined;
+                return;
+            }
             // Scroll to bottom after state changes if needed
             this.scrollToBottom();
         });
@@ -113,17 +129,35 @@ export class SocialInbox extends Component {
     }
 
     async loadConversations() {
-        this.state.conversations = await this.orm.searchRead(
+        // NEDEN: limit+1 satır istenir; fazla gelen satır "devamı var" işaretidir, listeye girmez.
+        const rows = await this.orm.searchRead(
             "social.media.conversation",
             [],
             ["id", "name", "platform", "unread_count", "state", "user_id"],
-            { order: "last_message_date desc", limit: 100 }
+            { order: "last_message_date desc", limit: this.state.convLimit + 1 }
         );
+        this.state.hasMoreConvs = rows.length > this.state.convLimit;
+        this.state.conversations = rows.slice(0, this.state.convLimit);
+    }
+
+    async loadMoreConversations() {
+        this.state.convLimit += CONV_PAGE;
+        await this.loadConversations();
+    }
+
+    async loadMoreMessages() {
+        const el = this.chatContainerRef.el;
+        this._anchorHeight = el ? el.scrollHeight - el.scrollTop : undefined;
+        this.state.msgLimit += MSG_PAGE;
+        await this.loadMessages(this.state.activeConversation.id);
     }
 
     async selectConversation(convId) {
         this.state.activeConversation = this.state.conversations.find(c => c.id === convId);
         this.state.showChatOnMobile = true;
+        if (this.state.activeConversation?.id !== this._msgConvId) {
+            this.state.msgLimit = MSG_PAGE;  // başka görüşme: sayfalama baştan
+        }
         
         // CRM: Mark as read
         await this.orm.call("social.media.conversation", "mark_as_read", [[convId]]);
@@ -167,14 +201,17 @@ export class SocialInbox extends Component {
     }
 
     async loadMessages(convId) {
-        // NEDEN: uzun görüşmede tüm geçmiş her 10 sn okunmasın; son 200 mesaj (en yeni → eski çekilip çevrilir).
+        // NEDEN: uzun görüşmede tüm geçmiş her 10 sn okunmasın; son msgLimit mesaj (en yeni → eski çekilip çevrilir).
+        // Fazla gelen 1 satır eski mesaj olduğunu gösterir ("önceki mesajları yükle" düğmesi).
         const msgs = await this.orm.searchRead(
             "social.media.message",
             [["conversation_id", "=", convId]],
             ["id", "content", "message_type", "date", "is_read", "post_link", "has_attachment"],
-            { order: "date desc, id desc", limit: 200 }
+            { order: "date desc, id desc", limit: this.state.msgLimit + 1 }
         );
-        this.state.messages = msgs.reverse();
+        this.state.hasMoreMsgs = msgs.length > this.state.msgLimit;
+        this.state.messages = msgs.slice(0, this.state.msgLimit).reverse();
+        this._msgConvId = convId;
     }
 
     autoResizeInput(ev) {
