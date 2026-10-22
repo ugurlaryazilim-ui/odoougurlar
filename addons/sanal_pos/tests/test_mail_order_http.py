@@ -26,6 +26,10 @@ WARNING_TEXT = ('Kart bilgisini yalnız bu ekrandan açılan kart sayfasına gir
                 'müşteriden alıp yalnız banka sayfasına girin.')
 CARD_FIELDS = {'cardOwner', 'pan', 'expiryMonth', 'expiryYear', 'cvv', 'installmentCount'}
 PAYMENT_LIST = '/odoo/action-sanal_pos.action_sanal_pos_payment'
+CSS_PATH = '/sanal_pos/static/src/css/mail_order.css'
+# NEDEN: Odoo /static yanıtı 1 hafta önbelleklenir (Cache-Control: public, max-age=604800); adres
+# sabit kalırsa dağıtımdan sonra tarayıcı eski CSS'i kullanır, yeni işaretleme stilsiz görünür.
+CSS_HREF_RE = re.compile(r'^' + re.escape(CSS_PATH) + r'\?v=[0-9a-f]{12}$')
 BODY_CARD = {'pan': LEAK_PAN, 'cvv': LEAK_CVV, 'cardOwner': LEAK_OWNER,
              'expiryMonth': '12', 'expiryYear': '2030'}
 
@@ -157,7 +161,8 @@ class TestCardPage(MoHttpCase):
         self.assertIsNone(re.search(r'\son[a-z]+\s*=', lowered), 'satır içi olay işleyicisi')
         doc = lxml_html.fromstring(text)
         links = doc.xpath('//link/@href')
-        self.assertEqual(links, ['/sanal_pos/static/src/css/mail_order.css'])
+        self.assertEqual(len(links), 1)
+        self.assertRegex(links[0], CSS_HREF_RE)
         self.assertFalse(doc.xpath('//img[not(starts-with(@src,"/"))]'))
 
     # ---- Odoo 19 görünümü (feat/mail-order-card-page-design): kritik öğeler
@@ -256,8 +261,48 @@ class TestCardPage(MoHttpCase):
             self.assertNotIn('<iframe', lowered)
             self.assertNotIn('/web/assets', lowered)
             self.assertIsNone(re.search(r'\son[a-z]+\s*=', lowered))
-            self.assertEqual(lxml_html.fromstring(text).xpath('//link/@href'),
-                             ['/sanal_pos/static/src/css/mail_order.css'])
+            links = lxml_html.fromstring(text).xpath('//link/@href')
+            self.assertEqual(len(links), 1)
+            self.assertRegex(links[0], CSS_HREF_RE)
+
+    def test_css_baglantisi_surumlu_ve_csp_izin_verir(self):
+        # Canlı hata: CSS adresi sürümsüzdü, tarayıcı eski dosyayı önbellekten kullandı (stilsiz sayfa)
+        pages = [self.page(self.make_mail_order()),
+                 self.page(self.make_mail_order(invoice_no='E-1', state='paid')),            # hata sayfası
+                 self.url_open(MAIL_ORDER_RETURN_PATH, data={'MERCHANTPAYMENTID': 'X-1-1'}, method='POST')]
+        hrefs = set()
+        for response in pages:
+            doc = lxml_html.fromstring(response.text)
+            link = doc.xpath('//link[@rel="stylesheet"]')
+            self.assertEqual(len(link), 1, response.text[:300])
+            href = link[0].get('href')
+            self.assertRegex(href, CSS_HREF_RE)
+            hrefs.add(href)
+            # CSP: style-src 'self' + bağlantı aynı kökenli göreli adres => tarayıcı yükler
+            policy = self.csp(response)
+            self.assertEqual(policy.get('style-src'), ["'self'"])
+            self.assertTrue(href.startswith('/') and not href.startswith('//'), href)
+            self.assertNotIn("'unsafe-inline'", response.headers['Content-Security-Policy'])
+        self.assertEqual(len(hrefs), 1)             # üç sayfa da aynı sürümü kullanır
+        # sürümlü adres gerçekten CSS döndürür ve sürüm dosya içeriğinden türer
+        css = self.url_open(hrefs.pop())
+        self.assertEqual(css.status_code, 200)
+        self.assertIn('text/css', css.headers.get('Content-Type', ''))
+        from odoo.addons.sanal_pos import tools
+        self.assertEqual(css.url.rsplit('?v=', 1)[1], tools.static_file_version(
+            tools.MAIL_ORDER_CSS_FILE))
+
+    def test_satir_ici_svg_boyut_ozniteligi_tasir(self):
+        # Savunma: CSS yüklenmese bile ikonlar ekranı kaplayan dev şekillere dönmesin
+        for response in (self.page(self.make_mail_order()),
+                         self.page(self.make_mail_order(invoice_no='E-1', state='paid')),
+                         self.url_open(MAIL_ORDER_RETURN_PATH, data={'MERCHANTPAYMENTID': 'X-1-1'},
+                                       method='POST')):
+            svgs = lxml_html.fromstring(response.text).xpath('//svg')
+            self.assertTrue(svgs)
+            for svg in svgs:
+                self.assertTrue(svg.get('width', '').isdigit(), svg.get('class'))
+                self.assertTrue(svg.get('height', '').isdigit(), svg.get('class'))
 
     def test_hata_sayfasi_ayni_tasarim_dili_ve_geri_baglantisi(self):
         payment = self.make_mail_order(state='expired')

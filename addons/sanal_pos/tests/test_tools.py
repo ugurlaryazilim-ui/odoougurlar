@@ -260,3 +260,30 @@ class TestMasking(TransactionCase):
     def test_kk37_scrub_none_metin(self):
         t = _tools()
         self.assertFalse(t.scrub(None, ['x']))
+
+
+@tagged('post_install', '-at_install', 'sanal_pos')
+class TestStaticFileVersion(TransactionCase):
+
+    def test_surum_icerikten_turer_ve_degisince_degisir(self):
+        # Canlı hata: sabit CSS adresi tarayıcıda 1 hafta eski kalıyordu; içerik değişince sürüm değişmeli
+        import os
+        import tempfile
+        t = _tools()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'a.css')
+            with open(path, 'w') as f:
+                f.write('a{color:red}')
+            v1 = t.static_file_version(path)
+            self.assertRegex(v1, r'^[0-9a-f]{12}$')
+            self.assertEqual(t.static_file_version(path), v1)
+            with open(path, 'w') as f:
+                f.write('a{color:blue}')
+            os.utime(path, (1, 1))      # mtime farklı olsun (önbellek anahtarı)
+            v2 = t.static_file_version(path)
+            self.assertNotEqual(v1, v2)
+
+    def test_css_adresi_surumlu(self):
+        t = _tools()
+        self.assertRegex(t.mail_order_css_url(),
+                         r'^/sanal_pos/static/src/css/mail_order\.css\?v=[0-9a-f]{12}$')
