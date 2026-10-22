@@ -564,7 +564,7 @@ class SanalPosProviderParatika(models.AbstractModel):
         res['options'] = []
         if not res['ok']:
             return res
-        merged = {}
+        merged, all_keys = {}, set()
         for system in (data or {}).get('paymentSystemList') or []:
             if not isinstance(system, dict):
                 continue
@@ -573,6 +573,7 @@ class SanalPosProviderParatika(models.AbstractModel):
             # ``paymentSystem`` değeri bu üç kimlikten biriyle karşılaştırılır.
             keys = sorted({str(system.get(k)).strip() for k in ('name', 'paymentSystemNetwork', 'paymentSystem')
                            if system.get(k) not in (None, '')})
+            all_keys.update(keys)
             for item in system.get('installmentList') or []:
                 try:
                     count = int(str(item.get('count')).strip())      # 'NOT_ON_US' atlanır
@@ -592,6 +593,8 @@ class SanalPosProviderParatika(models.AbstractModel):
                 # Aynı sayı birden çok ağda farklı oranlıysa en yüksek oran gösterilir (güvenli taraf)
                 option['rate'] = max(option['rate'], rate)
         res['options'] = [merged[count] for count in sorted(merged)]
+        # Taksit seçeneği olmayan sistemler dahil tüm sistem kimlikleri (vade farkı: "ağ tabloda var mı")
+        res['system_keys'] = sorted(all_keys)
         return res
 
     @api.private

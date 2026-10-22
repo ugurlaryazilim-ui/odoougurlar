@@ -15,7 +15,8 @@ Ortak sonuç anahtarları: ``ok``, ``timeout``, ``error_code``, ``error_message`
   ``ok=False``, belirsizlik yoktur)
 * ``direct_post_url`` -> kart formunun gönderileceği adres ya da ``None`` (çağrı yapmaz)
 * ``query_installments`` -> ``options`` (``[{'count': int, 'networks': [str], 'rate': float,
-  'systems': [{'keys': [str], 'rate': float}]}]``; hata -> ``ok=False``, ``options=[]``)
+  'systems': [{'keys': [str], 'rate': float}]}]``) + ``system_keys`` (tüm sistem kimlikleri);
+  hata -> ``ok=False``, ``options=[]``)
 * ``resend``       -> -
 * ``cancel_link``  -> ``already_closed``
 * ``find_link``    -> ``found``, ``token``, ``status`` (+ ``ambiguous``)

@@ -85,6 +85,24 @@ class TestSurchargeAccepted(SurchargeCase):
                 self.pay('10221.30', payment=payment, paymentSystem=system)
                 self.assertEqual(payment.state, state)
 
+    def test_ag_eslesmezse_not_ve_ham_deger_logu(self):
+        self.rates(AXESS)
+        payment = self.sent()
+        with self.capture_logs() as logged:
+            self.pay('10221.30', payment=payment, paymentSystem='TANIMSIZ SISTEM')
+        self.assertEqual(payment.state, 'paid')
+        self.assertIn(NOTE + ' (ağ eşleşmedi)', self.chatter(payment))
+        hits = [r for r in logged if 'ağ eşleşmedi' in r]
+        self.assertEqual(len(hits), 1)
+        self.assertIn("'TANIMSIZ SISTEM'", hits[0])
+
+    def test_ag_eslesirse_not_isareti_yok(self):
+        self.rates(AXESS)
+        payment = self.pay('10221.30', paymentSystem='AXESS')
+        self.assertEqual(payment.state, 'paid')
+        self.assertIn(NOTE, self.chatter(payment))
+        self.assertNotIn('ağ eşleşmedi', self.chatter(payment))
+
 
 @tagged('post_install', '-at_install', 'sanal_pos')
 class TestSurchargeRejected(SurchargeCase):
@@ -113,6 +131,16 @@ class TestSurchargeRejected(SurchargeCase):
                 self.mock.default('QUERYINSTALLMENT', lambda p, r=response: r)
                 payment = self.make_payment(state='sent', invoice_no='OB-%d' % i)
                 self.pay('10221.30', payment=payment)
+                self.assertReviewAmount(payment)
+
+    def test_ag_tabloda_var_bu_taksitte_orani_yok_inceleme(self):
+        """İşlemin ağı tabloda ama 7 taksit oranı yok: AXESS'in %13,57'siyle tesadüfi eşleşme kabul edilmez."""
+        self.rates(AXESS, ('Bonus Sanal POS', 'BONUS', [(3, 4.5)]),
+                   ('CardFinans Sanal POS', 'CARD_FNS', [(1, 0), ('NOT_ON_US', 0)]))
+        for i, system in enumerate(('BONUS', 'Bonus Sanal POS', 'CARD_FNS')):
+            with self.subTest(system=system):
+                payment = self.make_payment(state='sent', invoice_no='AY-%d' % i)
+                self.pay('10221.30', payment=payment, paymentSystem=system)
                 self.assertReviewAmount(payment)
 
     def test_sifir_oranda_kurus_fazla_inceleme(self):

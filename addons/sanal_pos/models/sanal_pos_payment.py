@@ -1512,18 +1512,29 @@ class SanalPosPayment(models.Model):
         # DIKKAT: çağıranlar satır kilidi altındadır (QUERYTRANSACTION gibi); bu ikinci dış çağrı
         # kilidi en çok bir zaman aşımı kadar uzatır. Koşulları gevşetip her senkronda sorgulatmayın.
         result = self._call_provider_safely('query_installments', 'vade farkı oran sorgusunda')
-        option = next((o for o in result.get('options') or [] if o.get('count') == count), None)
-        if not result.get('ok') or not option:
+        if not result.get('ok'):
             return ''
-        systems = option.get('systems') or []
+        option = next((o for o in result.get('options') or [] if o.get('count') == count), None)
+        systems = (option or {}).get('systems') or []
         payment_system = tran.get('payment_system')
+        own = [s['rate'] for s in systems if payment_system and payment_system in s['keys']]
+        if not own and payment_system and payment_system in (result.get('system_keys') or []):
+            # NEDEN: işlemin ağı tabloda var ama bu taksit sayısında oranı yok -> başka ağın
+            # oranıyla eşleşme tesadüftür; İnceleme (güvenli taraf).
+            return ''
         # İşlemin ödeme sistemi tablodakilerden biriyse yalnız onun oranı; bilinmiyor/eşleşmiyorsa
         # herhangi bir oran (aynı taksitte ağlar farklı oranlı olabilir).
-        own = [s['rate'] for s in systems if payment_system and payment_system in s['keys']]
         rate = match_surcharge_rate(expected, got, count, own or [s['rate'] for s in systems])
         if rate is None:
             return ''
-        return 'Vade farkı %s (%d taksit, %s)' % (format_try(got - expected), count, format_rate(rate))
+        note = 'Vade farkı %s (%d taksit, %s)' % (format_try(got - expected), count, format_rate(rate))
+        if not own:
+            # G0: paymentSystem biçimi doğrulanmadı; eşleşmeme kalıcıysa eşleştirme anahtarı
+            # düzeltilsin diye ham değer (sistem adı/kodu, sır/kart verisi değil) loglanır.
+            _logger.info('sanal_pos: vade farkı ağ eşleşmedi, paymentSystem=%r, ödeme id=%s',
+                         payment_system, self.id)
+            note += ' (ağ eşleşmedi)'
+        return note
 
     def _set_review(self, code, reason, tran, approved=None):
         values = {'state': 'review', 'last_error_code': code, 'last_error_message': reason[:250]}
@@ -1614,7 +1625,7 @@ class SanalPosPayment(models.Model):
         if not tran:
             return
         code, reason = self._review_reason(approved, in_review, [], surcharge=False)
-        prefix ='Kapalı linke (%s) geç ödeme geldi: Paratika %s, talep tutarı %s.' % (
+        prefix = 'Kapalı linke (%s) geç ödeme geldi: Paratika %s, talep tutarı %s.' % (
             dict(PAYMENT_STATES).get(self.state, self.state),
             format_try(tran.get('amount') or 0), format_try(self.amount))
         self._set_review('REVIEW_LATE', ('%s %s' % (prefix, reason or '')).strip(), tran, approved)
