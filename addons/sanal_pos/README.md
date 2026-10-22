@@ -34,8 +34,8 @@ Aynı ekranda bildirim ve dönüş adresleri salt okunur gösterilir (aşağıda
 | Grup | Yapabildikleri |
 |---|---|
 | Grupsuz iç kullanıcı | Hiçbir Sanal POS kaydını ve eylemini göremez. |
-| **Sanal POS / Kullanıcı** | Fatura sorgular, link oluşturur, yeniden gönderir, linki iptal eder, durum yeniler; talepleri okur. |
-| **Sanal POS / Yönetici** | Kullanıcının hepsi + ödeme iptali (VOID), iade (REFUND), inceleme (kabul/kapat), işlem kayıtları. |
+| **Sanal POS / Kullanıcı** | Fatura sorgular, link oluşturur, yeniden gönderir, linki iptal eder, durum yeniler; talepleri okur. **Mail Order** başlatır, kart sayfasını açar, Mail Order'ı kapatır (9. bölüm). |
+| **Sanal POS / Yönetici** | Kullanıcının hepsi + ödeme iptali (VOID), iade (REFUND), inceleme (kabul/kapat), işlem kayıtları. Mail Order ile alınan ödemenin iptal/iadesi de yalnız yönetici. |
 | Sistem yöneticisi (`base.group_system`) | Yalnız **ayarlar**. İade/iptal yetkisi **otomatik gelmez**; gerekirse ayrıca Yönetici grubuna eklenir. |
 
 Sır alanları (API şifresi, secretKey, MSSQL kullanıcı/şifre) hiçbir kayıt, log, chatter, dışa aktarma veya RPC yanıtında görünmez; log gövdelerinde maskelenir.
@@ -147,3 +147,57 @@ Not: 2. adım bekleyen iadeleri "iade edildi" sayar; Paratika sonradan reddeders
 3. Ayar alanlarını `res.config.settings` içine ekleyin; sır alanlarına `groups='base.group_system'` verin ve `models/res_config_settings.py` içindeki `_SECRET_FIELDS` listesine yazın.
 4. Loglardan sır süzme (`tools.py`) yeni sağlayıcının parola/anahtar alan adlarını kapsamalıdır.
 5. `tests/test_hardening.py` RPC yüzeyi taraması, listelenmemiş her public metotta kırılır; tarama sizi ACL ve rol testlerine yönlendirir.
+
+## 9. Mail Order (Direct POST 3D) — 19.0.1.3.0
+
+Müşteri kartını telefonla bildirir; personel kartı **Odoo'nun sunduğu kart sayfasına** girer, sayfa kartı **doğrudan Paratika'ya** gönderir (`/paratika/api/v2/post/sale3d/<oturum anahtarı>`), banka 3D doğrulaması yapılır. Kart verisi Odoo sunucusuna, veritabanına, loglara ve chatter'a hiç girmez (tasarım K-13). Hep 3D'lidir; 3D'siz (MOTO) yol yoktur.
+
+### 9.1 Akış
+1. **Sanal POS > Mail Order** (menü, "Yeni Ödeme Linki"nin yanında). Fatura numarasını yazıp **Faturayı Getir**; tutar faturadan gelir ve değiştirilemez. Müşteri adı zorunlu; telefon/e-posta girilirse biçimi denetlenir.
+2. **Kart Sayfasını Aç**: tek ödeme kaydı (Yöntem = Mail Order) ve tek Paratika oturumu açılır, tarayıcı **aynı sekmede** kart sayfasına gider. Oturum 1 saat geçerlidir. Aynı faturaya açık bir link ya da Mail Order varsa ikincisi açılmaz (DB indeksi; mesaj açık kaydın yöntemini söyler).
+3. Kart sayfasında müşteriden alınan ad, kart numarası (boşluksuz), son kullanma, CVV ve taksit girilir; **Öde (3D)**. Adres çubuğu Paratika/banka alan adına döner.
+4. Banka SMS kodunu müşterinin telefonuna gönderir; personel kodu **müşteriden telefonla alıp yalnız banka sayfasına** girer.
+5. Dönüşte Odoo durumu Paratika'ya sorar (`QUERYTRANSACTION`; dönüş gövdesi okunmaz) ve ödeme kaydını açar: **Ödendi**, ya da başarısızsa son hatanın kodu ve Türkçe mesajı kayıtta. Dönüş gelmezse bildirim ya da 10 dakikalık cron yakalar.
+6. Kayıt formunda: **Kart Bilgisi Gir** (açık ve süresi dolmamış oturumda aynı sayfayı yeniden açar, yeni oturum açmaz), **Mail Order'ı Kapat** (Paratika'da onaylı/bekleyen satış yoksa kaydı "Süresi doldu" yapar ve yeni denemeye izin verir; satış varsa kapatmaz ve nedenini söyler; Paratika yanıt vermezse de kapatmaz). Hata sonrası ya aynı oturumda yeniden denenir ya da kapatılıp yeni Mail Order açılır.
+7. Ödenmiş Mail Order'ın iptali (VOID), iadesi ve iade onayı link ödemesiyle birebir aynıdır (yalnız Yönetici). Mail Order kayıtlarında Yeniden Gönder / Linki İptal Et / Yeni Link düğmeleri yoktur.
+
+Paratika oturumu açılamazsa (zaman aşımı, 5xx, anahtar yok) kayıt **Hata** olur (Belirsiz değil): anahtar hiçbir tarayıcıya ulaşmadığı için ödeme yapılamaz ve hemen yeni deneme açılabilir.
+
+### 9.2 Yetki
+Menü, sihirbaz, kart sayfası ve sonuç sayfası **Sanal POS / Kullanıcı** (ve Yönetici) grubuna açıktır; grupsuz iç kullanıcı menüyü görmez, RPC/HTTP ile denerse erişim reddedilir ve Paratika'ya istek gitmez. Kart sayfası ve sonuç rotası `auth='user'`'dır (public değil). `mo_return` rotası public'tir ama yalnız tetiktir (sipariş numarasını okur, durum değiştirmez).
+
+### 9.3 PCI notu (kart verisi) — işyerinin yükümlülükleri
+- **Modül tarafı (kodla zorlanır):** kart sayfasında hiç `<script>` yok; sıkı CSP (`default-src 'none'`, `form-action` yalnız Paratika, iframe yasak); kart alanlarında `value` yok; Odoo hiçbir rotada kart alanı kabul etmez; hiçbir modelde kart no/SKT/CVV/kart sahibi alanı yok (yalnız `card_last4`). Odoo→Paratika isteklerinde kart parametresi yoktur. Savunma olarak log/işlem kaydı gövdelerinde Luhn-geçerli kart numaraları ve kart anahtarları maskelenir. `tests/test_mail_order_pci.py` bunları her çalıştırmada denetler (yeni bir controller, rota, model alanı ya da sağlayıcı metodu kart alanı eklerse kırılır).
+- **Kapsam:** kart sayfasını Odoo sunduğu için işyeri PCI DSS'te "kart girişi sayfasını sunan sunucu" yükümlülüğünü taşır (**SAQ A-EP benzeri**; kart Odoo'dan geçmediği için SAQ D değildir). Resmî SAQ türünü bankanız/Paratika ile teyit edin. Bu yükümlülüğün işlevsel karşılığı:
+  - **Sunucu güncelliği:** işletim sistemi, Docker imajı, Odoo ve Python bağımlılıkları güncel tutulur; şablon/modül değişiklikleri incelemeden geçer (kart sayfası şablonu ve `controllers/mail_order.py` kritik dosyadır). Ters vekil/Cloudflare tarafında sayfaya script enjekte eden özellikler (Rocket Loader, analytics) kapalı tutulur; enjekte script CSP ile zaten çalışmaz ama konsolda ihlal olarak görünür.
+  - **Personel bilgisayarları:** güncel tarayıcı ve işletim sistemi, kötü amaçlı yazılım koruması; Mail Order yalnız bu bilgisayarlardan yapılır.
+  - **Tarayıcıda kart kaydetme kapalı:** Chrome/Edge politikası `AutofillCreditCardEnabled=false` (ve parola yöneticisinde kart kaydı kapalı). Sayfa `autocomplete="off"` ve CVV `password` alanıdır ama asıl önlem tarayıcı politikasıdır.
+- **Prosedür (kodla zorlanmaz):** kart bilgisi **kâğıda, e-postaya, WhatsApp/mesajlaşmaya, chatter'a, ek dosyaya yazılmaz**; telefon görüşmesi kaydı varsa kart bilgisi bölümü saklanmaz; kart yalnız Mail Order ekranından açılan kart sayfasına girilir. Banka SMS kodu yalnız banka sayfasına girilir, başka yere yazılmaz.
+- **Taksit (bilinçli fark):** kartın ilk haneleri Odoo'ya gitmesin diye taksit seçenekleri karta göre değil, işyerinin kart programı tablosuna göre listelenir; personel müşteriden kart programını öğrenip seçer. Kartın desteklemediği sayıyı Paratika reddeder (aynı oturumda tekrar denenir). Komisyonlu taksitte tahsilat tutarı fatura tutarından farklıysa kayıt **İnceleme**'ye düşer (link ile aynı kural).
+
+### 9.4 Deploy (yeni stored alan `payment_method`)
+**Mesai dışında** yapın; kullanıcılara önceden haber verin.
+1. Veritabanı yedeği alın ve `rollback-pre-mail-order` etiketini (merge öncesi) atın.
+2. Üç Sanal POS cron'unu **pasif** yapın: "durum senkronu", "bildirim tetikli senkron", "günlük temizlik ve iade senkronu".
+3. Redeploy.
+4. **Hemen** `odoo -d <veritabani> -u sanal_pos --stop-after-init` (yeni modül/bağımlılık yok; yeni model, görünüm, menü ve kayıt kuralı bu adımda oluşur).
+5. Doğrulama: `SELECT payment_method, count(*) FROM sanal_pos_payment GROUP BY 1;` yalnız `link` döndürmeli (eski kayıtlar varsayılanla dolar, migrasyon betiği yok). Modül sürümü 19.0.1.3.0.
+6. Cron'ları tekrar **aktif** edin.
+7. Sanal POS kullanıcısıyla Mail Order menüsünü ve kart sayfası açılışını deneyin (gerçek ödeme yapmadan, ardından **Mail Order'ı Kapat**).
+8. Canlı kabul (9.6 şartları sağlandıysa): küçük tutarlı gerçek fatura, gerçek kart, Ödendi, aynı gün İptal. Canlı veritabanı dökümü alınmaz; yalnız `sanal_pos_log` ve kayıt kontrol edilir; tarayıcı konsolunda CSP ihlali olmadığına bakılır.
+
+Redeploy ile `-u` arasında `payment_method` sütunu yoktur: Sanal POS cron'ları ve ödeme listesi "column does not exist" hatası verir. Cron'ların pasif olması ve pencerenin kısa tutulması bu yüzdendir. `web.base.url` HTTPS ve **ASCII** olmalıdır (Paratika dönüş adresi bundan türer). Paratika paneline yeni ayar gerekmez (bildirim adresi aynı).
+
+### 9.5 Geri alma
+1. **Önkoşul:** açık Mail Order olmamalı (en fazla 60 dakika bekleyin ya da Mail Order'ı Kapat): `SELECT count(*) FROM sanal_pos_payment WHERE payment_method='mail_order' AND state IN ('sending','sent');` sonucu 0.
+2. Kodu `rollback-pre-mail-order` etiketine döndürüp redeploy edin. **`-u` gerekmez**; eski kod `payment_method` sütununu yok sayar (sütun veritabanında kalır, zararsızdır). Eski sürümle `-u` çalıştırılırsa Mail Order menü/görünüm kayıtları temizlenir; çalıştırılmazsa menü model bulunamadığı için açılmaz (isterseniz `menu_sanal_pos_mail_order` menüsünü arşivleyin).
+3. Eski kodda Mail Order kayıtları "link" gibi görünür: `sent` olanlar senkronla Ödendi/Süresi doldu olur; ödenmişlerin iptal/iadesi link yoluyla çalışır. Bu kayıtlarda Yeniden Gönder / Linki İptal Et görünür ama Paratika hata döner (zararsız); personele bu düğmeleri kullanmamaları söylenir.
+4. Paratika tarafında geri alınacak ayar yoktur (dönüş adresi oturum başınadır). Veri kaybı yoktur, geri dönüş betiği gerekmez.
+
+### 9.6 G0 canlı denemesi ve canlıya çıkış şartı
+Dokümanda Direct POST'un işyeri bazında açılması gerekip gerekmediği yazmaz; Paratika TEST kimlik bilgisi olmadığından deneme **canlı işyerinde** yapılır. Mail Order yalnız şu şartlar sağlanınca canlıda kullanıma açılır:
+1. **Paratika'dan yazılı sale3d teyidi:** "Canlı işyerimizde Direct POST 3D (`/paratika/api/v2/post/sale3d/`) açık mı? Açık değilse açar mısınız? (MOTO yetkisi istemiyoruz.)" Kapalıysa oturum/ödeme `ERR10136` (entegrasyon modeli işyerine kapalı) ya da `ERR10154` (3D kısıtı) gibi bir hata döner; kayıt Hata olur ve mesaj Türkçe gösterilir.
+2. **G0 spike'ı:** `.ekip/20261022-mail-order/spike_sale3d.py` (yalnız standart kütüphane; adımlar `spike-talimat.md`). 1,00 TL gerçek çekim, kullanıcı kendi kartıyla yapar, aynı gün betik ile **VOID** edilir (mümkünse mesai içinde, sabah). Kart bilgisi betiğe ve geliştiriciye gelmez (kart sayfası yerelde açılır, form doğrudan Paratika'ya gider); kimlik bilgileri dosyaya yazılmaz. Ölçülen belirsizlikler `spike-direct-post.md`'ye işlenir: sale3d'nin 302 mi HTML mi döndüğü (302 ise CSP `form-action` değerine `https:` eklenir: `controllers/mail_order.py` `FORM_ACTION_EXTRA_SOURCES`), dönüş POST alan adları, hata sonrası aynı oturumla yeniden deneme, taksit alanı ve `QUERYINSTALLMENT` biçimi, yarım kalan 3D'nin Paratika'daki görünümü.
+3. Spike sonucuna göre gerekirse küçük ayar yapılır (yalnız `FORM_ACTION_EXTRA_SOURCES`, `mo_return` yöntemi/alan adı, `installmentCount` tek çekim değeri, `query_installments`/`direct_post_url` biçimi), testler yeniden koşulur ve 9.4 adım 8'deki canlı kabul tamamlanır.
+
+Kod, G0 sonucu gelmeden tasarım varsayımlarıyla yazılmıştır; sonuç beklenen biçimde gelmezse değişecek yerler yukarıdaki listeyle sınırlıdır.

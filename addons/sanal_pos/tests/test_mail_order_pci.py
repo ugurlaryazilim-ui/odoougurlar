@@ -55,12 +55,30 @@ class TestPciStatic(SanalPosCase):
         self.assertTrue([r for r in rows if r[0] == 'sanal_pos_payment'])
         self.assertEqual(['%s.%s' % r for r in rows if is_card_field(r[1])], [])
 
+    @staticmethod
+    def sanal_pos_controllers():
+        """sanal_pos'un tüm ``http.Controller`` alt sınıfları (yeni controller dosyası da kapsanır)."""
+        import importlib
+        import pkgutil
+        from odoo.addons.sanal_pos import controllers as pkg
+        # NEDEN: __init__'e eklenmemiş bir dosya da taransın; yalnız import edilmiş sınıflar görünür
+        # (rota kaydı da aynı importa bağlı olduğundan eksik import zaten rota üretmez).
+        for info in pkgutil.iter_modules(pkg.__path__):
+            importlib.import_module('%s.%s' % (pkg.__name__, info.name))
+        found, todo = [], list(http.Controller.__subclasses__())
+        while todo:
+            cls = todo.pop()
+            todo.extend(cls.__subclasses__())
+            if cls.__module__.startswith('odoo.addons.sanal_pos.controllers'):
+                found.append(cls)
+        return found
+
     def test_rota_imzalarinda_kart_parametresi_yok(self):
-        from odoo.addons.sanal_pos.controllers import main as ctrl_module
         found, offenders = set(), []
-        for cls in vars(ctrl_module).values():
-            if not (inspect.isclass(cls) and issubclass(cls, http.Controller)):
-                continue
+        controllers = self.sanal_pos_controllers()
+        modules = {c.__module__.rsplit('.', 1)[-1] for c in controllers}
+        self.assertTrue({'main', 'mail_order'} <= modules, modules)      # tarayıcı tüm dosyaları görüyor
+        for cls in controllers:
             for name, fn in inspect.getmembers(cls, inspect.isfunction):
                 routing = getattr(fn, 'original_routing', None)
                 if not routing:
@@ -68,8 +86,12 @@ class TestPciStatic(SanalPosCase):
                 routes = routing.get('routes', [])
                 found.update(routes)
                 params = list(inspect.signature(fn).parameters)
-                offenders += ['%s(%s)' % (name, p) for p in params if is_card_field(p)]
+                offenders += ['%s.%s(%s)' % (cls.__name__, name, p) for p in params if is_card_field(p)]
+                offenders += ['%s: %s' % (name, r) for r in routes if is_card_field(r.rsplit('/', 1)[-1])]
+        # olumlu çapalar: kart rotası (mail_order.py) ve dönüş rotası (main.py) taranmış olmalı
         self.assertIn('/sanal_pos/mail_order/pay/<int:payment_id>', found)
+        self.assertIn('/sanal_pos/mail_order/result', found)
+        self.assertIn('/sanal_pos/paratika/mo_return', found)
         self.assertEqual(offenders, [])
 
     def test_saglayici_tum_metotlari_kart_parametresi_gondermez(self):
@@ -79,7 +101,17 @@ class TestPciStatic(SanalPosCase):
         provider.query_installments(payment)
         provider.direct_post_url(self.make_mail_order(provider_token='T', invoice_no='PCI-2'))
         provider.query_status(payment)
-        self.assertGreaterEqual(len(self.mock.calls), 3)
+        # link ve iade yolu da (G5 teslimi: sağlayıcının tüm arayüz metotları)
+        link = self.make_payment(state='sending', invoice_no='PCI-3', provider_token=False)
+        provider.create_link(link)
+        provider.find_link(link)
+        provider.resend(link, ['sms'])
+        provider.cancel_link(link)
+        paid = self.make_paid(self.make_payment(invoice_no='PCI-4'))
+        provider.void(paid, self.make_refund_line(paid, paid.amount, kind='void', state='processing'))
+        paid2 = self.make_paid(self.make_payment(invoice_no='PCI-5'), tran_ref='T5')
+        provider.refund(paid2, self.make_refund_line(paid2, 10.0, state='processing'))
+        self.assertGreaterEqual(len(self.mock.calls), 9)
         for call in self.mock.calls:
             for key in call.params:
                 self.assertFalse(key.upper().startswith('CARD'), key)
