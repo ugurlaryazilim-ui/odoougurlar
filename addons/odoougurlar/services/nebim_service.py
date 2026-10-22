@@ -1,4 +1,5 @@
 import logging
+import time
 from collections import defaultdict
 from datetime import datetime
 
@@ -9,6 +10,12 @@ _logger = logging.getLogger(__name__)
 # Stok / maliyet senkronizasyonu tek seferde bir tane (pg advisory lock anahtarları)
 NEBIM_STOCK_SYNC_LOCK = 812345001
 NEBIM_COST_SYNC_LOCK = 812345002
+
+# NEDEN (A5 Ö-5): stok kilidi başka çalışma tarafından tutulduğunda her cron turu atlar; kısa
+# çakışma olağandır (DEBUG), ama kilit uzun süre bırakılmıyorsa (takılan iş) görünür olmalı.
+# {dbname: ilk atlamanın time.monotonic() değeri}; kilit alınınca sıfırlanır. Süreç belleği.
+_STOCK_SKIP_SINCE = {}
+STOCK_SKIP_WARN_SECONDS = 30 * 60
 
 # Maliyet tam taramasında her commit'te işlenen varyant sayısı
 COST_BATCH_SIZE = 500
@@ -76,9 +83,15 @@ class NebimService(models.AbstractModel):
         # Cron ile "Stok Güncelle" / "Tüm Stokları Çek" aynı anda çalışmasın (processor ara
         # commit yaptığından transaction kilidi yetmez: oturum kilidi)
         self.env.cr.execute("SELECT pg_try_advisory_lock(%s)", [NEBIM_STOCK_SYNC_LOCK])
+        dbname = self.env.cr.dbname
         if not self.env.cr.fetchone()[0]:
-            _logger.debug("Stok güncelleme atlandı: başka bir stok senkronizasyonu çalışıyor.")
+            since = _STOCK_SKIP_SINCE.setdefault(dbname, time.monotonic())
+            waited = time.monotonic() - since
+            level = logging.WARNING if waited >= STOCK_SKIP_WARN_SECONDS else logging.DEBUG
+            _logger.log(level, "Stok güncelleme atlandı: başka bir stok senkronizasyonu çalışıyor "
+                               "(%d dk'dır kilit alınamıyor).", waited // 60)
             return
+        _STOCK_SKIP_SINCE.pop(dbname, None)
         try:
             self._sync_stock_prices_locked(mode, day_value, log_name)
         finally:

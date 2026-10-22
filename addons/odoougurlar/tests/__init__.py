@@ -13,3 +13,4 @@ from . import test_k2_cleanup
 from . import test_queue_cron_interval
 from . import test_shelf_export_cleanup
 from . import test_settings_secret_guard
+from . import test_a5_skip_logs

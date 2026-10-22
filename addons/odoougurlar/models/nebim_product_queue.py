@@ -344,7 +344,8 @@ class NebimProductQueue(models.Model):
         # Zaten bekleyen kuyruk varsa tekrar çekme
         pending = self.sudo().search_count([('state', 'in', ['pending', 'processing'])])
         if pending > 0:
-            _logger.debug(
+            # NEDEN (A5 Ö-5): takılı kuyruk otomatik sync'i sessizce durduruyordu; günlükte görünsün
+            _logger.info(
                 "Otomatik sync atlanıyor: %d kayıt hâlâ işleniyor.", pending
             )
             return
