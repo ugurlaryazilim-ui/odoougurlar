@@ -29,6 +29,7 @@ Sanal POS / Ödeme Linki
         'wizard/payment_resend_wizard_views.xml',
         'wizard/payment_refund_wizard_views.xml',
         'wizard/connection_test_wizard_views.xml',
+        'wizard/refund_approval_wizard_views.xml',
         'views/sanal_pos_payment_views.xml',
         'views/sanal_pos_log_views.xml',
         'views/res_config_settings_views.xml',

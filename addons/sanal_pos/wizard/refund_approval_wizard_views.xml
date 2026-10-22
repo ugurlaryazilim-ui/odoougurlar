@@ -1,0 +1,45 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- İade Onay Geçişi (yönetici): mevcut "İade edildi" kayıtlarını Paratika ile karşılaştırır,
+         onaylı olmayanları "Onay bekliyor"a alır. Karşılaştırma iş verisi yazmaz (tasarım §6). -->
+    <record id="view_sanal_pos_refund_approval_wizard_form" model="ir.ui.view">
+        <field name="name">sanal.pos.refund.approval.wizard.form</field>
+        <field name="model">sanal.pos.refund.approval.wizard</field>
+        <field name="arch" type="xml">
+            <form string="İade Onay Geçişi">
+                <field name="state" invisible="1"/>
+                <div class="alert alert-info" role="alert" invisible="state != 'draft'">
+                    Paratika iadeyi finans onayına bırakabilir. Eski sürümde "İade edildi" görünen
+                    iadelerden Paratika'da onaylı olmayanlar "Onay bekliyor"a alınacaktır.
+                    Önce <strong>Paratika ile Karşılaştır</strong> ile raporu inceleyin; bu adım
+                    hiçbir kaydı değiştirmez.
+                </div>
+                <div class="alert alert-warning" role="alert" invisible="state != 'compared'">
+                    Rapor yalnız önizlemedir. <strong>Geçişi Uygula</strong> her ödemeyi yeniden
+                    sorgular ve yalnız Paratika'da onaylı görünmeyen iadeleri değiştirir.
+                </div>
+                <div class="alert alert-success" role="alert" invisible="state != 'applied'">
+                    Geçiş uygulandı. İşlem tekrar çalıştırılabilir; yalnız hâlâ onaylı olmayan
+                    kayıtlar etkilenir.
+                </div>
+                <field name="report_html" nolabel="1" invisible="state == 'draft'"/>
+                <footer>
+                    <button name="action_compare" type="object" string="Paratika ile Karşılaştır"
+                            class="btn-primary" invisible="state == 'applied'"/>
+                    <button name="action_apply" type="object" string="Geçişi Uygula"
+                            class="btn-danger" invisible="state != 'compared'"
+                            confirm="Onaylı olmayan iadeler 'Onay bekliyor' durumuna alınacak. Devam edilsin mi?"/>
+                    <button string="Kapat" special="cancel" class="btn-secondary"/>
+                </footer>
+            </form>
+        </field>
+    </record>
+
+    <record id="action_sanal_pos_refund_approval_wizard" model="ir.actions.act_window">
+        <field name="name">İade Onay Geçişi</field>
+        <field name="res_model">sanal.pos.refund.approval.wizard</field>
+        <field name="view_mode">form</field>
+        <field name="target">new</field>
+        <field name="context">{'dialog_size': 'extra-large'}</field>
+    </record>
+</odoo>

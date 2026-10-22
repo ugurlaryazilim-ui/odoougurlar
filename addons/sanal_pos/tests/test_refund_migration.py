@@ -89,6 +89,9 @@ class TestRefundApprovalMigration(RefundCase):
             tran('AP', 'SALE', '9000.00', 'T1'), rt('AP', 9000.0, 'R-P9'))
         self.env.flush_all()
         self.migrated = self.p1 | self.p3
+        # paid() her çağrıda QUERYTRANSACTION varsayılanını yalnız-satış yanıtıyla ezer; ödeme
+        # başına yanıt veren yanıtlayıcıyı kurulumun SONUNDA yeniden bağla
+        self.mock.default('QUERYTRANSACTION', self._answer)
 
     def new_wizard(self, user=None):
         return self.env[WIZ].with_user(user or self.user_mgr).create({})

@@ -28,6 +28,14 @@
               groups="sanal_pos.group_sanal_pos_manager"
               sequence="80"/>
 
+    <!-- Tek seferlik iade onay geçişi yalnız Sanal POS yöneticisinde (tasarım §3.3) -->
+    <menuitem id="menu_sanal_pos_refund_approval"
+              name="İade Onay Geçişi"
+              parent="menu_sanal_pos_root"
+              action="action_sanal_pos_refund_approval_wizard"
+              groups="sanal_pos.group_sanal_pos_manager"
+              sequence="85"/>
+
     <record id="action_sanal_pos_settings" model="ir.actions.act_window">
         <field name="name">Ayarlar</field>
         <field name="res_model">res.config.settings</field>

@@ -11,3 +11,4 @@ access_sanal_pos_payment_resend_wizard_user,sanal.pos.payment.resend.wizard user
 access_sanal_pos_payment_resend_wizard_manager,sanal.pos.payment.resend.wizard manager,model_sanal_pos_payment_resend_wizard,group_sanal_pos_manager,1,1,1,0
 access_sanal_pos_payment_refund_wizard_manager,sanal.pos.payment.refund.wizard manager,model_sanal_pos_payment_refund_wizard,group_sanal_pos_manager,1,1,1,0
 access_sanal_pos_connection_test_wizard_system,sanal.pos.connection.test.wizard system,model_sanal_pos_connection_test_wizard,base.group_system,1,1,1,0
+access_sanal_pos_refund_approval_wizard_manager,sanal.pos.refund.approval.wizard manager,model_sanal_pos_refund_approval_wizard,group_sanal_pos_manager,1,1,1,0

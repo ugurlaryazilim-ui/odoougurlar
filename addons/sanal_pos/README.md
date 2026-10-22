@@ -96,6 +96,41 @@ Sıralı özet (ayrıntılar aşağıda ve 1-5. bölümlerde):
 9. P-9 Karakter kodlaması UTF-8 mi; Türkçe ad SMS'te ve ödeme sayfasında doğru mu?
 10. P-10 Gün sonu saati; kısmi iade sınırı; QUERYTRANSACTION iade işlemlerini orijinal `MERCHANTPAYMENTID` ile döndürüyor mu?
 
+## 6a. İade onay akışı ve geçiş (19.0.1.2.0)
+
+**Davranış değişikliği:** Paratika iadeyi finans onayına bırakabilir. REFUND `responseCode=00` artık "iade edildi" değil "Paratika isteği kabul etti" demektir: iade satırı **Onay bekliyor** (`pending_approval`), ödeme **İade onay bekliyor** (`refund_pending`) olur. Kesin sonucu QUERYTRANSACTION senkronu verir: onaylı (AP) → **Başarılı**, açık red (FA / bilinen ret kodu) → **Reddedildi** (ret sebebi satırda ve chatter'da), diğer her durum beklemeye devam eder. "Bulunamadı" hiçbir zaman red sayılmaz. Bekleyen iade varken yeni iade/iptal yapılamaz. 72 saatten uzun bekleyen iade için yönetici grubuna ve iadeyi yapana tek seferlik uyarı gider.
+
+**Deploy (sıra önemli):**
+1. **Mesai dışında** merge ve redeploy yapın; ardından **hemen** `odoo -d <veritabani> -u sanal_pos --stop-after-init`. Redeploy ile `-u` arasında Python kodu yeni kolonları (`sanal_pos_refund.provider_status`, `provider_status_detail`, `pending_alert_sent`) okur; bu sürede durum senkronu cron'u, bildirim tetikli senkron, ödeme formu (İade Geçmişi) ve iade/iptal sihirbazı hata verir. Pencereyi kısa tutun, kullanıcılara önceden haber verin; isteğe bağlı olarak iki senkron cron'unu redeploy öncesi pasif yapıp `-u` sonrası açın.
+2. `-u` sonrası doğrulama (salt okunur SQL): `SELECT indexdef FROM pg_indexes WHERE tablename='sanal_pos_refund' AND indexdef ILIKE '%pending_approval%';` 1 satır dönmeli; `\d sanal_pos_refund` 3 yeni kolonu göstermeli.
+3. **Sanal POS > İade Onay Geçişi** (yalnız Sanal POS / Yönetici): **Paratika ile Karşılaştır** raporu inceleyin. Bu adım salt okunurdur (yalnız işlem kaydı yazar). Her satır için planlanan eylem görünür: *Değişmez (AP)*, *Onay bekliyor'a alınacak*, *Atlanacak: sebep*. Atlananlar elle incelenir: devam eden işlem var, aynı ödemede birden fazla dönüşecek satır, belirsiz eşleşme (işlem no ile bire bir eşleşmeyen satır yalnız satırdan sonra tarihli işlemle değerlendirilir; tutar eşleşmesi tek başına yetmez), Paratika'da işlem bulunamadı, sorgu hatası, kayıt kilitli. İkinci bölüm, yeni kuralın mevcut durumdan farklı sonuç verdiği kayıtları listeler (yalnız bildirir).
+4. Rapor uygunsa **Geçişi Uygula**: her ödeme yeniden sorgulanır (önizleme bayatlamış olabilir), kısa kilit altında yalnız Paratika'da onaylı görünmeyen "Başarılı" satırlar "Onay bekliyor"a alınır, normal senkron kuralları çalışır (açık red hemen "Reddedildi" olur ve bildirim gider), ödeme başına commit edilir. İşlem **idempotenttir**; tekrar çalıştırılabilir. Büyük kümelerde süre sınırı (60 sn) aşılırsa kalanlar raporlanır ve işlem tekrar çalıştırılır. Son çalışma zamanı `sanal_pos.refund_approval_migration_at` parametresindedir. Geçiş migrate betiğiyle yapılmaz: migrate içinde dış API çağrısı yoktur.
+5. İlk günlerde log'da `tanınmayan transactionStatus` WARNING'ini izleyin; görülen kod bildirilirse eşlemesi ayrı küçük iş olur.
+6. Başka modülün yükseltilmesi gerekmez (bağımlı modül yok).
+
+*Kabul edilen sınır:* Paratika bekleyen iadeyi de AP gösteriyorsa kayıt "İade edildi" kalır; bu eski davranıştan kötü değildir.
+
+**Geri alma (iade onay akışı):** önkoşul merge öncesi rollback etiketi ve `-u` öncesi veritabanı yedeği.
+Eski kodda `pending_approval`, `rejected` ve `refund_pending` değerleri yoktur; DB'de varchar olarak kalır ve görünümde etiketsiz görünür. `refund_pending` ödemede eski iade düğmesi görünmez, RPC ile çağrılırsa reddedilir (çift iade yolu açılmaz); ancak kayıt hiç güncellenmez. Adımlar:
+1. "Sanal POS: durum senkronu" ve "bildirim tetikli senkron" cron'larını pasif yapın.
+2. Veriyi eski anlama çevirin (tek transaction, yalnız SQL, dış API yok). Bekleyen = eski davranış "iade edildi":
+   ```sql
+   BEGIN;
+   UPDATE sanal_pos_refund SET state='done', done_at=COALESCE(done_at, create_date) WHERE state='pending_approval';
+   UPDATE sanal_pos_refund SET state='failed' WHERE state='rejected';
+   UPDATE sanal_pos_payment p SET refunded_amount = COALESCE((SELECT SUM(r.amount) FROM sanal_pos_refund r
+          WHERE r.payment_id=p.id AND r.state='done'),0)
+    WHERE p.id IN (SELECT payment_id FROM sanal_pos_refund);
+   UPDATE sanal_pos_payment SET state = CASE WHEN refunded_amount >= paid_amount THEN 'refunded'
+          WHEN refunded_amount > 0 THEN 'partial_refund' ELSE 'paid' END
+    WHERE state='refund_pending';
+   COMMIT;
+   ```
+3. Rollback etiketine dönün, yeniden deploy edin ve `-u sanal_pos` çalıştırın (yeni kolonlar yetim ve zararsız kalır, sihirbaz modeli kaldırılır).
+4. Cron'ları açın; `SELECT count(*) FROM sanal_pos_payment WHERE state='refund_pending'` 0 olmalı.
+
+Not: 2. adım bekleyen iadeleri "iade edildi" sayar; Paratika sonradan reddederse eski kod bunu görmez (bugünkü durumla aynı risk). Geri alma sonrası bekleyenleri Paratika panelinden elle izleyin.
+
 ## 7. Geri alma planı
 
 1. **Hızlı (veri korunur):** Ayarlarda ortamı Test'e alın veya kullanıcıların Sanal POS grubunu kaldırın; "Sanal POS: durum senkronu" ve "günlük temizlik ve iade senkronu" cron'larını pasif yapın; Paratika panelinden bildirim adresini kaldırın. Açık linkleri Paratika panelinden iptal edin.
