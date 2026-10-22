@@ -10,3 +10,4 @@ from . import test_savepoint_swallow
 from . import test_stock_processor
 from . import test_nebim_barcode_index
 from . import test_k2_cleanup
+from . import test_queue_cron_interval

@@ -3,7 +3,6 @@ import threading
 import json
 import os
 import sys
-import time
 import logging
 import traceback
 
@@ -21,7 +20,7 @@ else:
 os.chdir(_app_dir)
 # ═══════════════════════════════════════
 
-from sync_agent import OdooImageSync, load_config, _logger
+from sync_agent import OdooImageSync, load_config, poll_loop, resolve_scan_interval, _logger
 
 def resource_path(relative_path):
     """PyInstaller (OneFile) için dosya yolunu çözer."""
@@ -276,28 +275,24 @@ class OdooSyncApp(ctk.CTk):
         self.after(0, _update)
 
     def run_agent_loop(self):
-        # Ajanı başlat
-        while not self.stop_event.is_set():
-            try:
-                if self.agent is None:
-                    self.agent = OdooImageSync(self.config)
-                    
-                self.agent.optimize_large_local_images()  # Önce büyük dosyaları küçült
-                self._reset_progress()
-                self.agent.process_folder(progress_callback=self._update_progress)  # Sonra Odoo'ya yükle
-                self.agent.download_ai_exports()           # AI görsellerini indir
-                
-                # Her döngüde 3 saniye bekle (event set edilirse anında çıkar)
-                self.stop_event.wait(3.0)
-                
-            except Exception as e:
-                err_str = str(e)
-                _logger.error("Ajan çalışırken hata: %s", err_str)
-                _logger.error(traceback.format_exc())
-                # ── TÜM HATALARI KURTAR — asla çökme ──
-                _logger.info("🔄 30 saniye sonra tekrar denenecek...")
-                self.agent = None  # Bağlantıyı sıfırla, yeniden oluşturulsun
-                self.stop_event.wait(30.0)
+        def run_once():
+            if self.agent is None:
+                self.agent = OdooImageSync(self.config)
+
+            self.agent.optimize_large_local_images()  # Önce büyük dosyaları küçült
+            self._reset_progress()
+            uploaded = self.agent.process_folder(progress_callback=self._update_progress)  # Sonra Odoo'ya yükle
+            self.agent.download_ai_exports()           # AI görsellerini indir
+            return uploaded
+
+        def reset_agent(_error):
+            _logger.error(traceback.format_exc())
+            self.agent = None  # Bağlantıyı sıfırla, yeniden oluşturulsun
+
+        # TÜM HATALARI KURTAR — asla çökme. Event.wait durdurulunca anında döner;
+        # iş bulan tur beklemeden tekrarlanır, boş tur ayarlı süre (varsayılan 30 sn) bekler.
+        poll_loop(run_once, resolve_scan_interval(self.config), self.stop_event.wait,
+                  should_stop=self.stop_event.is_set, on_retry=reset_agent)
 
     def _reset_ui_on_error(self):
         self.status_label.configure(text="Durum: HATA OLUŞTU", text_color="red")

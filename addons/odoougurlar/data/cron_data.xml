@@ -48,14 +48,17 @@
 
     </data>
 
-    <!-- Kuyruk İşleyici: noupdate=0 çünkü upgrade'de oluşturulmalı -->
+    <!-- Kuyruk İşleyici: noupdate=0 çünkü upgrade'de oluşturulmalı.
+         10 dk: kuyruğa iş eklenince cron _trigger() ile anında çalışır, kalan batch'leri de kendi
+         tetikler; dakikalık yoklama boş kuyrukta gereksiz iş yapıyordu. noupdate=0 olduğundan
+         mevcut kayıt -u ile bu değere çekilir (ayrı migration gerekmez). -->
     <data noupdate="0">
         <record id="cron_process_product_queue" model="ir.cron">
             <field name="name">Uğurlar Nebim: Ürün Kuyruk İşleyici</field>
             <field name="model_id" ref="model_odoougurlar_product_queue"/>
             <field name="state">code</field>
             <field name="code">model.process_queue_batch()</field>
-            <field name="interval_number">1</field>
+            <field name="interval_number">10</field>
             <field name="interval_type">minutes</field>
             <field name="active" eval="True"/>
         </record>
