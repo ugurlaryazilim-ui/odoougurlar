@@ -49,7 +49,8 @@ CARD_LIKE_KEY_RE = re.compile(
 # ayardaki API adresi başka host gösterirse kart sayfası açılmaz (kart başka adrese gönderilmesin).
 DIRECT_POST_HOSTS = ('vpos.paratika.com.tr', 'test.paratika.com.tr')
 
-VIOLATOR_RE = re.compile(r'[A-Za-z][A-Za-z0-9_.]{0,63}')    # Paratika parametre adı biçimi
+# Paratika parametre adı biçimi; kalem alanları 'ORDERITEMS:description' gibi ':' içerir
+VIOLATOR_RE = re.compile(r'[A-Za-z][A-Za-z0-9_.:]{0,63}')
 
 _ISTANBUL = ZoneInfo('Europe/Istanbul')
 _UTC = timezone.utc
@@ -470,9 +471,12 @@ class SanalPosProviderParatika(models.AbstractModel):
         DIKKAT: kalem tutarı AMOUNT ile aynı biçimde (``_amount_text``) yazılır; Paratika kalem
         toplamı ile AMOUNT'u karşılaştırır (ERR10022/10023/10150). Tutar sayı olarak (tırnaksız).
         """
+        # NEDEN: canlıda description'sız kalem ERR10128 (violatorParam=ORDERITEMS:description) verdi;
+        # dokümandaki her örnek kalem productCode/name/description/quantity/amount taşır.
+        # Metin kısa tutulur (belgelenmiş uzunluk sınırı yok; güvenli yan).
         name = ('Fatura %s' % payment.invoice_no)[:64]
-        return '[{"name":%s,"quantity":1,"amount":%s}]' % (
-            json.dumps(name), _amount_text(payment.amount))
+        return '[{"name":%s,"description":%s,"quantity":1,"amount":%s}]' % (
+            json.dumps(name), json.dumps(name), _amount_text(payment.amount))
 
     # ---------------------------------------------------------------- arayüz: mail order
     @api.private
