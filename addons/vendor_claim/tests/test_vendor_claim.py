@@ -21,7 +21,7 @@ class TestVendorClaim(TransactionCase):
         icp.set_param('sms_system.turatel_originator', 'TEST')
         for event in ('received', 'sent', 'returned', 'delivered', 'reminder'):
             icp.set_param('vendor_claim.sms_%s_enabled' % event, 'True')
-        cls.user = new_test_user(cls.env, login='vc_user', groups='base.group_user')
+        cls.user = new_test_user(cls.env, login='vc_user', groups='base.group_user,vendor_claim.group_vendor_claim_user')
         attr = cls.env['product.attribute'].create({'name': 'Tedarikçi', 'create_variant': 'no_variant'})
         value = cls.env['product.attribute.value'].create({'name': 'ABC Tekstil', 'attribute_id': attr.id})
         cls.template = cls.env['product.template'].create({

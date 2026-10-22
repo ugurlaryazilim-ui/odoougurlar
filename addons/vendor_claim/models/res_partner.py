@@ -7,6 +7,11 @@ class ResPartner(models.Model):
     vendor_claim_count = fields.Integer(string='İnceleme Kayıtları', compute='_compute_vendor_claim_count')
 
     def _compute_vendor_claim_count(self):
+        # NEDEN: iş ortağı formu tüm çalışanlarda açılır; grubu olmayan kullanıcıda okuma AccessError verip formu bozmasın
+        if not self.env['vendor.claim'].has_access('read'):
+            for partner in self:
+                partner.vendor_claim_count = 0
+            return
         counts = dict(self.env['vendor.claim']._read_group(
             [('vendor_id', 'in', self.ids)], ['vendor_id'], ['__count']))
         for partner in self:

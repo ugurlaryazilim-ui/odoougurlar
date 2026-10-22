@@ -36,7 +36,9 @@ class VendorClaimController(http.Controller):
 
     @staticmethod
     def _check_user():
-        if not request.env.user._is_internal():
+        # NEDEN: grup adı yerine model ACL'i sorulur: Kullanıcı grubu yokken (yükseltme öncesi) eski davranış
+        # sürer, ve search_invoice gibi sudo'lu uçlar grupsuz iç kullanıcıya açık kalmaz.
+        if not request.env.user._is_internal() or not request.env['vendor.claim'].has_access('read'):
             raise AccessDenied()
 
     @staticmethod

@@ -22,12 +22,12 @@ class VcMixin(SmsFakes):
         icp = cls.env['ir.config_parameter'].sudo()
         icp.set_param('vendor_claim.sms_reminder_days', '3')
         icp.set_param('vendor_claim.sms_reminder_max', '2')
-        cls.user = new_test_user(cls.env, login='vc_t_user', password=PW, groups='base.group_user')
-        cls.user2 = new_test_user(cls.env, login='vc_t_user2', password=PW, groups='base.group_user')
+        cls.user = new_test_user(cls.env, login='vc_t_user', password=PW, groups='base.group_user,vendor_claim.group_vendor_claim_user')
+        cls.user2 = new_test_user(cls.env, login='vc_t_user2', password=PW, groups='base.group_user,vendor_claim.group_vendor_claim_user')
         cls.manager = new_test_user(cls.env, login='vc_t_mgr', password=PW,
                                     groups='base.group_user,vendor_claim.group_vendor_claim_manager')
         cls.sms_manager = new_test_user(cls.env, login='vc_t_smsmgr', password=PW,
-                                        groups='base.group_user,sms_system.group_sms_manager')
+                                        groups='base.group_user,vendor_claim.group_vendor_claim_user,sms_system.group_sms_manager')
         attr = cls.env['product.attribute'].create({'name': 'Tedarikçi', 'create_variant': 'no_variant'})
         value = cls.env['product.attribute.value'].create({'name': 'ABC Tekstil', 'attribute_id': attr.id})
         template = cls.env['product.template'].create({

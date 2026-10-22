@@ -21,7 +21,7 @@ class TestVendorClaimMobileApi(HttpCase):
         icp = cls.env['ir.config_parameter'].sudo()
         icp.set_param('sms_system.test_mode', 'True')
         icp.set_param('sms_system.turatel_originator', 'TEST')
-        new_test_user(cls.env, login='vc_mobile', password='vc_mobile_pw1', groups='base.group_user')
+        new_test_user(cls.env, login='vc_mobile', password='vc_mobile_pw1', groups='base.group_user,vendor_claim.group_vendor_claim_user')
         new_test_user(cls.env, login='vc_portal', password='vc_portal_pw1', groups='base.group_portal')
         attr = cls.env['product.attribute'].create({'name': 'Tedarikçi', 'create_variant': 'no_variant'})
         value = cls.env['product.attribute.value'].create({'name': 'Mobil Tedarik', 'attribute_id': attr.id})
