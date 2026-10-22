@@ -98,9 +98,12 @@ class TestScreens(SanalPosCase):
     def test_kk17_link_adresi_ve_token_yalniz_ayar_aciksa_gorunur(self):
         arch = self.views(PAYMENT, self.user_sp)['form']
         self.assertIn('name="link_url"', arch)
-        for fname in ('link_url', 'provider_token'):
-            index = arch.index('name="%s"' % fname)
-            self.assertIn('not link_url', arch[index:index + 400],
+        # G-8: token yönetici grubuna kısıtlı; Sanal POS kullanıcısının görünümünden hiç çıkar
+        self.assertNotIn('name="provider_token"', arch)
+        mgr_arch = self.views(PAYMENT, self.user_mgr)['form']
+        for fname, view_arch in (('link_url', arch), ('provider_token', mgr_arch)):
+            index = view_arch.index('name="%s"' % fname)
+            self.assertIn('not link_url', view_arch[index:index + 400],
                           '%s link_url boşken gizlenmeli' % fname)
         self.set_setting('paratika_show_link_url', False)
         self.assertFalse(self.make_payment().with_user(self.user_sp).link_url)

@@ -107,6 +107,23 @@ def qt_body(*transactions):
     )
 
 
+def installment_body(*systems):
+    """QUERYINSTALLMENT yanıtı. ``systems``: ``(ad, ağ, [(sayı, oran), ...])``.
+
+    Biçim Paratika belgesinden (#query-installment): ``paymentSystemList[].installmentList[]``
+    içinde ``count`` metindir (``NOT_ON_US`` dahil), ağ adı ``paymentSystemNetwork``.
+    """
+    listing = []
+    for index, (name, network, options) in enumerate(systems, 1):
+        item = {'name': name, 'paymentSystem': index,
+                'installmentList': [{'count': str(count), 'customerCostCommissionRate': rate}
+                                    for count, rate in options]}
+        if network:
+            item['paymentSystemNetwork'] = network
+        listing.append(item)
+    return ok_body(paymentSystemList=listing)
+
+
 def timeout_exc():
     return requests.exceptions.ReadTimeout('read timed out')
 
@@ -126,6 +143,7 @@ class ParatikaMock:
         self._defaults = {}
         self._token_seq = itertools.count(1)
         self._ref_seq = itertools.count(1)
+        self._session_seq = itertools.count(1)
         self._install_defaults()
 
     # -- yapılandırma ---------------------------------------------------
@@ -136,6 +154,10 @@ class ParatikaMock:
         self.default('PAYBYLINKPAYMENTCANCEL', lambda p: ok_body())
         self.default('QUERYPAYBYLINKPAYMENT', lambda p: ok_body(payByLinkPaymentList=[]))
         self.default('QUERYTRANSACTION', lambda p: qt_body())
+        # Mail Order (Direct POST 3D): oturum anahtarı ve işyeri taksit listesi (kart verisi yok)
+        self.default('SESSIONTOKEN', lambda p: ok_body(
+            sessionToken='MOT-%03d' % next(self._session_seq)))
+        self.default('QUERYINSTALLMENT', lambda p: installment_body())
         self.default('VOID', lambda p: ok_body(
             pgTranId='V-%03d' % next(self._ref_seq), merchantPaymentId=p.get('MERCHANTPAYMENTID')))
         self.default('REFUND', lambda p: ok_body(

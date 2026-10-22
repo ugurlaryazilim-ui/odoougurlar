@@ -1,0 +1,19 @@
+/* Mail Order kart sayfası (K-13): yalnız stil; bu sayfada script yoktur. */
+body { margin: 0; font-family: system-ui, -apple-system, "Segoe UI", Roboto, sans-serif; color: #222; background: #f4f5f7; }
+.mo-page { max-width: 34rem; margin: 2rem auto; padding: 1.5rem; background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0, 0, 0, .12); }
+h1 { font-size: 1.35rem; margin: 0 0 1rem; }
+h2 { font-size: 1.1rem; margin: 1.5rem 0 .5rem; }
+.mo-test-band { margin: -1.5rem -1.5rem 1rem; padding: .5rem 1rem; background: #f0ad4e; color: #000; font-weight: 700; text-align: center; border-radius: 8px 8px 0 0; }
+.mo-summary { display: grid; grid-template-columns: max-content 1fr; gap: .25rem 1rem; margin: 0 0 1rem; }
+.mo-summary dt { font-weight: 600; }
+.mo-summary dd { margin: 0; }
+.mo-warning { padding: .75rem; background: #fff3cd; border: 1px solid #ffe08a; border-radius: 6px; font-size: .95rem; }
+.mo-form label { display: block; margin: .75rem 0 .25rem; font-weight: 600; }
+.mo-form input, .mo-form select { width: 100%; box-sizing: border-box; padding: .5rem; font-size: 1rem; border: 1px solid #bbb; border-radius: 4px; }
+.mo-row { display: grid; grid-template-columns: 1fr 1fr 1fr; gap: .75rem; }
+.mo-submit { margin-top: 1.25rem; width: 100%; padding: .75rem; font-size: 1.05rem; font-weight: 700; color: #fff; background: #1f6feb; border: 0; border-radius: 6px; cursor: pointer; }
+.mo-table { width: 100%; border-collapse: collapse; font-size: .9rem; }
+.mo-table th, .mo-table td { padding: .35rem .5rem; border-bottom: 1px solid #ddd; text-align: left; }
+.mo-hint { font-size: .9rem; color: #555; }
+.mo-error { padding: .75rem; background: #f8d7da; border: 1px solid #f1aeb5; border-radius: 6px; }
+.mo-back { margin-top: 1.25rem; }

@@ -11,6 +11,7 @@
 """
 import json
 import logging
+import re
 import time
 from datetime import datetime, timedelta, timezone
 from decimal import ROUND_HALF_UP, Decimal, InvalidOperation
@@ -23,6 +24,7 @@ from odoo import api, models
 
 from .. import tools
 from .res_config_settings import get_bool_param
+from .sanal_pos_payment import MAIL_ORDER_EXPIRY_HOURS
 
 _logger = logging.getLogger(__name__)
 
@@ -31,11 +33,21 @@ DEFAULT_LIVE_URL = 'https://vpos.paratika.com.tr/paratika/api/v2'
 TIMEOUT = (10, 30)                    # (bağlanma, okuma) sn - NFR-2
 CONTENT_TYPE = 'application/x-www-form-urlencoded; charset=UTF-8'
 RETURN_PATH = '/sanal_pos/paratika/return'
+RETURN_PATH_MO = '/sanal_pos/paratika/mo_return'     # Mail Order: Direct POST 3D dönüşü
 NOTE_MAX = 50                         # MERCHANTNOTE en çok 50 karakter
 CHANNEL_NAMES = {'sms': 'SMS', 'email': 'EMAIL'}
 # 5xx / çözülemeyen yanıtta işlemin gerçekleşmiş olabileceği action'lar
 STATE_CHANGING_ACTIONS = ('PAYBYLINKPAYMENT', 'VOID', 'REFUND')
 FINANCIAL_ACTIONS = ('VOID', 'REFUND')
+# G-4: Paratika yanıtlarında kart sahibi adı, BIN, maskeli PAN / son 4 hane taşıyabilecek anahtarlar
+# günlükte '***' olur (gerçek alan adları G0-Q9'da ölçülecek; desen bu yüzden geniş tutuldu).
+# NEDEN: 'pan' yalnız kelime başı/sonunda (panLast4, maskedPan, cardPan) aranır: 'company' eşleşmesin.
+# Kayda yazılan son 4 hane (card_last4) ham yanıttan normalize edilir, bu maskeden etkilenmez.
+CARD_LIKE_KEY_RE = re.compile(
+    r'holder|owner|nameoncard|cardname|first6|last4|bin$|^pan|pan$', re.IGNORECASE)
+# G-1: kart formu (Direct POST) ve CSP form-action yalnız bu Paratika host'larına gidebilir;
+# ayardaki API adresi başka host gösterirse kart sayfası açılmaz (kart başka adrese gönderilmesin).
+DIRECT_POST_HOSTS = ('vpos.paratika.com.tr', 'test.paratika.com.tr')
 
 _ISTANBUL = ZoneInfo('Europe/Istanbul')
 _UTC = timezone.utc
@@ -71,6 +83,10 @@ ERROR_MESSAGES = {
     'ERR10153': 'İade işlemi Paratika Finans ekibi tarafından reddedildi.',
     'ERR10038': 'İlgili ödeme Paratika onayı bekliyor; işlem şu an yapılamaz.',
     'ERR10106': 'İşlem tutarı üye iş yeri hesabına geçmemiş; iade yapılamaz.',
+    # Mail Order (Direct POST) oturumu: işyeri tarafı ayarlar (G0)
+    'ERR10136': 'Bu işyeri için kart bilgisi ile ödeme (Direct POST) açık değil; '
+                'yöneticinize başvurun.',
+    'ERR10154': '3D Secure ayarı bu ödeme yöntemine izin vermiyor; yöneticinize başvurun.',
 }
 # NEDEN: iade/iptal işleminde bu kodlar Paratika'nın açık red kanıtıdır; transactionStatus
 # AP görünse bile işlem 'failed' sayılır. Sağlayıcıya özgü red kodları yalnız burada (K-5, K-12).
@@ -78,6 +94,11 @@ REFUND_REJECT_CODES = ('ERR10153',)
 # Bağlantı testi: kimlik reddi ve yetki eksikliği kodları
 AUTH_ERROR_CODES = ('ERR10020',)
 PERMISSION_ERROR_CODES = ('ERR10047', 'ERR10053', 'ERR10266')
+
+# NEDEN: kart verisi hiçbir isteğe girmez (bkz. KARARLAR K-13); yine de bir kart anahtarı ileride
+# yanlışlıkla parametreye eklenirse günlükte değeri yerine ``***`` görünür (büyük/küçük harf duyarsız).
+CARD_PARAM_KEYS = ('CARDPAN', 'PAN', 'CVV', 'CARDCVV', 'CARDEXPIRY', 'EXPIRYMONTH', 'EXPIRYYEAR',
+                   'NAMEONCARD', 'CARDOWNER', 'CARDTOKEN')
 
 # Paratika transactionType -> normalize tür
 _KIND_BY_TYPE = {
@@ -191,17 +212,19 @@ class SanalPosProviderParatika(models.AbstractModel):
             return None
         return '%s://%s/payment/%s?lang=tr' % (parts.scheme, parts.netloc, token)
 
-    def _return_url(self):
+    def _return_url(self, path=RETURN_PATH):
         base = (self._param('web.base.url') or '').strip().rstrip('/')
-        return base + RETURN_PATH if base else ''
+        return base + path if base else ''
 
     # ---------------------------------------------------------------- maskeleme
     def _clean_value(self, value, secrets, key=''):
-        """Log için: sırları süz, e-posta/telefon alanlarını maskele (özyinelemeli)."""
+        """Log için: sırları süz, kart benzeri ve e-posta/telefon alanlarını maskele (özyinelemeli)."""
         if isinstance(value, dict):
             return {k: self._clean_value(v, secrets, str(k)) for k, v in value.items()}
         if isinstance(value, list):
             return [self._clean_value(v, secrets, key) for v in value]
+        if value not in (None, '', False) and CARD_LIKE_KEY_RE.search(key):
+            return tools.MASK
         if isinstance(value, str):
             lowered = key.lower()
             if value and 'email' in lowered:
@@ -213,7 +236,7 @@ class SanalPosProviderParatika(models.AbstractModel):
 
     def _mask_request(self, params):
         secrets = self._secrets()
-        masked = tools.mask_params(params, ['MERCHANTPASSWORD'])
+        masked = tools.mask_params(params, ['MERCHANTPASSWORD'] + list(CARD_PARAM_KEYS))
         text = json.dumps(self._clean_value(masked, secrets), ensure_ascii=False)
         return tools.scrub(text, secrets)
 
@@ -237,7 +260,8 @@ class SanalPosProviderParatika(models.AbstractModel):
         if not text:
             detail = message or 'Bilinmeyen hata'
             text = '%s (%s)' % (detail, code) if code else detail
-        return tools.scrub(text, self._secrets())
+        # DIKKAT: errorMsg sağlayıcıdan gelir ve kayda/sohbete yazılır; kart numarası sızarsa maskelenir
+        return tools.scrub(tools.mask_card_data(text), self._secrets())
 
     def _call(self, payment, action, params, environment=None, credentials=None, api_url=None):
         """Paratika'ya tek istek. Asla istisna fırlatmaz; ham sonuç sözlüğü döner.
@@ -377,6 +401,35 @@ class SanalPosProviderParatika(models.AbstractModel):
                 error_code='RETURNURL',
                 error_message="Sistem adresi (web.base.url) yalnızca ASCII karakter içermelidir; "
                               "yöneticinize başvurun.")
+        channels = [name for key, name in (('email', 'EMAIL'), ('sms', 'SMS'))
+                    if payment['channel_%s' % key]]
+        params = {
+            'MERCHANTPAYMENTID': payment.merchant_payment_id,
+            'AMOUNT': _amount_text(payment.amount),
+            'CURRENCY': payment.currency_id.name or 'TRY',
+            'NOTIFICATIONCHANNELS': ','.join(channels),
+            'SESSIONEXPIRY': '%dh' % payment.expiry_hours,
+            'RETURNURL': return_url,
+            # U-2: not = ödeme numarası (deneme sırası dahil); find_link bununla arar
+            'MERCHANTNOTE': self._note(payment),
+        }
+        params.update(self._customer_params(payment))
+        res = self._call(payment, 'PAYBYLINKPAYMENT', params)
+        data = res.pop('data')
+        if res['ok']:
+            token = (data or {}).get('sessionToken')
+            if not token:
+                # 00 döndü ama token yok: link oluşmuş olabilir -> belirsiz
+                return self._result(
+                    timeout=True, error_code='NO_TOKEN', raw_code=res['raw_code'],
+                    error_message='Paratika link bilgisini döndürmedi; durum kontrol edilecek.')
+            res['token'] = str(token)
+            res['url'] = self._link_url(payment, res['token'])
+        return res
+
+    def _customer_params(self, payment):
+        """Link ve Mail Order oturumunda aynı müşteri/fatura adresi parametreleri
+        (telefon biçimi ve ASCII ayarları dahil). Boş değerler ``_call`` içinde elenir."""
         ascii_mode = get_bool_param(self.env, 'sanal_pos.ascii_mode', default=False)
 
         def text(value):
@@ -389,40 +442,125 @@ class SanalPosProviderParatika(models.AbstractModel):
         phone = payment.customer_phone
         if phone:
             phone = tools.format_phone_for_provider(phone, phone_format)
-        channels = [name for key, name in (('email', 'EMAIL'), ('sms', 'SMS'))
-                    if payment['channel_%s' % key]]
         address = text(payment.customer_address)
         city = text(payment.customer_city)
         zip_code = payment.customer_zip
-        params = {
-            'MERCHANTPAYMENTID': payment.merchant_payment_id,
-            'AMOUNT': _amount_text(payment.amount),
-            'CURRENCY': payment.currency_id.name or 'TRY',
+        return {
             'CUSTOMER': payment.customer_code or 'INV-%s' % payment.invoice_no,
             'CUSTOMERNAME': text(payment.customer_name),
             'CUSTOMERPHONE': phone,
             'CUSTOMEREMAIL': payment.customer_email,
-            'NOTIFICATIONCHANNELS': ','.join(channels),
-            'SESSIONEXPIRY': '%dh' % payment.expiry_hours,
-            'RETURNURL': return_url,
-            # U-2: not = ödeme numarası (deneme sırası dahil); find_link bununla arar
-            'MERCHANTNOTE': self._note(payment),
             'BILLTOADDRESSLINE': address,
             'BILLTOCITY': city,
             'BILLTOPOSTALCODE': zip_code,
             'BILLTOCOUNTRY': 'TUR' if (address or city or zip_code) else '',
         }
-        res = self._call(payment, 'PAYBYLINKPAYMENT', params)
+
+    # ---------------------------------------------------------------- arayüz: mail order
+    @api.private
+    def create_session(self, payment):
+        """Mail Order: ``SESSIONTOKEN`` ile kart sayfası için ödeme oturumu açar.
+
+        Kart verisi bu çağrıda YOKTUR; kart alanları tarayıcıdan doğrudan Paratika'ya gider
+        (``direct_post_url``). Dönüş: ortak anahtarlar + ``token``. Zaman aşımı, 5xx, çözülemeyen
+        yanıt, red ve token yokluğu ``ok=False``'tur.
+        """
+        payment.ensure_one()
+        payment = payment.sudo()
+        return_url = self._return_url(RETURN_PATH_MO)
+        if not return_url or not return_url.isascii():
+            return self._result(
+                error_code='RETURNURL',
+                error_message="Sistem adresi (web.base.url) yalnızca ASCII karakter içermelidir; "
+                              "yöneticinize başvurun.")
+        # NEDEN: yasak anahtarlar bilinçli yok: NAMEONCARD/CARD* (kart verisi Odoo'ya girmez),
+        # NOTIFICATIONCHANNELS (SMS/e-posta göndermez), EXTRA (bkz. KARARLAR K-13).
+        # G0: ORDERITEMS gönderilmiyor; Paratika zorunlu tutarsa (spike Q6) tek kalemle eklenecek.
+        # EKIP-BORC: ORDERITEMS yok; zorunluysa tek kalem (productCode'suz) eklenmeli.
+        params = {
+            'SESSIONTYPE': 'PAYMENTSESSION',
+            'MERCHANTPAYMENTID': payment.merchant_payment_id,
+            'AMOUNT': _amount_text(payment.amount),
+            'CURRENCY': payment.currency_id.name or 'TRY',
+            # NEDEN: Odoo'daki son geçerlilik (expires_at) ve aynı MPID'nin yeniden kullanım penceresi
+            # (K-15) bu süreye bağlı; tek kaynak MAIL_ORDER_EXPIRY_HOURS.
+            # G0: Paratika'nın kabul ettiği en küçük değer (ör. '30m') spike'ta ölçülecek.
+            'SESSIONEXPIRY': '%dh' % MAIL_ORDER_EXPIRY_HOURS,
+            'RETURNURL': return_url,
+            'MERCHANTNOTE': self._note(payment),
+        }
+        params.update(self._customer_params(payment))
+        res = self._call(payment, 'SESSIONTOKEN', params)
         data = res.pop('data')
         if res['ok']:
             token = (data or {}).get('sessionToken')
             if not token:
-                # 00 döndü ama token yok: link oluşmuş olabilir -> belirsiz
+                # NEDEN: token yoksa kimse ödeme yapamaz: belirsizlik değil hata
+                # (bkz. KARARLAR K-14; link'te 'timeout' sayılırdı)
                 return self._result(
-                    timeout=True, error_code='NO_TOKEN', raw_code=res['raw_code'],
-                    error_message='Paratika link bilgisini döndürmedi; durum kontrol edilecek.')
+                    error_code='NO_TOKEN', raw_code=res['raw_code'],
+                    error_message='Paratika oturum bilgisini döndürmedi.')
             res['token'] = str(token)
-            res['url'] = self._link_url(payment, res['token'])
+        return res
+
+    @api.private
+    def direct_post_url(self, payment):
+        """Kart formunun gönderileceği adres (kaydın ortamına göre).
+
+        Token yoksa ya da ayardaki adres https + ``DIRECT_POST_HOSTS`` dışındaysa ``None``.
+        DIKKAT: bu adres kartın gideceği yerdir ve CSP form-action da buradan türer; izin listesi
+        kodda sabittir, ayarla genişletilemez (G-1).
+        """
+        payment.ensure_one()
+        payment = payment.sudo()
+        if not payment.provider_token:
+            return None
+        api_url = self._api_url(payment)
+        parts = urlsplit(api_url)
+        if (parts.scheme != 'https' or (parts.hostname or '') not in DIRECT_POST_HOSTS
+                or parts.port or '@' in parts.netloc):
+            _logger.error('sanal_pos: kart formu adresi izin listesinde değil (host=%s), ödeme id=%s',
+                          parts.hostname, payment.id)
+            return None
+        return '%s/post/sale3d/%s' % (api_url, payment.provider_token)
+
+    @api.private
+    def query_installments(self, payment):
+        """İşyerinin taksit seçenekleri: ``options=[{'count', 'networks', 'rate'}]``.
+
+        G0: yanıt biçimi Paratika belgesinden (paymentSystemList[].installmentList[]); gerçek
+        yanıtla doğrulanmadı. EKIP-BORC: liste karta göre değil işyerine göre (BIN gönderilmez,
+        K-13); BIN'e göre liste gerekirse tarayıcıdan CORS'lu çağrı için sayfaya script gerekir.
+        Hata/zaman aşımında ``options=[]`` (sayfa yalnız "Tek çekim" gösterir).
+        """
+        payment.ensure_one()
+        res = self._call(payment.sudo(), 'QUERYINSTALLMENT', {})
+        data = res.pop('data')
+        res['options'] = []
+        if not res['ok']:
+            return res
+        merged = {}
+        for system in (data or {}).get('paymentSystemList') or []:
+            if not isinstance(system, dict):
+                continue
+            network = str(system.get('paymentSystemNetwork') or system.get('name') or '').strip()
+            for item in system.get('installmentList') or []:
+                try:
+                    count = int(str(item.get('count')).strip())      # 'NOT_ON_US' atlanır
+                except (AttributeError, TypeError, ValueError):
+                    continue
+                if count < 2:
+                    continue
+                option = merged.setdefault(count, {'count': count, 'networks': [], 'rate': 0.0})
+                if network and network not in option['networks']:
+                    option['networks'].append(network)
+                try:
+                    rate = float(item.get('customerCostCommissionRate') or 0)
+                except (TypeError, ValueError):
+                    rate = 0.0
+                # Aynı sayı birden çok ağda farklı oranlıysa en yüksek oran gösterilir (güvenli taraf)
+                option['rate'] = max(option['rate'], rate)
+        res['options'] = [merged[count] for count in sorted(merged)]
         return res
 
     @api.private

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Sanal POS (Ödeme Linki)',
-    'version': '19.0.1.2.0',
+    'version': '19.0.1.3.0',
     'category': 'Accounting/Payment',
     'summary': 'Nebim faturasına bağlı Paratika ödeme linki oluşturma, takip, iptal ve iade',
     'description': """
@@ -25,6 +25,7 @@ Sanal POS / Ödeme Linki
         'data/ir_sequence.xml',
         'data/ir_cron.xml',
         'wizard/payment_create_wizard_views.xml',
+        'wizard/mail_order_wizard_views.xml',
         'wizard/review_close_wizard_views.xml',
         'wizard/payment_resend_wizard_views.xml',
         'wizard/payment_refund_wizard_views.xml',
@@ -32,6 +33,7 @@ Sanal POS / Ödeme Linki
         'wizard/refund_approval_wizard_views.xml',
         'views/sanal_pos_payment_views.xml',
         'views/sanal_pos_log_views.xml',
+        'views/mail_order_templates.xml',   # kart sayfası QWeb; CSS assets'e EKLENMEZ (K-13)
         'views/res_config_settings_views.xml',
         'views/menus.xml',
     ],

@@ -111,6 +111,77 @@ def mask_params(params, secret_keys):
     return {k: (MASK if str(k).lower() in secrets else v) for k, v in (params or {}).items()}
 
 
+# NEDEN: Mail Order'da kart verisi Odoo'ya hiç girmemelidir (bkz. KARARLAR K-13); bu, mimari
+# savunmanın yanındaki son katmandır: bir yanıt/istisna metnine yanlışlıkla PAN sızsa bile
+# günlüğe yazılmaz. Luhn doğrulaması rastgele uzun sayıları (ödeme numarası, işlem no) korur.
+# pgTranRefId Paratika'nın işlem referansıdır (16 hane olabilir, Luhn tesadüfen tutabilir) ve
+# merchantPaymentId bizim ödeme numaramızdır (harfe bitişik hane içerir): anahtarlıyken muaf.
+# G-5: sınır yalnız rakamdır ('x4355…', 'card_4355…', '4355…TL' de aday); ayraç boşluk, tire,
+# nokta, artı, NBSP ve URL kodlu karşılıkları (%20 %2B %2D %2E %C2%A0), arka arkaya en çok iki.
+# DIKKAT: ayraç kümesi gevşetilirse tutar/tarih metinleri bozulur; daraltılırsa ayraçlı PAN kaçar.
+# tests/test_mail_order.py::TestCardMasking.
+_CARD_SEP = r'(?:[ \-.+ ]|%(?:20|2[BbDdEe]|[Cc]2%[Aa]0))'
+_CARD_CANDIDATE_RE = re.compile(
+    r'(?i:pgTranRefId|merchantPaymentId)["\']?\s*[:=]\s*["\']?[\w-]+'
+    r'|(?<![0-9])[0-9](?:' + _CARD_SEP + r'{0,2}[0-9])+')
+# URL kodlu ayraçtaki rakamlar ('%20' içindeki 2 ve 0) hane grubu sayılmaz
+_DIGIT_GROUP_RE = re.compile(r'(?<!%)(?<!%[0-9A-Fa-f])[0-9]+')
+PAN_MIN, PAN_MAX = 13, 19
+
+
+def _luhn_ok(digits):
+    total = 0
+    for index, char in enumerate(reversed(digits)):
+        value = int(char)
+        if index % 2 == 1:
+            value *= 2
+            if value > 9:
+                value -= 9
+        total += value
+    return total % 10 == 0
+
+
+def _mask_candidate(match):
+    text = match.group(0)
+    if not text[0].isdigit():
+        return text                     # pgTranRefId / merchantPaymentId muafiyeti
+    groups = [(m.start(), m.end()) for m in _DIGIT_GROUP_RE.finditer(text)]
+    out, last, i = [], 0, 0
+    while i < len(groups):
+        # En uzun, soldan başlayan grup penceresi: "9000.00 4355 0843 5508 4358" gibi
+        # bitişik sayılar PAN'ı gizlemesin (aday bütününde Luhn tutmayabilir).
+        # Gerçek PAN '0' ile başlamaz: baştaki sıfırlar (ör. "00" kuruş) Luhn'u bozmaz ama
+        # PAN'ın parçası da değildir.
+        # NEDEN: aday uzunluğu sınırsız (uzun ayraçlı sayı dizileri); pencere PAN_MAX haneyle
+        # sınırlı olduğundan iş grup sayısıyla doğrusal kalır.
+        ends, total = [], 0
+        for j in range(i, len(groups)) if text[groups[i][0]] != '0' else ():
+            total += groups[j][1] - groups[j][0]
+            if total > PAN_MAX:
+                break
+            if total >= PAN_MIN:
+                ends.append(j + 1)
+        for j in reversed(ends):
+            digits = ''.join(text[a:b] for a, b in groups[i:j])
+            if _luhn_ok(digits):
+                out.append(text[last:groups[i][0]] + '****' + digits[-4:])
+                last = groups[j - 1][1]
+                i = j
+                break
+        else:
+            i += 1
+    return ''.join(out) + text[last:]
+
+
+def mask_card_data(text):
+    """Luhn-geçerli 13-19 haneli rakam dizilerini (ayraçlı ve URL kodlu dahil) ``****<son4>``
+    yapar (ayraç kümesi ``_CARD_SEP``). Başka hiçbir şeye dokunmaz; tekrar uygulamak sonucu
+    değiştirmez."""
+    if not text or not isinstance(text, str):
+        return text
+    return _CARD_CANDIDATE_RE.sub(_mask_candidate, text)
+
+
 def scrub(text, secrets):
     """Metindeki sır değerlerini her geçtiği yerde ``'***'`` yapar. Boş sırlar yok sayılır."""
     if not text:

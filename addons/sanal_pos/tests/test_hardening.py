@@ -34,9 +34,14 @@ EXPECTED_PUBLIC = {
         'create', 'action_new_link', 'action_check_status', 'action_resend', 'action_cancel_link',
         'action_review_accept', 'action_review_close', 'action_void', 'action_refund',
         'action_open_refund_wizard', 'action_open_void_wizard',
+        # Mail Order (G3): ikisi de metot içi grup denetimi ile korunur (_check_sanal_pos_user)
+        'action_open_card_page', 'action_mail_order_close',
     },
     'sanal.pos.refund': {'write', 'unlink'},
     'sanal.pos.payment.create.wizard': {'create', 'write', 'action_fetch_invoice', 'action_create_link'},
+    # create_wizard'dan miras: aynı korumalı alan denetimi ve fatura getirme + yeni eylem
+    'sanal.pos.mail.order.wizard': {'create', 'write', 'action_fetch_invoice', 'action_create_link',
+                                    'action_create_mail_order'},
     'sanal.pos.payment.resend.wizard': {'default_get', 'action_confirm'},
     'sanal.pos.payment.refund.wizard': {'action_confirm'},
     'sanal.pos.payment.review.close.wizard': {'action_confirm'},
@@ -56,7 +61,8 @@ ACTION_ARGS = {
     'action_refund': (100.0, 'Müşteri talebi'),
 }
 SP_MODELS = ('sanal.pos.payment', 'sanal.pos.refund', 'sanal.pos.log',
-             'sanal.pos.payment.create.wizard', 'sanal.pos.payment.resend.wizard',
+             'sanal.pos.payment.create.wizard', 'sanal.pos.mail.order.wizard',
+             'sanal.pos.payment.resend.wizard',
              'sanal.pos.payment.refund.wizard', 'sanal.pos.payment.review.close.wizard')
 
 
@@ -232,6 +238,7 @@ class TestRoleMatrix(SecurityCase):
     def test_sihirbaz_olusturma_matrisi(self):
         allowed = {
             'sanal.pos.payment.create.wizard': (self.user_sp, self.user_mgr),
+            'sanal.pos.mail.order.wizard': (self.user_sp, self.user_mgr),
             'sanal.pos.payment.resend.wizard': (self.user_sp, self.user_mgr),
             'sanal.pos.payment.refund.wizard': (self.user_mgr,),
             'sanal.pos.payment.review.close.wizard': (self.user_mgr,),
@@ -395,8 +402,15 @@ class TestSecretSurfaces(SecurityCase):
         self.assertTrue(exported['datas'])
         self.assertNoSecrets(json.dumps(exported['datas'], ensure_ascii=False), where='log export')
         fields_pay = ['invoice_no', 'customer_name', 'last_error_message', 'last_error_code', 'provider_token']
-        exported = self.env['sanal.pos.payment'].with_user(self.user_sp).search([]).export_data(fields_pay)
-        self.assertNoSecrets(json.dumps(exported['datas'], ensure_ascii=False), where='ödeme export')
+        # G-8: provider_token yalnız yöneticiye açık; Sanal POS kullanıcısı onu dışa aktaramaz
+        with self.assertRaises(AccessError):
+            self.env['sanal.pos.payment'].with_user(self.user_sp).search([]).export_data(fields_pay)
+        for user, fnames in ((self.user_sp, fields_pay[:-1]), (self.user_mgr, fields_pay)):
+            with self.subTest(user=user.login):
+                exported = self.env['sanal.pos.payment'].with_user(user).search([]).export_data(fnames)
+                self.assertTrue(exported['datas'])
+                self.assertNoSecrets(json.dumps(exported['datas'], ensure_ascii=False),
+                                     where='ödeme export')
 
     def test_chatter_grupsuz_kullaniciya_gorunmez(self):
         """Chatter (KK-5 notları dahil) kişisel veri taşır: model okuma yetkisi olmayan görmez."""

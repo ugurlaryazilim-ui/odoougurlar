@@ -16,6 +16,9 @@
 import json
 import logging
 import re
+from urllib.parse import urlencode
+
+from markupsafe import Markup
 
 from odoo import http
 from odoo.http import request
@@ -27,6 +30,11 @@ _logger = logging.getLogger(__name__)
 
 NOTIFY_PATH = '/sanal_pos/paratika/notify'
 RETURN_PATH = '/sanal_pos/paratika/return'
+MO_RETURN_PATH = '/sanal_pos/paratika/mo_return'       # Mail Order Direct POST 3D dönüşü (K-13)
+MO_RESULT_PATH = '/sanal_pos/mail_order/result'
+PAYMENT_LIST_PATH = '/odoo/action-sanal_pos.action_sanal_pos_payment'
+# Dönüş sayfasında script/çerçeve yok; yalnız modülün CSS'i (tasarım §5.2)
+MO_RETURN_CSP = "default-src 'none'; style-src 'self'; frame-ancestors 'none'"
 PROVIDER_MODEL = 'sanal.pos.provider.paratika'
 
 MAX_BODY_BYTES = 10 * 1024          # KK-38
@@ -83,6 +91,30 @@ class SanalPosParatikaController(http.Controller):
         self._trigger('RETURN')
         return self._response(RETURN_HTML, 'text/html; charset=utf-8')
 
+    @http.route(MO_RETURN_PATH, type='http', auth='public', methods=['POST'], csrf=False,
+                save_session=False)
+    def paratika_mo_return(self, **_kwargs):
+        """Mail Order 3D dönüşü (Paratika RETURNURL): yalnız tetik + sonuç sayfasına geçiş.
+
+        DIKKAT: Paratika'nın dönüş gövdesinde kart verisi beklenmez; gelse bile (``_kwargs``)
+        hiçbir değeri okunmaz, loglanmaz, saklanmaz ve yanıta yansımaz: ``_trigger`` yalnız
+        MPID'yi ve izin listesindeki alanları alır. Bu metoda gövde alanı okuyan kod eklemeyin
+        (bkz. KARARLAR K-13). Karar sonuç sayfasındaki QUERYTRANSACTION'dır.
+        """
+        if self._body_too_large():
+            return self._too_large_response()
+        mpid = self._trigger('MO_RETURN')
+        # NEDEN: Paratika'dan gelen siteler arası POST'ta oturum çerezi (SameSite=Lax) yoktur;
+        # sonuç sayfası Odoo kökenli bir gezinmeyle (meta refresh/bağlantı) açılınca oturumla
+        # gelir. Bağlantıya yalnız MPID_RE'ye uyan değer girer, QWeb ayrıca kaçışlar (XSS).
+        target = (MO_RESULT_PATH + '?' + urlencode({'mpid': mpid})) if mpid else PAYMENT_LIST_PATH
+        body = request.env['ir.qweb']._render('sanal_pos.mail_order_return_page', {'target': target})
+        # DIKKAT: body Markup'tır; düz str ile birleştirmek DOCTYPE'ı kaçışlar (quirks kipi, Ö-1)
+        return request.make_response(
+            Markup('<!DOCTYPE html>\n') + body,
+            headers=[('Content-Type', 'text/html; charset=utf-8'),
+                     ('Content-Security-Policy', MO_RETURN_CSP)] + SECURITY_HEADERS)
+
     # ------------------------------------------------------------------ yardımcılar
     @staticmethod
     def _response(body, content_type, status=200):
@@ -120,6 +152,7 @@ class SanalPosParatikaController(http.Controller):
         """Ödeme numarasını okur, bayrak + cron tetiğini kurar ve olayı maskeli kaydeder.
 
         Hiçbir hata dışarı sızmaz: yanıt sabit kalır. Dış çağrı ve durum kararı yoktur.
+        Dönüş: biçimi geçerli MPID veya ``None`` (kaydın varlığını belirtmez).
         """
         env = request.env
         provider = env[PROVIDER_MODEL]
@@ -144,6 +177,7 @@ class SanalPosParatikaController(http.Controller):
                             deferred=bool(payment.env.context.get('sanal_pos_sync_deferred')))
         except Exception as exc:  # noqa: BLE001 - olay kaydı yanıtı bozmaz
             _logger.warning('sanal_pos: %s olayı kaydedilemedi (%s)', action, type(exc).__name__)
+        return mpid
 
     @staticmethod
     def _log_event(provider, action, params, mpid, payment, deferred=False):
