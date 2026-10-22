@@ -828,3 +828,44 @@ class TestApprovalGate(TransactionCase):
             open_photo.write({'session_id': locked.id})
         open_photo.write({'photo_type': 'back'})   # kontrol: açık oturumda serbest
         photo.with_user(self.reviewer).write({'photo_type': 'side'})   # onaycı kilide takılmaz
+
+    # --- K5: jeton maskeleme ve Türkçe yeniden işleme mesajı ---
+    def test_review_lock_logs_mask_token(self):
+        # K5-1: log okuyan jetonla başkasının ekranını devralamasın (ilk 4 karakter + '***')
+        session = self._session()
+        manager = new_test_user(self.env, login='ais_mgr_k5',
+                                groups='ugurlar_ai_studio.group_ai_studio_manager')
+        secret = 'SECRETTOKEN-0123456789'
+        with self.assertLogs(CTRL, level='INFO') as logs:
+            self._lock(session, token=secret)                                  # kilit ALINDI
+            self._ctrl(self.reviewer, 'acquire_review_lock', session.id,       # aynı kullanıcı devraldı
+                       lock_token='OTHERTOKEN-9876')
+            session.review_lock_token = secret
+            res = self._ctrl(manager, 'acquire_review_lock', session.id,       # başkasına KİLİTLİ
+                             lock_token='MGRTOKEN-5555')
+        self.assertTrue(res.get('locked'))
+        text = '\n'.join(logs.output)
+        self.assertIn('SECR***', text)
+        for leak in ('SECRETTOKEN', 'OTHERTOKEN', '9876', 'MGRTOKEN', '0123456789'):
+            self.assertNotIn(leak, text)
+
+    def test_operator_reprocess_gets_turkish_error(self):
+        # K5-2 (D4): ham "You are not allowed to delete" yerine nedeni söyleyen UserError
+        preset = self.env['ai.studio.model.preset'].create(
+            {'name': 'K5 Manken', 'garment_type': 'tops', 'model_image_front': self._image((5, 5, 5))})
+        session = self._session(state='draft', model_preset_id=preset.id)
+        self.env['ai.studio.photo'].create(
+            {'session_id': session.id, 'photo_type': 'front', 'image_original': self._image((1, 2, 3))})
+        op = session.with_user(self.operator)
+        for label, call in (('start', op.action_start_processing), ('batch', op.action_batch_reprocess)):
+            with self.subTest(call=label), self.assertRaises(UserError) as ctx:
+                call()
+            self.assertIn('yeniden işlemeyi yalnız onaycı veya yönetici yapabilir', str(ctx.exception))
+        # kontrol: yetki modeli değişmedi, operatör hâlâ silemez; onaycı/yönetici kapıya takılmaz
+        with self.assertRaises(AccessError):
+            session.generation_ids.with_user(self.operator).unlink()
+        session.with_user(self.reviewer)._check_can_discard_generations()
+        session._check_can_discard_generations()
+        # üretimi olmayan oturumda operatör kapıya takılmaz
+        empty = self.Session.create({'product_id': self.product.id, 'user_id': self.operator.id})
+        empty.with_user(self.operator)._check_can_discard_generations()

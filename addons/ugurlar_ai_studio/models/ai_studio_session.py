@@ -2036,6 +2036,18 @@ class AiStudioSession(models.Model):
             s['fidelity_failed'] = s['id'] in flagged
         return {'sessions': sessions, 'in_revision_count': in_revision}
 
+    def _check_can_discard_generations(self):
+        """Yeniden işleme eski üretimleri siler; operatörün silme yetkisi yoktur (ACL unlink=0).
+
+        NEDEN: yetki modeli değişmez (operatöre unlink açılmaz); ham İngilizce AccessError yerine
+        nedeni Türkçe söyleriz. Onaycı/yönetici/sunucu kodu (su) davranışı aynı kalır.
+        """
+        if self._is_approval_authority():
+            return
+        if self.sudo().generation_ids:
+            raise UserError(_('Bu oturumda üretilmiş görseller var; yeniden işlemeyi yalnız onaycı veya '
+                              'yönetici yapabilir.'))
+
     def action_start_processing(self):
         """AI işlemeyi başlat."""
         self.ensure_one()
@@ -2061,6 +2073,7 @@ class AiStudioSession(models.Model):
                                 and self.date_processing_start > now - timedelta(minutes=LEASE_MINUTES))
             if lease_active or recently_started:
                 raise UserError(_('Bu oturum şu anda aktif bir arka plan işlemi tarafından yürütülüyor.'))
+        self._check_can_discard_generations()
         if not self.model_preset_id:
             raise UserError(_('Lütfen bir manken preseti seçin.'))
         if not self.photo_ids:
@@ -2186,6 +2199,9 @@ class AiStudioSession(models.Model):
         )
         if not valid_sessions:
             raise UserError(_('Seçili oturumlar arasında işlenebilir durumda olan (Ön yüz fotoğrafı ve Manken Preseti olan) oturum bulunamadı.'))
+        # Toplu işte tek oturum bile operatöre kapalıysa hiçbir şey yazılmadan dur
+        for session in valid_sessions:
+            session._check_can_discard_generations()
         self._check_monthly_budget()
 
         # API key kontrolü
