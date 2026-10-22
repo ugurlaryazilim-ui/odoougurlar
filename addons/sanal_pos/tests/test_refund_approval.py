@@ -23,7 +23,7 @@ from odoo.tools import file_open, mute_logger
 from odoo.tools import html2plaintext
 
 from .common import (
-    CRON_DAILY, CRON_SYNC, INV_NO, ok_body, timeout_exc, tran,
+    CRON_DAILY, CRON_SYNC, INV_NO, err_body, ok_body, timeout_exc, tran,
 )
 from .test_refund import RefundCase
 
@@ -664,13 +664,16 @@ class TestMatching(ApprovalCase):
         self.assertEqual((line.state, line.provider_ref), ('done', 'R-Q'))
         self.assertEqual(len(self.lines(payment)), 1)
 
-    def test_kk9_zaman_toleransi_5_dk_oncesi_aday_sayilir(self):
+    def test_kk9_tolerans_icindeki_onceki_tarihli_ap_tek_aday_olsa_da_done_yapmaz(self):
+        # Güvenlik bulgusu R1 (2026-10-22): 5 dk tolerans yalnız aday listesini kurar; satırdan
+        # önce tarihli işlem başka bir isteğe aittir, satırı sonuçlandırmaz ve bağlanmaz.
         payment, line = self.pending_payment(2500.0, ref=None)
         created = self.age(line, hours=1)
         self.query(payment, rt('AP', 2500.0, 'R-TOL', timeCreated=ms(created - timedelta(minutes=3))))
         self.sync(payment)
         self.refresh(line)
-        self.assertEqual((line.state, line.provider_ref), ('done', 'R-TOL'))
+        self.assertEqual((line.state, line.provider_ref), ('pending_approval', False))
+        self.assertEqual(len(self.lines(payment)), 1)
 
     def test_kk9_cok_eski_islem_aday_degil_panel_satiri_da_acilmaz(self):
         payment, line = self.pending_payment(2500.0, ref='R-OLD2')
@@ -741,6 +744,98 @@ class TestMatching(ApprovalCase):
         self.assertEqual(line.state, 'pending_approval', 'R-USED başka satıra ait; bu satıra bağlanmaz')
         self.assertEqual(line.provider_ref, 'R-FREE', 'tek geçerli aday (R-FREE) bağlanır')
         self.assertEqual(done.provider_ref, 'R-USED')
+
+
+# ---------------------------------------------------------------------------------------
+# Güvenlik bulgusu R1 (çift iade): tutar eşleşmesinde satırdan ÖNCE tarihli işlem (önceki,
+# ref'siz başarısız denemenin işlemi) satır hakkında karar vermez ve satıra bağlanmaz.
+# ---------------------------------------------------------------------------------------
+@tagged('post_install', '-at_install', 'sanal_pos')
+class TestStaleCandidateGuard(ApprovalCase):
+
+    def failed_attempt(self, payment, amount=2500.0):
+        """Gerçek akıştan REFUND hata yanıtı: satır 'failed', işlem no yazılmaz."""
+        self.mock.queue('REFUND', err_body('ERR10031', 'Islem yapilamadi'))
+        self.refund(payment, amount)                    # dış çağrı sonrası raise yok; bildirim döner
+        failed = self.last_line(payment)
+        self.assertEqual((failed.state, failed.provider_ref), ('failed', False))
+        return failed
+
+    def assert_still_pending(self, payment, line):
+        self.refresh(line)
+        self.assertEqual(line.state, 'pending_approval', 'önceki denemenin işlemi bu satırı sonuçlandırmamalı')
+        self.assertFalse(line.provider_ref, 'önceki tarihli işlem bağlanmaz (sonra ref ile red yetkisi verirdi)')
+        self.assertEqual(payment.state, 'refund_pending')
+        self.assertEqual(payment._refundable_cents(), 900000 - 250000, 'tutar iade edilebilire dönmez')
+        self.assertFalse(self.messages_with(payment, 'REDDEDİLDİ'))
+
+    def test_r1_onceki_denemenin_fa_si_tek_adayken_yeni_satiri_reddetmez(self):
+        payment = self.paid(amount=9000.0)
+        failed = self.failed_attempt(payment)
+        line = self.request_refund(payment, 2500.0, ref=None)     # 2 dk sonra yeniden deneme
+        created = self.age(line, hours=1)
+        self.set_create_date(failed, created - timedelta(minutes=2))
+        old_fa = rt('FA', 2500.0, 'R-OLD-FA', timeCreated=ms(created - timedelta(minutes=2, seconds=-1)))
+        # Yeni işlem henüz sorguda yok; tek aday önceki denemenin FA'sı (5 dk tolerans içinde)
+        self.query(payment, old_fa)
+        for _turn in range(2):
+            self.sync(payment)
+            self.assert_still_pending(payment, line)
+            self.assertNotEqual(line.provider_status, 'FA')
+        self.refresh(failed)
+        self.assertEqual(failed.state, 'failed')
+        # Satırın kendi işlemi (satırdan sonra) FA görününce red verilir
+        self.query(payment, old_fa,
+                   rt('FA', 2500.0, 'R-NEW-FA', timeCreated=ms(created + timedelta(seconds=5))))
+        self.sync(payment)
+        self.refresh(line)
+        self.assertEqual((line.state, line.provider_ref), ('rejected', 'R-NEW-FA'))
+        self.assertEqual(payment.state, 'paid')
+
+    def test_r1_zamansiz_fa_tutar_eslesmesiyle_reddetmez(self):
+        # timeCreated yoksa/okunamazsa işlemin satırdan sonra olduğu kanıtlanamaz
+        payment, line = self.pending_payment(2500.0, ref=None)
+        self.query(payment, rt('FA', 2500.0, 'R-NOTIME'))
+        self.sync(payment)
+        self.assert_still_pending(payment, line)
+
+    def test_r1_onceki_tarihli_bekleyen_islem_baglanmaz_sonra_fa_olsa_da_reddetmez(self):
+        payment, line = self.pending_payment(2500.0, ref=None)
+        created = self.age(line, hours=1)
+        when = ms(created - timedelta(minutes=2))
+        self.query(payment, rt('IP', 2500.0, 'R-OLD', timeCreated=when))
+        self.sync(payment)
+        self.assert_still_pending(payment, line)
+        self.query(payment, rt('FA', 2500.0, 'R-OLD', timeCreated=when))
+        self.sync(payment)
+        self.assert_still_pending(payment, line)
+
+    def test_r1_onceki_tarihli_ap_done_yapmaz_kendi_islemi_gelince_ikisi_de_sayilir(self):
+        payment, line = self.pending_payment(2500.0, ref=None)
+        created = self.age(line, hours=1)
+        old_ap = rt('AP', 2500.0, 'R-OLD-AP', timeCreated=ms(created - timedelta(minutes=2)))
+        self.query(payment, old_ap)
+        self.sync(payment)
+        self.assert_still_pending(payment, line)
+        self.assertEqual(len(self.lines(payment)), 1, 'sahibi belirsiz AP bekleyen satır varken panel satırı açmaz')
+        self.query(payment, old_ap,
+                   rt('AP', 2500.0, 'R-NEW-AP', timeCreated=ms(created + timedelta(seconds=5))))
+        self.sync(payment)
+        self.refresh(line)
+        self.assertEqual((line.state, line.provider_ref), ('done', 'R-NEW-AP'))
+        panel = self.lines(payment) - line
+        self.assertEqual((panel.state, panel.provider_ref), ('done', 'R-OLD-AP'))
+        self.assertEqual(payment.refunded_amount, 5000.0)
+
+    def test_r1_belirsiz_satir_onceki_tarihli_bekleyen_isleme_baglanmaz(self):
+        payment = self.paid(amount=9000.0)
+        line = self.make_refund_line(payment, 2500.0, state='unknown', provider_ref=None)
+        created = self.age(line, hours=1)
+        self.query(payment, rt('IP', 2500.0, 'R-OLD-IP', timeCreated=ms(created - timedelta(minutes=2))))
+        self.sync(payment)
+        self.refresh(line)
+        self.assertEqual(line.state, 'unknown')
+        self.assertFalse(line.provider_ref)
 
 
 # ---------------------------------------------------------------------------------------

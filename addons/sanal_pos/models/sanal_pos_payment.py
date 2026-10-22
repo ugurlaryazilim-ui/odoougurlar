@@ -749,18 +749,21 @@ class SanalPosPayment(models.Model):
 
         # a) Onay bekleyen satırlar: AP -> done, açık red -> rejected, diğer her durum bekler
         for line in self.refund_ids.sorted('id').filtered(lambda l: l.state == 'pending_approval'):
-            tran, _how = self._match_refund_transaction(line, financial, used_refs(line))
+            tran, how = self._match_refund_transaction(line, financial, used_refs(line))
             if not tran:
                 continue                                 # 'none'/'ambiguous': hiçbir şey yapılmaz
-            vals = self._refund_bind_vals(line, tran)
             status = tran.get('status')
+            if not self._refund_match_decisive(line, tran, how, need_time=status == 'failed'):
+                continue
+            vals = self._refund_bind_vals(line, tran)
             if status == 'approved':
                 vals.update(state='done', done_at=tran.get('time') or now,
                             error_code=False, error_message=False)
                 events.append(('approved', line))
             elif status == 'failed':
                 # NEDEN: yalnız açık red kanıtı (FA ya da REFUND_REJECT_CODES; sağlayıcı 'failed'
-                # yapar) satırı reddeder. Tutar iade edilebilire döner (bkz. KARARLAR K-12).
+                # yapar) satırı reddeder; ref'siz eşleşmede işlem satırdan sonra tarihli olmalı
+                # (_refund_match_decisive). Tutar iade edilebilire döner (bkz. KARARLAR K-12).
                 code, message = self._refund_reject_reason(tran)
                 vals.update(state='rejected', error_code=code, error_message=message)
                 events.append(('rejected', line))
@@ -782,8 +785,9 @@ class SanalPosPayment(models.Model):
         # c) Belirsiz iade + sonuçlanmamış eşleşme: istek Paratika'ya ulaşmış, onay bekliyor.
         # Onaylı/redli eşleşmede bugünkü yollar (onaylı döngüsü, bulunamadı sayacı) çalışır.
         for line in self.refund_ids.filtered(lambda l: l.state == 'unknown' and l.kind == 'refund'):
-            tran, _how = self._match_refund_transaction(line, financial, used_refs(line))
-            if not tran or tran.get('status') in REFUND_TERMINAL_STATUSES:
+            tran, how = self._match_refund_transaction(line, financial, used_refs(line))
+            if (not tran or tran.get('status') in REFUND_TERMINAL_STATUSES
+                    or not self._refund_match_decisive(line, tran, how)):
                 continue
             vals = self._refund_bind_vals(line, tran)
             vals.update(state='pending_approval', provider_ref=tran.get('ref'), unknown_since=False,
@@ -828,6 +832,32 @@ class SanalPosPayment(models.Model):
         if candidates:
             return candidates[0], 'unique'
         return None, 'none'
+
+    @api.model
+    def _refund_match_decisive(self, line, tran, how, need_time=False):
+        """Eşleşme satırı sonuçlandırabilir/ref bağlayabilir mi (güvenlik bulgusu R1)?
+
+        DIKKAT: REFUND hata yanıtı satırı ref'siz 'failed' yapar; o denemenin Paratika işlemi
+        used_refs'e girmez ve 5 dk toleransla yeni satırın tek adayı olabilir. Ona dayanıp
+        red vermek tutarı iade edilebilire döndürür; ilk istek sonra onaylanırsa çift iade olur.
+        Bu yüzden ref'siz eşleşmede yalnız satırdan SONRA tarihli işlem karar verir (toleranssız).
+        Ref bağlama da aynı şarta bağlıdır: bağlanan ref sonraki turda 'ref' eşleşmesi olur.
+        AP için de geçerli: ön senkron, satır açılmadan görünen her AP'yi bir satıra bağlar;
+        satırdan önce tarihli boşta AP başka bir isteğindir (panel yarışı, hata yanıtı alıp
+        Paratika'da işlenmiş önceki deneme). Onunla 'done' bekleme engelini erken kaldırır.
+        """
+        if how == 'ref':
+            return True
+        when, created = tran.get('time'), line.create_date
+        if not when or not created:
+            # NEDEN: zaman yoksa sıra kanıtlanamaz; red verilmez (satır bekler, 72 saat uyarısı).
+            # AP/bekleme zamansız işlemle bağlanır (P-10: biçim belgesiz; okunamazsa ref'siz
+            # satır hiç sonuçlanmazdı).
+            return not need_time
+        # NEDEN: ikisi de naive UTC (_parse_time saat dilimsiz metni Europe/Istanbul sayar).
+        # create_date saniyeye kırpılır: timeCreated saniye hassasiyetinde gelebilir; önceki
+        # deneme aynı saniyede olamaz (hata yanıtı + sihirbazı yeniden açma arada).
+        return when >= created.replace(microsecond=0)
 
     def _refund_bind_vals(self, line, tran):
         """Ham durum/ayrıntı ve (değiştiyse) işlem no; yalnız farklı alanlar döner."""
