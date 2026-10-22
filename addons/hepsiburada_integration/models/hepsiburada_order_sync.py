@@ -310,6 +310,11 @@ class HepsiburadaOrderSync(models.AbstractModel):
             params = dict(extra_params or {}, limit=limit, offset=page * limit)
             try:
                 res = self._hb_get(session, url, params=params, timeout=30)
+            except _RateLimited as e:
+                # NEDEN: 429 sonrası aynı turdaki her liste isteği ayrı WARNING yazıyordu; tur başına
+                # tek uyarı `_store_backoff`ta (Retry-After süresiyle birlikte).
+                _logger.debug("HB istek 429 nedeniyle atlandı %s: %s", url, e)
+                return None
             except Exception as e:
                 _logger.warning("HB istek hatası %s: %s", url, e)
                 return None
@@ -462,9 +467,13 @@ class HepsiburadaOrderSync(models.AbstractModel):
         for m_order in missing_orders:
             if retry.get(m_order, '') > now_s:
                 continue
+            if getattr(session, '_hb_retry_after', None):
+                break  # 429 görüldü: kalanlar istek atılmadan, damgasız sonraki tura kalır
             attempted = True
             wait = _MISSING_RETRY
             full_json = self._fetch_full_order_detail(m_order, store, session, merchant_id)
+            if not full_json and getattr(session, '_hb_retry_after', None):
+                break  # bu sipariş 429'a takıldı (denenmedi sayılır): 30 dk damgası vurma
             if full_json:
                 order_dt = self._parse_hb_datetime(self._order_date_str(full_json))
                 if order_dt and order_dt < cutoff_date:
@@ -509,6 +518,10 @@ class HepsiburadaOrderSync(models.AbstractModel):
             if res.status_code == 200:
                 return res.json()  # bozuk JSON aşağıdaki except'e düşer ve loglanır
             _logger.debug("HB sipariş detayı alınamadı (%s): HTTP %s", order_no, res.status_code)
+        except _RateLimited:
+            # NEDEN: 429 hata değil, beklenen geri çekilme; tur başına tek WARNING `_store_backoff`ta.
+            # Satır başına ERROR, 429 sonrası aynı turdaki her eksik siparişte log seli yapıyordu.
+            _logger.debug("HB sipariş detayı 429 nedeniyle atlandı (%s)", order_no)
         except Exception as e:
             _logger.error("Eksik Sipariş (No: %s) full detay API hatası: %s", order_no, e)
 

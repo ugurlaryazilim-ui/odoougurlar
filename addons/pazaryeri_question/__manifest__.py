@@ -1,6 +1,6 @@
 {
     'name': 'Pazaryeri Müşteri Soruları',
-    'version': '19.0.1.0.1',
+    'version': '19.0.1.0.2',
     'summary': 'Tüm pazaryerlerinden müşteri sorularını tek panelde yönetin',
     'description': 'Trendyol, Hepsiburada, N11, Pazarama, PTTAVM, Shopify pazaryerlerinden gelen müşteri sorularını tek bir Odoo panelinde toplayın ve doğrudan cevaplayın.',
     'author': 'Uğurlar',

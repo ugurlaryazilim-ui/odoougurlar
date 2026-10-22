@@ -214,23 +214,38 @@ class ProductProcessor(models.AbstractModel):
                 # Yalnız tek (6, 0, ids) komutu kullanılıyor: küme karşılaştırması
                 if set(record[fname].ids) != set(new[0][2]):
                     changed[fname] = new
-            elif field.type == 'many2one':
-                if record[fname].id != new:
-                    changed[fname] = new
-            elif field.type == 'float':
-                # list_price vb.: Ürün Fiyatı ondalık hassasiyetiyle karşılaştır (0.001 farkı değişiklik değil)
-                digits = self.env['decimal.precision'].precision_get('Product Price')
-                if float_compare(record[fname] or 0.0, new or 0.0, precision_digits=digits) != 0:
-                    changed[fname] = new
-            elif field.type in ('char', 'text', 'html', 'selection'):
-                # False/'' aynı sayılır; html için alanın kendi sanitize'ı uygulanır
-                current = str(record[fname] or '')
-                incoming = str(field.convert_to_cache(new, record) or '')
-                if current != incoming:
-                    changed[fname] = new
-            elif record[fname] != new:
+            elif self._value_differs(field, record, record[fname], new):
                 changed[fname] = new
         return changed
+
+    @api.model
+    def _value_differs(self, field, record, old, new):
+        """Tek alan için tip bilinçli karşılaştırma: sahte write üretmez, gerçek farkı kaçırmaz.
+
+        NEDEN: Ham `!=` şu durumlarda her senkronda "değişti" derdi: Float yuvarlama
+        (100.0004 vs 100.0), Char sonundaki boşluk, False/None/'' farkı, Many2one'da
+        kayıt/id farkı.
+        """
+        ftype = field.type
+        if ftype == 'many2one':
+            old_id = old.id if isinstance(old, models.BaseModel) else (old or False)
+            new_id = new.id if isinstance(new, models.BaseModel) else (new or False)
+            return old_id != new_id
+        if ftype == 'float':
+            # Alanın kendi hassasiyeti; tanımsızsa Ürün Fiyatı (0.001 farkı değişiklik değil)
+            digits = field.get_digits(self.env)
+            precision = digits[1] if digits else self.env['decimal.precision'].precision_get('Product Price')
+            return float_compare(old or 0.0, new or 0.0, precision_digits=precision) != 0
+        if ftype in ('char', 'text', 'html', 'selection'):
+            # False/None/'' aynı; html için alanın kendi sanitize'ı uygulanır
+            current = str(old or '').strip()
+            incoming = str(field.convert_to_cache(new, record) or '').strip() if new else ''
+            return current != incoming
+        if ftype == 'boolean':
+            return bool(old) != bool(new)
+        if ftype == 'integer':
+            return int(old or 0) != int(new or 0)
+        return old != new
 
     @api.private
     def _flush_last_sync(self):

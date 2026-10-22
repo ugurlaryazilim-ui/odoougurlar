@@ -32,7 +32,7 @@ class InvoiceProcessor(models.AbstractModel):
         ])
 
         if not invoices:
-            _logger.info("Gönderilecek fatura yok.")
+            _logger.debug("Gönderilecek fatura yok.")  # NEDEN: dakikalık cron, iş yoksa INFO yazılmaz
             return stats
 
         connector = self.env['odoougurlar.nebim.connector']

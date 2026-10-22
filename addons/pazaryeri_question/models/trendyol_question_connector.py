@@ -12,7 +12,7 @@ class TrendyolQuestionConnector(models.AbstractModel):
     @api.model
     def sync_questions_for_store(self, store):
         """Belirli bir mağazanın tüm sorularını çek."""
-        _logger.info("Trendyol soru sync başlıyor — mağaza: %s, seller_id: %s", store.name, store.seller_id)
+        _logger.debug("Trendyol soru sync başlıyor — mağaza: %s, seller_id: %s", store.name, store.seller_id)
         
         api = store.get_api()
         
@@ -34,8 +34,8 @@ class TrendyolQuestionConnector(models.AbstractModel):
                 'orderByDirection': 'DESC',
             }
             
-            _logger.info("API çağrısı: page=%d, startDate=%s, endDate=%s", 
-                        page, start_date.isoformat(), now.isoformat())
+            _logger.debug("API çağrısı: page=%d, startDate=%s, endDate=%s",
+                          page, start_date.isoformat(), now.isoformat())
             
             result = api._request('GET', f'/qna/sellers/{store.seller_id}/questions/filter', params=params)
             
@@ -47,17 +47,17 @@ class TrendyolQuestionConnector(models.AbstractModel):
             
             # API yanıt yapısını logla
             if page == 0:
-                _logger.info("API yanıt anahtarları: %s", list(data.keys()) if isinstance(data, dict) else type(data))
-                _logger.info("totalElements: %s, totalPages: %s", 
-                           data.get('totalElements', 'N/A'), data.get('totalPages', 'N/A'))
+                _logger.debug("API yanıt anahtarları: %s", list(data.keys()) if isinstance(data, dict) else type(data))
+                _logger.debug("totalElements: %s, totalPages: %s",
+                              data.get('totalElements', 'N/A'), data.get('totalPages', 'N/A'))
             
             content = data.get('content', [])
             
             if not content:
-                _logger.info("Sayfa %d: İçerik boş, döngü sonlandırılıyor.", page)
+                _logger.debug("Sayfa %d: İçerik boş, döngü sonlandırılıyor.", page)
                 break
             
-            _logger.info("Sayfa %d: %d soru işleniyor...", page, len(content))
+            _logger.debug("Sayfa %d: %d soru işleniyor...", page, len(content))
             
             # NEDEN: soru başına 2-3 search yerine sayfa başına 2 toplu sorgu (mevcut sorular + cevap geçmişi).
             cache = self._prefetch_existing([str(q.get('id', '')) for q in content])
@@ -94,8 +94,10 @@ class TrendyolQuestionConnector(models.AbstractModel):
         except Exception as e:
             _logger.warning("last_question_sync güncellenemedi (mağaza: %s): %s", store.name, e)
         
-        _logger.info("Trendyol soru sync tamamlandı (mağaza: %s) | Yeni: %d | Güncellenen: %d",
-                     store.name, total_created, total_updated)
+        _logger.log(
+            logging.INFO if total_created or total_updated else logging.DEBUG,
+            "Trendyol soru sync tamamlandı (mağaza: %s) | Yeni: %d | Güncellenen: %d",
+            store.name, total_created, total_updated)
         
         return {'created': total_created, 'updated': total_updated}
 
@@ -133,17 +135,22 @@ class TrendyolQuestionConnector(models.AbstractModel):
 
     @staticmethod
     def _differs(rec, vals):
-        """vals içinde kayıttan gerçekten farklı olan alan var mı (tip bilinçli karşılaştırma)."""
+        """vals içinde kayıttan gerçekten farklı olan alan var mı.
+
+        NEDEN: İki taraf da alanın kendi `convert_to_cache`'inden geçer (Float yuvarlama,
+        Char'a gelen sayı, M2O kayıt/id, boş değer). Elle tip dönüşümü `'123' != 123` gibi
+        durumlarda her turda sahte güncelleme üretiyordu."""
+        def norm(field, value):
+            if field.type == 'many2one':
+                return value.id if isinstance(value, models.BaseModel) else (value or False)
+            cached = field.convert_to_cache(value, rec)
+            if field.type in ('char', 'text', 'html'):
+                return str(cached or '').strip()
+            return cached
+
         for key, new_val in vals.items():
             field = rec._fields[key]
-            old_val = rec[key]
-            if field.type == 'many2one':
-                old_val = old_val.id
-            elif field.type == 'boolean':
-                old_val, new_val = bool(old_val), bool(new_val)
-            elif field.type in ('char', 'text'):
-                old_val, new_val = old_val or '', new_val or ''
-            if old_val != new_val:
+            if norm(field, rec[key]) != norm(field, new_val):
                 return True
         return False
 
