@@ -143,6 +143,10 @@ class OperationsApiController(BarcodeApiBase):
         if limit_error:
             return limit_error
 
+        # NEDEN: raf yokken putaway hiçbir dala girmez, istemci sessiz boş sonuç (total: 0) alırdı
+        if operation == 'putaway' and not (shelf_barcode or '').strip():
+            return {'error': 'Raf gerekli: raflama için raf barkodunu okutun'}
+
         results = []
         success_count = 0
         # Raflama kalemleri sırayla çözümlenir (yanıt sırası korunur), hareketler sonda tek turda
@@ -177,7 +181,7 @@ class OperationsApiController(BarcodeApiBase):
                 })
                 success_count += 1
 
-            elif operation == 'putaway' and shelf_barcode:
+            elif operation == 'putaway':
                 shelf_key = shelf_barcode.strip()
                 if shelf_key not in locations:
                     locations[shelf_key] = self._find_location(shelf_key)
@@ -186,8 +190,7 @@ class OperationsApiController(BarcodeApiBase):
                     results.append({'barcode': bc, 'status': 'error', 'message': 'Raf bulunamadı'})
                     continue
 
-                # Önceden _safe_update_quant: qty <= 0 ise hareket açılmaz (envanter hedefe
-                # yalnız pozitif miktar girer); işlem kaydı yine yazılırdı
+                # qty burada her zaman > 0: _parse_qty 0 ve negatifi reddeder (None döner)
                 putaway_entries.append(
                     (product, self._inventory_location(product, location), location, qty))
                 putaway_slots.append(len(results))
@@ -202,8 +205,7 @@ class OperationsApiController(BarcodeApiBase):
                 success_count += 1
 
         if putaway_entries:
-            self._mobile_stock_moves(
-                [e for e in putaway_entries if e[3] > 0], 'Mobil: Toplu Raflama', is_inventory=True)
+            self._mobile_stock_moves(putaway_entries, 'Mobil: Toplu Raflama', is_inventory=True)
             request.env['ugurlar.barcode.operation'].sudo().create([{
                 'operation_type': 'putaway',
                 'barcode': results[slot]['barcode'],

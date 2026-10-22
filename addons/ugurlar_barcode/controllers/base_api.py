@@ -304,6 +304,19 @@ class BarcodeApiBase(http.Controller):
 
             _last_requests[key] = now
 
+            # NEDEN: yukarıdaki sözlük süreç belleğidir; çok worker'da (veya yeniden başlatmada)
+            # başka worker'a düşen çift okutmayı görmez. Aynı anahtar için işlemi kilitle:
+            # kilit bu isteğin transaction'ı bitene (commit/rollback) kadar tutulur, bu sürede
+            # başka worker'dan gelen aynı istek çift sayılır. Bekleme yok (try): kilitlenme
+            # riski yok. Kilit yalnız uçuştaki isteği yakalar; ilk istek commit olduktan sonra
+            # başka worker'a düşen 500ms içindeki ikinci istek bu kilitle yakalanmaz.
+            # EKIP-BORC: tam 500ms penceresi için ortak (DB) zaman damgası gerekir (yeni model =
+            # modül yükseltmesi); uçuştaki çift okutma asıl riskti, o yüzden yalnız kilit.
+            request.env.cr.execute(
+                'SELECT pg_try_advisory_xact_lock(hashtextextended(%s, 0))', ('ugurlar_scan:' + key,))
+            if not request.env.cr.fetchone()[0]:
+                return True  # başka worker aynı isteği işliyor
+
             # Bellek temizliği: 1000'den fazla kayıt varsa eski olanları sil
             if len(_last_requests) > 1000:
                 cutoff = now - 60

@@ -245,10 +245,12 @@ class BatchApiController(BarcodeApiBase):
                 warehouse_set.add(ab_wh)
 
         # Durum sayaçları tüm filtrelerle (500 kayıt sınırı olmadan)
+        # NEDEN: durum başına search_count (3 sorgu) yerine tek GROUP BY sorgusu
         Batch = request.env['stock.picking.batch'].sudo()
-        for st in state_counts:
-            state_counts[st] = Batch.search_count(
-                count_domain_base + filter_domain + [('state', '=', st)])
+        for st, count in Batch._read_group(
+                count_domain_base + filter_domain, groupby=['state'], aggregates=['__count']):
+            if st in state_counts:
+                state_counts[st] = count
 
         return {
             'batches': result,
