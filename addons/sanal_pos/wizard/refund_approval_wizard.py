@@ -75,10 +75,6 @@ class SanalPosRefundApprovalWizard(models.TransientModel):
         return payment.refund_ids.filtered(
             lambda l: l.state == 'done' and l.source == 'odoo' and l.kind == 'refund').sorted('id')
 
-    @staticmethod
-    def _raw_status(tran):
-        return tran.get('raw_status') or str(tran.get('status') or '').upper()
-
     def _plan(self, payment, result):
         """Ödemenin aday satırları için planlanan eylem (saf; veri yazmaz).
 
@@ -102,7 +98,7 @@ class SanalPosRefundApprovalWizard(models.TransientModel):
                 item['paratika'] = 'belirsiz eşleşme' if how == 'ambiguous' else 'bulunamadı'
                 item['note'] = AMBIGUOUS_REASON if how == 'ambiguous' else NOT_FOUND_REASON
                 continue
-            item['paratika'] = self._raw_status(tran)
+            item['paratika'] = payment._refund_raw_status(tran)
             # DIKKAT: ref'siz eşleşme bir "Başarılı" satırı çevirmeye yetmez (modül açıklaması).
             # Satırın kendi işlem nosu varsa ve sorguda görünmüyorsa, aynı tutarlı başka işlem
             # onun yerine geçmez; zaman da kanıtlanamıyorsa satır elle incelenir.

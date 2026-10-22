@@ -757,8 +757,7 @@ class SanalPosPayment(models.Model):
                 continue
             vals = self._refund_bind_vals(line, tran)
             if status == 'approved':
-                vals.update(state='done', done_at=tran.get('time') or now,
-                            error_code=False, error_message=False)
+                vals.update(self._refund_done_vals(tran, now))
                 events.append(('approved', line))
             elif status == 'failed':
                 # NEDEN: yalnız açık red kanıtı (FA ya da REFUND_REJECT_CODES; sağlayıcı 'failed'
@@ -776,8 +775,7 @@ class SanalPosPayment(models.Model):
                          and t.get('kind') == line.kind and t.get('status') == 'approved'), None)
             if tran:
                 vals = self._refund_bind_vals(line, tran)
-                vals.update(state='done', done_at=tran.get('time') or now,
-                            error_code=False, error_message=False)
+                vals.update(self._refund_done_vals(tran, now))
                 line.write(vals)
                 _logger.warning('sanal_pos: reddedilmiş iade Paratika\'da onaylı görünüyor, '
                                 'ödeme id=%s, satır id=%s', self.id, line.id)
@@ -859,9 +857,18 @@ class SanalPosPayment(models.Model):
         # deneme aynı saniyede olamaz (hata yanıtı + sihirbazı yeniden açma arada).
         return when >= created.replace(microsecond=0)
 
+    @staticmethod
+    def _refund_done_vals(tran, now):
+        return {'state': 'done', 'done_at': tran.get('time') or now,
+                'error_code': False, 'error_message': False}
+
+    @staticmethod
+    def _refund_raw_status(tran):
+        return tran.get('raw_status') or str(tran.get('status') or '').upper()
+
     def _refund_bind_vals(self, line, tran):
         """Ham durum/ayrıntı ve (değiştiyse) işlem no; yalnız farklı alanlar döner."""
-        status = tran.get('raw_status') or str(tran.get('status') or '').upper()
+        status = self._refund_raw_status(tran)
         detail = self._refund_status_detail(tran)
         vals = {}
         if line.provider_status != status:
@@ -1317,7 +1324,8 @@ class SanalPosPayment(models.Model):
         rec = self.sudo()
         now = fields.Datetime.now()
         # Onay bekleyen iade Paratika'da 30 günden uzun sürebilir; kullanıcı yine sorgulayabilmeli.
-        if rec.state not in OPEN_STATES + ('review', 'refund_pending')                 and rec.create_date < now - CHECK_STATUS_MAX_AGE:
+        if (rec.state not in OPEN_STATES + ('review', 'refund_pending')
+                and rec.create_date < now - CHECK_STATUS_MAX_AGE):
             raise UserError('30 günden eski kapanmış kayıt sorgulanamaz.')
         if rec.state == 'sending' and rec.create_date >= now - STALE_SENDING_AGE:
             raise UserError(BUSY_MSG)
