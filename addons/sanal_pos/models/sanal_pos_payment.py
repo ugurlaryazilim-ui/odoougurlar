@@ -60,6 +60,8 @@ FIELD_MAX_LENGTH = {
 
 # Kullanıcı mesajları (01-gereksinimler; metinler testlerle sabit)
 OPEN_LINK_MSG = 'Bu faturaya ait açık bir link var%s. Yeniden gönderin veya iptal edin.'   # KK-18
+OPEN_MAIL_ORDER_MSG = ('Bu faturaya ait açık bir mail order var%s. Kart sayfasını açın ya da '
+                       '"Mail Order\'ı Kapat" ile kapatın.')                                # KK-7
 PAID_MSG = 'Bu fatura için ödeme alınmış/incelemede; yeni link oluşturulamaz.'             # KK-19
 PRIOR_REFUND_MSG = ('Bu faturanın önceki ödemesi iade/iptal edilmiş. Yeni link için '      # KK-20
                     '"Önceki iadeyi/iptali biliyorum" kutusunu işaretleyin.')
@@ -100,6 +102,7 @@ LINK_NOT_FOUND_PENDING_MSG = "Link Paratika'da henüz bulunamadı; durum tekrar 
 AMBIGUOUS_MSG = ("Paratika'da birden fazla aday link bulundu; yönetici Paratika panelinden "
                  'kontrol etmelidir.')
 STALE_SENDING_MSG = "Link oluşturma işlemi yarıda kaldı; durum Paratika'dan uzlaştırılacak."
+STALE_SENDING_MO_MSG = 'Mail order oturumu açılamadı (istek yarıda kaldı). Tekrar deneyebilirsiniz.'
 # G10: yeniden gönder / link iptali (KK-31, KK-32)
 CHANNEL_MSG = 'En az bir gönderim kanalı seçin.'                                         # KK-9
 RESEND_CHANNELS = ('sms', 'email')
@@ -218,6 +221,16 @@ class SanalPosPayment(models.Model):
     amount = fields.Monetary(string='Tutar', currency_field='currency_id', required=True,
                              readonly=True)
 
+    # ---------------------------------------------------------------- yöntem
+    # NEDEN: link ve mail order aynı tabloyu/yaşam döngüsünü paylaşır; yöntem yalnız birkaç dalı
+    # ayırır (bkz. KARARLAR K-14). Kullanıcı yazamaz: kayıtlar yalnız ``_insert_sending`` (sudo) ile
+    # açılır ve her iki yol alanı vals'ta açıkça yazar.
+    # DIKKAT: ``default_payment_method`` bağlamı yalnız vals'ta OLMAYAN alana uygulanır; bu yüzden
+    # varsayılana güvenilmez, ``_insert_sending`` anahtarsız vals'ı reddeder (DERSLER 3. tekrar).
+    payment_method = fields.Selection(
+        [('link', 'Link'), ('mail_order', 'Mail Order')], string='Yöntem', required=True,
+        default='link', readonly=True, index=True, copy=False)
+
     # ---------------------------------------------------------------- link
     channel_sms = fields.Boolean(string='SMS ile gönder')
     channel_email = fields.Boolean(string='E-posta ile gönder')
@@ -302,27 +315,31 @@ class SanalPosPayment(models.Model):
                 parts.append('E-posta')
             rec.channels_display = '+'.join(parts)
 
-    @api.depends('provider_token', 'environment', 'provider')
+    @api.depends('provider_token', 'environment', 'provider', 'payment_method')
     def _compute_link_url(self):
         """Ödeme sayfası adresi; yalnız ``sanal_pos.paratika_show_link_url`` açıksa dolu (KK-17)."""
         # Boolean ayar kapatılınca parametre satırı silinir: yok = kapalı
         show = get_bool_param(self.env, 'sanal_pos.paratika_show_link_url', default=False)
         for rec in self:
             rec.link_url = False
-            if not show or not rec.provider_token:
+            # NEDEN: mail order'da token bir HPP adresi değil, Direct POST oturumudur; adres olarak
+            # gösterilmez (bkz. KARARLAR K-14).
+            if not show or not rec.provider_token or rec.payment_method == 'mail_order':
                 continue
             if 'sanal.pos.provider.%s' % (rec.provider or '') not in self.env:
                 continue
             # Ö-E: adres kalıbı yalnız sağlayıcıda (create_link yanıtıyla aynı kaynak)
             rec.link_url = rec._provider()._link_url(rec, rec.provider_token) or False
 
-    @api.depends('state', 'expires_at')
+    @api.depends('state', 'expires_at', 'payment_method')
     def _compute_can_resend(self):
-        """KK-31: yalnız Gönderildi ve süresi dolmamış linkler yeniden gönderilebilir."""
+        """KK-31: yalnız Gönderildi ve süresi dolmamış linkler yeniden gönderilebilir
+        (mail order'da gönderilecek bir link yoktur)."""
         now = fields.Datetime.now()
         for rec in self:
             rec.can_resend = bool(
-                rec.state == 'sent' and (not rec.expires_at or rec.expires_at > now))
+                rec.payment_method == 'link' and rec.state == 'sent'
+                and (not rec.expires_at or rec.expires_at > now))
 
     @api.depends('refund_ids.state', 'refund_ids.amount')
     def _compute_refunded_amount(self):
@@ -403,12 +420,13 @@ class SanalPosPayment(models.Model):
         return value.replace(tzinfo=_UTC).astimezone(_ISTANBUL).strftime('%d.%m.%Y %H:%M')
 
     @api.model
-    def _open_link_message(self, creator_name=None, created_at=None):
-        """KK-18 metni; oluşturan/tarih bilinmiyorsa parantezsiz."""
+    def _open_link_message(self, creator_name=None, created_at=None, payment_method='link'):
+        """KK-18 metni; oluşturan/tarih bilinmiyorsa parantezsiz. Açık kaydın yöntemine göre
+        "açık bir link" / "açık bir mail order" (bilinmiyorsa link: eski davranış)."""
         detail = ''
         if creator_name or created_at:
             detail = ' (%s, %s)' % (creator_name or '-', self._format_local(created_at) or '-')
-        return OPEN_LINK_MSG % detail
+        return (OPEN_MAIL_ORDER_MSG if payment_method == 'mail_order' else OPEN_LINK_MSG) % detail
 
     @api.model
     def _new_link_blocker(self, invoice_no, confirm_prior_refund=False, refresh=False):
@@ -439,7 +457,7 @@ class SanalPosPayment(models.Model):
         open_rec = records.filtered(lambda rec: rec.state in OPEN_STATES)[:1]
         if open_rec:
             creator = open_rec.user_id or open_rec.create_uid
-            return self._open_link_message(creator.name, open_rec.create_date)
+            return self._open_link_message(creator.name, open_rec.create_date, open_rec.payment_method)
         if unverified:
             return UNVERIFIED_PRIOR_MSG
         if not confirm_prior_refund and any(rec.state in REFUNDED_STATES for rec in records):
@@ -501,7 +519,7 @@ class SanalPosPayment(models.Model):
     def _open_link_message_sql(self, invoice_no):
         """DB tekillik ihlalinde KK-18 metni; ORM aramasına bağlı değildir (KK-21)."""
         self.env.cr.execute("""
-            SELECT partner.name, p.create_date
+            SELECT partner.name, p.create_date, p.payment_method
               FROM sanal_pos_payment p
               LEFT JOIN res_users u ON u.id = COALESCE(p.user_id, p.create_uid)
               LEFT JOIN res_partner partner ON partner.id = u.partner_id
@@ -511,7 +529,7 @@ class SanalPosPayment(models.Model):
         """, [invoice_no, OPEN_STATES])
         row = self.env.cr.fetchone()
         # Eşzamanlı istekte (REPEATABLE READ) diğer işlemin satırı görünmeyebilir: parantezsiz
-        return self._open_link_message(*(row or (None, None)))
+        return self._open_link_message(*(row or (None, None)))   # row üç sütun: yöntem de iletilir
 
     @api.model
     def _next_attempt_no(self, invoice_no):
@@ -529,6 +547,10 @@ class SanalPosPayment(models.Model):
         Savepoint geri alındığı için işlem (transaction) zehirlenmez; diğer IntegrityError'lar
         (CHECK vb.) olduğu gibi yükselir.
         """
+        # NEDEN: ``default_payment_method`` bağlamı vals'ta olmayan alana uygulanır; yöntem hiçbir
+        # zaman bağlamdan türemesin diye anahtarsız vals reddedilir (bkz. KARARLAR K-14).
+        if vals.get('payment_method') not in ('link', 'mail_order'):
+            raise ValueError('payment_method açıkça verilmelidir.')
         try:
             with self.env.cr.savepoint():
                 return self.sudo().create(vals)
@@ -661,6 +683,9 @@ class SanalPosPayment(models.Model):
         müşteri/kanal değerleriyle açar. Engel kuralları sihirbazda yine uygulanır."""
         self.ensure_one()
         self._check_sanal_pos_user()
+        if self.payment_method == 'mail_order':
+            raise UserError('Mail order kaydından yeni link oluşturulamaz; "Mail Order" '
+                            'menüsünden yeni deneme açın.')
         if self.state not in REUSABLE_STATES:
             raise UserError('Yeni link yalnız süresi dolmuş, iptal edilmiş, hatalı veya '
                             'iade/iptal edilmiş taleplerden oluşturulabilir.')
@@ -1167,6 +1192,11 @@ class SanalPosPayment(models.Model):
             detail = ['%d taksit' % (values.get('installment_count') or 1)]
             if values.get('card_last4'):
                 detail.append('kart son 4: %s' % values['card_last4'])
+            if self.payment_method == 'mail_order':
+                # NEDEN: kartı giren kişi izlenebilsin; yalnız son 4 hane yazılır, kart verisi yok.
+                self._post_note('Mail order ödemesi alındı: %s, %s, başlatan: %s' % (
+                    format_try(tran.get('amount')), ', '.join(detail),
+                    (self.user_id or self.create_uid).name or '-'))
             self._notify_creator('%s – %s ödendi (%s)' % (
                 self.invoice_no, format_try(tran.get('amount')), ', '.join(detail)))
             self._sync_refunds(transactions)
@@ -1178,6 +1208,15 @@ class SanalPosPayment(models.Model):
         if failed:
             values.update(last_error_code='CARD_FAILED',
                           last_error_message='Kart denemesi başarısız (%d)' % len(failed))
+            if self.payment_method == 'mail_order':
+                # NEDEN: personel kart sayfasında müşteriyle birlikte olduğundan reddin gerçek nedeni
+                # (yetersiz limit vb.) lazım; link'te müşteri HPP'de görür (bkz. KARARLAR K-14).
+                last = [t for t in transactions if t.get('kind') == 'sale'
+                        and t.get('status') in ('failed', 'cancelled') and t.get('error_code')][-1:]
+                if last:
+                    values.update(last_error_code=last[0]['error_code'],
+                                  last_error_message=(last[0].get('error_message') or '')[:250]
+                                  or values['last_error_message'])
         elif self.state == 'sent':
             values.update(last_error_code=False, last_error_message=False)
         self.write(values)
@@ -1209,8 +1248,17 @@ class SanalPosPayment(models.Model):
 
     # ---------------------------------------------------------------- belirsiz uzlaştırma (KK-16)
     def _mark_stale_sending(self):
-        """5 dakikadan eski 'Gönderiliyor' (yarıda kalmış istek) -> 'Belirsiz'."""
+        """5 dakikadan eski 'Gönderiliyor' (yarıda kalmış istek) -> 'Belirsiz'
+        (mail order'da 'Hata')."""
         self.ensure_one()
+        if self.payment_method == 'mail_order':
+            # NEDEN: SESSIONTOKEN gönderim yapmaz; yanıt bize ulaşmadıysa token hiçbir kişiye
+            # ulaşmamıştır, ödeme yapılamaz -> belirsizlik yok, çift tahsilat riski yok
+            # (bkz. KARARLAR K-14; link'te Paratika SMS/e-posta gönderdiği için 'unknown').
+            self.sudo().write({'state': 'error', 'last_error_code': 'STALE_SENDING',
+                               'last_error_message': STALE_SENDING_MO_MSG})
+            self._post_note(STALE_SENDING_MO_MSG)
+            return
         self.sudo().write({'state': 'unknown', 'unknown_since': fields.Datetime.now(),
                            'link_not_found_count': 0, 'last_error_code': 'STALE_SENDING',
                            'last_error_message': UNKNOWN_MSG})
@@ -1228,6 +1276,10 @@ class SanalPosPayment(models.Model):
         rec = self.sudo()
         result = rec._sync_status()
         if rec.state != 'unknown' or not result.get('ok'):
+            return result
+        if rec.payment_method == 'mail_order':
+            # NEDEN: mail order'da link yoktur, 'unknown' normalde oluşmaz; oluşmuşsa yalnız ödeme
+            # sorgusu yeterlidir, ``find_link`` çağrılmaz (bkz. KARARLAR K-14).
             return result
         found = rec._call_provider_safely('find_link', 'link uzlaştırmasında')
         now = fields.Datetime.now()
@@ -1385,6 +1437,11 @@ class SanalPosPayment(models.Model):
     def _check_link_open(self, require_unexpired):
         """Yalnız 'Gönderildi' linkler (yeniden gönderim için ayrıca süresi dolmamış)."""
         self.ensure_one()
+        if self.payment_method == 'mail_order':
+            # NEDEN: gönderilecek/iptal edilecek link yok; çağrı Paratika'ya hiç gitmez
+            # (bkz. KARARLAR K-14). Kapatma için "Mail Order'ı Kapat" kullanılır.
+            raise UserError('Mail order kaydında link işlemi yapılamaz; kart sayfasını açın '
+                            'ya da "Mail Order\'ı Kapat" kullanın.')
         if self.state != 'sent':
             raise UserError('Bu işlem yalnız "Gönderildi" durumundaki linklerde yapılabilir.')
         if require_unexpired and self.expires_at and self.expires_at <= fields.Datetime.now():

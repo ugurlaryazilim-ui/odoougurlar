@@ -317,6 +317,9 @@ class SanalPosPaymentCreateWizard(models.TransientModel):
         # 5. 'Gönderiliyor' kaydı (savepoint; tekillik ihlali -> KK-18)
         attempt_no = Payment._next_attempt_no(invoice_no)
         values.update({
+            # NEDEN: yöntem bağlamdan (default_payment_method) türemez, burada açıkça yazılır
+            # (bkz. KARARLAR K-14).
+            'payment_method': 'link',
             'invoice_source': 'nebim',
             'invoice_no': invoice_no,
             'invoice_ref': info['invoice_ref'] or False,
