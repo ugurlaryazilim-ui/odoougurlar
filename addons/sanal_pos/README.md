@@ -158,7 +158,7 @@ Müşteri kartını telefonla bildirir; personel kartı **Odoo'nun sunduğu kart
 3. Kart sayfasında müşteriden alınan ad, kart numarası (boşluksuz), son kullanma, CVV ve taksit girilir; **Öde (3D)**. Adres çubuğu Paratika/banka alan adına döner.
 4. Banka SMS kodunu müşterinin telefonuna gönderir; personel kodu **müşteriden telefonla alıp yalnız banka sayfasına** girer.
 5. Dönüşte Odoo durumu Paratika'ya sorar (`QUERYTRANSACTION`; dönüş gövdesi okunmaz) ve ödeme kaydını açar: **Ödendi**, ya da başarısızsa son hatanın kodu ve Türkçe mesajı kayıtta. Dönüş gelmezse bildirim ya da 10 dakikalık cron yakalar.
-6. Kayıt formunda: **Kart Bilgisi Gir** (açık ve süresi dolmamış oturumda aynı sayfayı yeniden açar, yeni oturum açmaz), **Mail Order'ı Kapat** (Paratika'da onaylı/bekleyen satış yoksa kaydı "Süresi doldu" yapar ve yeni denemeye izin verir; satış varsa kapatmaz ve nedenini söyler; Paratika yanıt vermezse de kapatmaz). Hata sonrası ya aynı oturumda yeniden denenir ya da kapatılıp yeni Mail Order açılır.
+6. Kayıt formunda: **Kart Bilgisi Gir** (açık ve süresi dolmamış oturumda aynı sayfayı yeniden açar, yeni oturum açmaz), **Mail Order'ı Kapat** (Paratika'da onaylı/bekleyen satış yoksa kaydı "Süresi doldu" yapar ve yeni denemeye izin verir; satış varsa kapatmaz ve nedenini söyler; Paratika yanıt vermezse de kapatmaz). Hata sonrası ya aynı oturumda yeniden denenir ya da kapatılıp yeni Mail Order açılır. **Kapat Paratika oturumunu bitiremez** (iptal API'si yok): son oturum anahtarının alınmasından itibaren 1 saat içinde açılan yeni deneme yeni kayıt açmaz, **aynı kaydı aynı ödeme numarasıyla** yeniden açar; önce Paratika sorgulanır, eski oturumda ödeme alınmışsa yeni oturum açılmaz ve kayıt Ödendi olur (açık kalmış bir sekmeden ikinci tahsilat olmasın diye; tasarım K-15). Bu 1 saat içinde fatura tutarı değiştiyse yeni deneme ve aynı faturaya **link** de açılamaz; mesaj bekleme saatini söyler.
 7. Ödenmiş Mail Order'ın iptali (VOID), iadesi ve iade onayı link ödemesiyle birebir aynıdır (yalnız Yönetici). Mail Order kayıtlarında Yeniden Gönder / Linki İptal Et / Yeni Link düğmeleri yoktur.
 
 Paratika oturumu açılamazsa (zaman aşımı, 5xx, anahtar yok) kayıt **Hata** olur (Belirsiz değil): anahtar hiçbir tarayıcıya ulaşmadığı için ödeme yapılamaz ve hemen yeni deneme açılabilir.
@@ -180,7 +180,9 @@ Menü, sihirbaz, kart sayfası ve sonuç sayfası **Sanal POS / Kullanıcı** (v
 1. Veritabanı yedeği alın ve `rollback-pre-mail-order` etiketini (merge öncesi) atın.
 2. Üç Sanal POS cron'unu **pasif** yapın: "durum senkronu", "bildirim tetikli senkron", "günlük temizlik ve iade senkronu".
 3. Redeploy.
-4. **Hemen** `odoo -d <veritabani> -u sanal_pos --stop-after-init` (yeni modül/bağımlılık yok; yeni model, görünüm, menü ve kayıt kuralı bu adımda oluşur).
+4. **Hemen** `-u sanal_pos` (yeni modül/bağımlılık yok; yeni model, görünüm, menü ve kayıt kuralı bu adımda oluşur). **Prod compose (`docker-compose.prod.yml`) açılışta yalnız `ugurlar_images,ugurlar_ai_studio` modüllerini `-u` eder; sanal_pos otomatik güncellenmez.** Yeni konteyner ayağa kalkınca elle çalıştırın (çalışan sunucu ayrıdır, `--stop-after-init` HTTP portu bağlamaz):
+   `docker exec odoougurlar-odoo-prod odoo -d <veritabani> -u sanal_pos --stop-after-init`
+   Pencere, konteynerin kendi açılış `-u`'su bitip bu komut tamamlanana kadar sürer.
 5. Doğrulama: `SELECT payment_method, count(*) FROM sanal_pos_payment GROUP BY 1;` yalnız `link` döndürmeli (eski kayıtlar varsayılanla dolar, migrasyon betiği yok). Modül sürümü 19.0.1.3.0.
 6. Cron'ları tekrar **aktif** edin.
 7. Sanal POS kullanıcısıyla Mail Order menüsünü ve kart sayfası açılışını deneyin (gerçek ödeme yapmadan, ardından **Mail Order'ı Kapat**).
@@ -190,9 +192,12 @@ Redeploy ile `-u` arasında `payment_method` sütunu yoktur: Sanal POS cron'lar�
 
 ### 9.5 Geri alma
 1. **Önkoşul:** açık Mail Order olmamalı (en fazla 60 dakika bekleyin ya da Mail Order'ı Kapat): `SELECT count(*) FROM sanal_pos_payment WHERE payment_method='mail_order' AND state IN ('sending','sent');` sonucu 0.
-2. Kodu `rollback-pre-mail-order` etiketine döndürüp redeploy edin. **`-u` gerekmez**; eski kod `payment_method` sütununu yok sayar (sütun veritabanında kalır, zararsızdır). Eski sürümle `-u` çalıştırılırsa Mail Order menü/görünüm kayıtları temizlenir; çalıştırılmazsa menü model bulunamadığı için açılmaz (isterseniz `menu_sanal_pos_mail_order` menüsünü arşivleyin).
-3. Eski kodda Mail Order kayıtları "link" gibi görünür: `sent` olanlar senkronla Ödendi/Süresi doldu olur; ödenmişlerin iptal/iadesi link yoluyla çalışır. Bu kayıtlarda Yeniden Gönder / Linki İptal Et görünür ama Paratika hata döner (zararsız); personele bu düğmeleri kullanmamaları söylenir.
-4. Paratika tarafında geri alınacak ayar yoktur (dönüş adresi oturum başınadır). Veri kaybı yoktur, geri dönüş betiği gerekmez.
+2. **Eski koda dönmeden ÖNCE** veritabanında çalıştırın:
+   `ALTER TABLE sanal_pos_payment ALTER COLUMN payment_method SET DEFAULT 'link';`
+   NEDEN: `payment_method` NOT NULL'dır ama DB varsayılanı yoktur; eski kod bu sütunu INSERT'e koymaz ve bu satır olmadan geri dönüşten sonra **hiçbir yeni link oluşturulamaz** (`NotNullViolation`).
+3. Kodu `rollback-pre-mail-order` etiketine döndürüp redeploy edin ve **hemen** eski kodla `-u sanal_pos` çalıştırın (prod'da 9.4 adım 4'teki `docker exec … -u sanal_pos --stop-after-init`; sanal_pos otomatik güncellenmez). `-u` eski görünüm/menü kayıtlarını geri yükler (DB'deki yeni görünümler `payment_method` alanını ve Mail Order düğmelerini referanslar) ve Mail Order menüsünü kaldırır. `payment_method` sütunu veritabanında kalır (zararsız); sonradan yeni sürüme ileri `-u` yapılırsa ORM sütunu kendi tanımına getirir.
+4. Eski kodda Mail Order kayıtları "link" gibi görünür: `sent` olanlar senkronla Ödendi/Süresi doldu olur; ödenmişlerin iptal/iadesi link yoluyla çalışır. Bu kayıtlarda Yeniden Gönder / Linki İptal Et görünür ama Paratika hata döner (zararsız); personele bu düğmeleri kullanmamaları söylenir.
+5. Paratika tarafında geri alınacak ayar yoktur (dönüş adresi oturum başınadır). Veri kaybı yoktur; geri dönüş için gereken tek SQL adım 2'deki `SET DEFAULT` satırıdır.
 
 ### 9.6 G0 canlı denemesi ve canlıya çıkış şartı
 Dokümanda Direct POST'un işyeri bazında açılması gerekip gerekmediği yazmaz; Paratika TEST kimlik bilgisi olmadığından deneme **canlı işyerinde** yapılır. Mail Order yalnız şu şartlar sağlanınca canlıda kullanıma açılır:
