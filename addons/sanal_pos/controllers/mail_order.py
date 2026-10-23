@@ -37,6 +37,7 @@ BIN_PATH = '/sanal_pos/mail_order/bin'
 # Aşama 3 POST rotaları (A3-G3); sonuç sayfası formlarının hedefi
 RETRY_PATH = '/sanal_pos/mail_order/retry/%d'
 LINK_PATH = '/sanal_pos/mail_order/link/%d'
+LINK_WIZARD_PATH = '/odoo/action-sanal_pos.action_sanal_pos_payment_create_wizard/%d'
 RECORD_PATH = PAYMENT_LIST_PATH + '/%d'
 EXPIRY_YEAR_SPAN = 15
 # Dağıtımsız kapatma anahtarı (tasarım §3.9, D-4): İZİN LİSTESİ. Parametre yoksa ya da değeri
@@ -240,6 +241,43 @@ class SanalPosMailOrderController(http.Controller):
         # yani yenileme istemci girdisiyle sonsuza uzatılamaz (KK-3.4)
         refresh_count = int(n) if n and re.fullmatch(r'[0-9]{1,3}', n) else 0
         return self._result_page(payment, refresh_count)
+
+    # DIKKAT: csrf varsayılan (açık) kalmalı; bu rotalar Kapat/K-15/SESSIONTOKEN tetikler (KK-3.9)
+    @http.route('/sanal_pos/mail_order/retry/<int:payment_id>', type='http', auth='user', methods=['POST'])
+    def mail_order_retry(self, payment_id, **_kwargs):
+        """Sonuç sayfasındaki 'Tekrar dene' / 'Yeni deneme aç' (tasarım §5.5)."""
+        return self._mail_order_post(payment_id, 'action_mail_order_retry')
+
+    @http.route('/sanal_pos/mail_order/link/<int:payment_id>', type='http', auth='user', methods=['POST'])
+    def mail_order_to_link(self, payment_id, **_kwargs):
+        """Sonuç sayfasındaki 'Bunun yerine link gönder' (tasarım §5.5)."""
+        return self._mail_order_post(payment_id, 'action_mail_order_to_link')
+
+    def _mail_order_post(self, payment_id, method):
+        """Model eylemini çalıştırır: kart sayfası/sihirbaz -> 303, bildirim ya da UserError -> sonuç sayfası."""
+        payment = request.env['sanal.pos.payment'].browse(payment_id)
+        try:
+            if not payment.exists():
+                raise MissingError('Ödeme kaydı bulunamadı.')
+            action = getattr(payment, method)()
+        except AccessError:
+            return self._error_page('Bu sayfa için Sanal POS kullanıcı yetkisi gerekir.', status=403)
+        except MissingError:
+            return self._error_page('Ödeme kaydı bulunamadı.', status=404)
+        except UserError as exc:
+            # NEDEN: yanıt döndürülünce Odoo isteği commit eder; yarım kalan yazım (ör. sihirbaz kaydı)
+            # istisnadaki gibi geri alınır. Kapat'ın sonucu eylem içinde zaten commit edilmiştir.
+            request.env.cr.rollback()
+            if payment.sudo().payment_method != 'mail_order':
+                return self._error_page(str(exc), status=409, payment_id=payment_id)
+            return self._result_page(payment, notice=str(exc), status=409)
+        action = action or {}
+        if action.get('type') == 'ir.actions.act_url':
+            return request.redirect(action['url'], code=303, local=True)
+        if action.get('type') == 'ir.actions.act_window' and action.get('res_id'):
+            # NEDEN: geçici sihirbaz kaydı web istemcisinde kendi adresiyle ön dolu açılır (tasarım §5.5)
+            return request.redirect(LINK_WIZARD_PATH % action['res_id'], code=303, local=True)
+        return self._result_page(payment, notice=(action.get('params') or {}).get('message'))
 
     # ------------------------------------------------------------------ yardımcılar
     @classmethod

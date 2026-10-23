@@ -162,6 +162,17 @@ RESULT_REFRESH_MAX = 24
 RESULT_HISTORY_LIMIT = 10
 # K-15/S3.2: açık banka oturumu bitmeden link açılamaz; saat Europe/Istanbul, "SS:DD" biçiminde
 MO_LINK_WAIT_MSG = "Link en erken %s'de gönderilebilir (açık banka oturumu)"
+# G0-Q4: aynı SESSIONTOKEN FA'dan sonra yeniden kullanılabilir mi? Bilinmiyor -> hayır varsayılır;
+# Tekrar dene = Kapat + K-15 yeniden açma. Ölçüm "evet" derse tek değişim yeri burası (tasarım §5.5).
+MO_TOKEN_REUSABLE_AFTER_FAIL = False
+MO_ACTION_STATES = ('sent', 'expired', 'error')
+MO_ACTION_STATE_MSG = ('Bu işlem yalnız açık, süresi dolmuş ya da hatalı mail order kaydında '
+                       'kullanılabilir.')
+# Güvenlik eki (A3-G3): eşik dolunca faturanın açık oturumu fatura kilidi altında kapatılır
+MO_LIMIT_LOCK_NAMESPACE = 0x4D4F4C31     # 'MOL1'
+MO_LIMIT_LOCK_TIMEOUT = '2s'
+MO_LIMIT_CLOSED_NOTE = ('Mail order oturumu kapatıldı (kart sayfası açılamaz): son 24 saatte %d '
+                        'başarısız kart denemesi (güvenlik sınırı).')
 # G10: yeniden gönder / link iptali (KK-31, KK-32)
 CHANNEL_MSG = 'En az bir gönderim kanalı seçin.'                                         # KK-9
 RESEND_CHANNELS = ('sms', 'email')
@@ -1167,7 +1178,16 @@ class SanalPosPayment(models.Model):
         return values
 
     def action_mail_order_close(self):
-        """'Mail Order'ı Kapat' (KK-21): açık oturumu kapatır ama önce Paratika'ya sorar.
+        """'Mail Order'ı Kapat' (KK-21) düğmesi; mantık ``_mail_order_close_core``'da."""
+        self.ensure_one()
+        _state, text, kind = self._mail_order_close_core()
+        return self._notification_action(text, kind)
+
+    def _mail_order_close_core(self):
+        """Açık oturumu kapatır ama önce Paratika'ya sorar; ``(durum, metin, tür)`` döner, commit eder.
+
+        Durum yanıtsız sorguda ``False``'tur. Kapat düğmesi, Tekrar dene ve Link eylemi aynı kuralı
+        buradan kullanır (A3-G3; ikinci kopya yok).
 
         NEDEN: ödeme gerçekleşmişken sessizce ``expired`` yazmak çift tahsilata yol açar
         (müşterinin kartı çekilmiş, kayıt kapalı). Bu yüzden önce QUERYTRANSACTION; durum kararı
@@ -1193,7 +1213,7 @@ class SanalPosPayment(models.Model):
         if not result.get('ok'):
             rec.write({'expires_at': previous_expiry})
             self._sp_commit()
-            return self._notification_action(QUERY_FAILED_MSG, 'warning')
+            return False, QUERY_FAILED_MSG, 'warning'
         if rec.state == 'expired':
             rec._post_note('Mail order %s tarafından kapatıldı.' % (self.env.user.name or '-'))
             text, kind = 'Mail order kapatıldı; yeni deneme açabilirsiniz.', 'success'
@@ -1205,7 +1225,74 @@ class SanalPosPayment(models.Model):
             text, kind = ("Paratika'da devam eden bir işlem var; mail order kapatılmadı. "
                           'Sonuç otomatik izlenecek.'), 'warning'
         self._sp_commit()
-        return self._notification_action(text, kind)
+        return rec.state, text, kind
+
+    # -- A3-G3: Tekrar dene / Bunun yerine link gönder (tasarım §5.5)
+    def _check_mail_order_action(self):
+        """Yetki, yöntem ve durum denetimi; her yazım ve Paratika çağrısından ÖNCE (KK-3.9)."""
+        self.ensure_one()
+        self._check_sanal_pos_user()
+        rec = self.sudo()
+        if rec.payment_method != 'mail_order':
+            raise UserError('Bu işlem yalnız mail order kaydında kullanılabilir.')
+        if rec.state not in MO_ACTION_STATES or rec.paid_at:
+            raise UserError(MO_ACTION_STATE_MSG)
+        return rec
+
+    def _close_before_new_attempt(self):
+        """Açık (Gönderildi) kayıtta Kapat; kapanmadıysa (ödeme/inceleme/bekleyen/yanıtsız) bildirim.
+
+        DIKKAT: fail-closed: Kapat sonucu ``expired`` değilse yeni oturum ya da link AÇILMAZ. Bildirim
+        raise edilmez: Kapat'ın yazdığı durum (ör. paid) commit edilmiştir ve öyle kalmalıdır.
+        """
+        if self.sudo().state != 'sent':
+            return None
+        state, text, kind = self._mail_order_close_core()
+        return None if state == 'expired' else self._notification_action(text, kind)
+
+    def _prefilled_wizard(self, model):
+        """``action_new_link`` deseni: fatura yeniden getirilir, müşteri değerleri bu kayıttan gelir."""
+        rec = self.sudo()
+        wizard = self.env[model].create({'invoice_no': rec.invoice_no})
+        wizard.action_fetch_invoice()
+        wizard.write({key: rec[key] or wizard[key] for key in MO_REUSE_CUSTOMER_FIELDS})
+        return wizard
+
+    def action_mail_order_retry(self):
+        """'Tekrar dene' / 'Yeni deneme aç' (KK-3.5): sınır -> Kapat -> Mail Order sihirbazı -> kart sayfası.
+
+        NEDEN: yeni kod yolu yok (R12): sihirbazın kendi akışı K-15 yeniden açmayı (aynı MPID, önce
+        QUERYTRANSACTION) ve tüm engelleri uygular; Paratika oturumu canlıyken yeni MPID açmak çift
+        tahsilattır (bkz. KARARLAR K-15).
+        """
+        rec = self._check_mail_order_action()
+        blocked = self._mail_order_attempt_block(rec.invoice_no)
+        if blocked:
+            raise UserError(blocked)
+        if (MO_TOKEN_REUSABLE_AFTER_FAIL and rec.state == 'sent' and rec.provider_token
+                and rec.expires_at and rec.expires_at > fields.Datetime.now()):
+            return rec._card_page_action()
+        notice = self._close_before_new_attempt()
+        if notice:
+            return notice
+        return self._prefilled_wizard('sanal.pos.mail.order.wizard').action_create_mail_order()
+
+    def action_mail_order_to_link(self):
+        """'Bunun yerine link gönder' (KK-3.8): bekleme -> Kapat -> ön dolu link sihirbazı.
+
+        NEDEN: son SESSIONTOKEN'dan 1 saat geçmeden açık banka sekmesi ödeyebilir; link yeni MPID
+        alır ve çift tahsilat olur. Bu yüzden pencere içinde hiçbir yazım ya da Paratika çağrısı
+        yapılmaz, yalnız en erken saat söylenir (bkz. KARARLAR K-15, S3.2).
+        """
+        rec = self._check_mail_order_action()
+        wait = rec._mail_order_link_wait()
+        if wait:
+            raise UserError(wait)
+        notice = self._close_before_new_attempt()
+        if notice:
+            return notice
+        # NEDEN: kanal/süre MO kaydında anlamsızdır (hep False/1); link sihirbazı varsayılanı kalır
+        return self._prefilled_wizard('sanal.pos.payment.create.wizard')._reopen_action()
 
     # -- K-15: aynı MPID ile yeni deneme
     @api.model
@@ -1749,17 +1836,20 @@ class SanalPosPayment(models.Model):
             return False
         transactions = result.get('transactions') or []
         rec.write({'last_checked_at': now})
+        newly_failed = False
         if rec.payment_method == 'mail_order':
             # DIKKAT: durum dallarından önce; geç onay (paid) da sayacı sıfırlayan satırı yazmalı
-            rec._record_attempts(transactions)
+            newly_failed = rec._record_attempts(transactions)
         if rec.state in IRREVERSIBLE_STATES:
             rec._sync_refunds(transactions)
-            return True
-        if rec.state in ('sent', 'unknown'):
+        elif rec.state in ('sent', 'unknown'):
             rec._apply_open_status(transactions, now)
         elif rec.state in LATE_PAYMENT_STATES:
             rec._apply_late_status(transactions)
         # review: yalnız yönetici eylemiyle çıkar; sending: G7/cron'un işidir
+        if rec.payment_method == 'mail_order':
+            # NEDEN: durum kararından SONRA: onay/inceleme bulunan kayıt kapatılmaz (A3-G3 güvenlik eki)
+            rec._mail_order_limit_close(newly_failed)
         return True
 
     def _record_attempts(self, transactions):
@@ -1767,15 +1857,17 @@ class SanalPosPayment(models.Model):
 
         pgTranId başına tek satır; tekrar gelen işlemde yalnız değişen alanlar güncellenir. Satır
         red/iptale GEÇTİĞİ anda bir chatter notu düşer; fatura sayacı eşiği bu çağrıda geçerse tek
-        "Deneme sınırı doldu" bildirimi gider. Kilit almaz, commit etmez, Paratika'yı çağırmaz.
+        "Deneme sınırı doldu" bildirimi gider. Kilit almaz, commit etmez, Paratika'yı çağırmaz. Bir satır red/iptale geçtiyse ``True`` döner
+        (sayaç artmış olabilir; ``_mail_order_limit_close`` fatura kilidini buna göre alır).
         """
         self.ensure_one()
         rec = self.sudo()
+        newly_failed = False
         Attempt = self.env['sanal.pos.payment.attempt'].sudo()
         labels = dict(Attempt._fields['status'].selection)
         sales = [t for t in transactions if t.get('kind') == 'sale' and t.get('status') in labels]
         if not sales:
-            return
+            return False
         before = self._mail_order_failed_count(rec.invoice_no)
         rows = {row.tran_ref: row for row in rec.attempt_ids}
         user = rec.user_id or rec.create_uid
@@ -1812,6 +1904,7 @@ class SanalPosPayment(models.Model):
                 row = rows[ref] = Attempt.create(values)
                 if not failed:
                     continue
+            newly_failed = True
             detail = row.reason or ''
             if row.error_code and row.error_code not in detail:
                 detail = '%s (%s)' % (detail, row.error_code)
@@ -1823,6 +1916,64 @@ class SanalPosPayment(models.Model):
             rec._notify_creator(
                 '%s – Deneme sınırı doldu: son 24 saatte %d başarısız kart denemesi; mail order 24 '
                 'saat kapalı. Müşteriye ödeme linki gönderin.' % (rec.invoice_no, after))
+        return newly_failed
+
+    def _mail_order_invoice_lock(self):
+        """Fatura başına ``pg_advisory_xact_lock`` (``MO_LIMIT_LOCK_TIMEOUT``); alınamazsa False.
+
+        NEDEN: sayaç artışı (bir kaydın senkronu) ile kapatma denetimi (aynı faturanın başka bir
+        kaydının senkronu) farklı işlemlerde olabilir; kilitsiz ikisi de eski sayıyı okuyup açık
+        oturumu kapatmadan geçerdi. Kilit işlem sonunda düşer; sıradaki işlem yeni sayıyı görür.
+        """
+        cr = self.env.cr
+        try:
+            with cr.savepoint():
+                cr.execute("SELECT current_setting('lock_timeout')")
+                previous = cr.fetchone()[0]
+                cr.execute("SET LOCAL lock_timeout = '%s'" % MO_LIMIT_LOCK_TIMEOUT)
+                cr.execute('SELECT pg_advisory_xact_lock(%s, hashtext(%s))',
+                           [MO_LIMIT_LOCK_NAMESPACE, self.invoice_no], log_exceptions=False)
+                cr.execute("SELECT set_config('lock_timeout', %s, true)", [previous])
+        except (pg_errors.LockNotAvailable, pg_errors.QueryCanceled):
+            _logger.info('sanal_pos: deneme sınırı fatura kilidi alınamadı; ödeme id=%s', self.id)
+            return False
+        return True
+
+    def _mail_order_limit_close(self, newly_failed):
+        """Güvenlik eki (A3-G3): sınır doluysa faturanın açık mail order oturumunu Odoo'da kapatır.
+
+        Bu kayıt 'Gönderildi' ve token'lıysa: token silinir, ``expires_at`` şimdi olur, not düşer;
+        ``sent_at`` korunur (K-15 ve link beklemesi sürer). Aynı faturanın diğer açık kaydı NOWAIT ile
+        kilitlenebilirse bayraklanır ve kendi senkronunda aynı kuralla kapanır; kilitliyse tutan işlem
+        fatura kilidini bizden sonra alır ve kendini kapatır. Paratika çağrısı ve commit yoktur.
+        NEDEN durum değişmez: karar normal senkrondadır (süresi dolmuş + ödeme/bekleyen yok -> expired,
+        Kapat ile aynı fail-closed kural). Burada expired yazmak aynı MPID'nin meşru onayını (FA->AP,
+        KK-3.7) REVIEW_LATE'e düşürürdü; aynı MPID'de ikinci başarılı satış olamaz (K-15).
+        DIKKAT: Paratika oturumu Odoo'dan sonlandırılamaz (iptal API'si yok, K-15). Önceden açılmış bir
+        sekme, token Paratika'da hâlâ geçerliyse doğrudan Paratika'ya POST edebilir; bu kapatma yalnız
+        Odoo tarafını kapatır (bilinen sınırlama, G0-Q4 ölçümü kuyrukta).
+        DIKKAT: fatura kilidini tutan işlem hiçbir satır kilidini BEKLEMEZ (yalnız NOWAIT); aksi halde
+        satırı tutup fatura kilidini bekleyen senkronla kilitlenme (deadlock) olur.
+        """
+        self.ensure_one()
+        rec = self.sudo()
+        if not rec.invoice_no or (rec.state != 'sent' and not newly_failed):
+            return
+        if not rec._mail_order_invoice_lock():
+            return  # kart sayfası GET'i sınırı yine uygular; sonraki senkron yeniden dener
+        count = self._mail_order_failed_count(rec.invoice_no)
+        if count < MO_FAIL_LIMIT:
+            return
+        if rec.state == 'sent' and rec.provider_token:
+            # NEDEN: bir saniye geri (Kapat ile aynı): süre kontrolü now > expires_at; aynı saniyede
+            # gelen senkron kaydı hâlâ süresi dolmamış sayardı.
+            rec.write({'provider_token': False, 'expires_at': fields.Datetime.now() - timedelta(seconds=1)})
+            rec._post_note(MO_LIMIT_CLOSED_NOTE % count)
+        others = rec.search([('invoice_no', '=', rec.invoice_no), ('payment_method', '=', 'mail_order'),
+                             ('state', '=', 'sent'), ('provider_token', '!=', False), ('id', '!=', rec.id)])
+        for other in others:
+            if other._lock_for_provider_call():
+                other._request_sync()
 
     @api.model
     def _mail_order_failed_count(self, invoice_no):
