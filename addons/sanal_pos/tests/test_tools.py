@@ -287,3 +287,146 @@ class TestStaticFileVersion(TransactionCase):
         t = _tools()
         self.assertRegex(t.mail_order_css_url(),
                          r'^/sanal_pos/static/src/css/mail_order\.css\?v=[0-9a-f]{12}$')
+
+
+# ======================================================================================
+# Mail Order kart sayfası Aşama 1: hash'li betik (tek kaynak) ve taksit kartı alanları
+# ======================================================================================
+_STAMPS = iter(range(1, 10 ** 6))
+
+
+@tagged('post_install', '-at_install', 'sanal_pos')
+class TestMailOrderScript(TransactionCase):
+    """``tools.mail_order_script()`` -> ``(metin, sha256_base64)`` (02-tasarim §3.1, NFR-1.2)."""
+
+    def _script(self, content):
+        """Geçici dosya içeriğiyle ``mail_order_script()`` döndürür (content=None: dosya yok)."""
+        import os
+        import tempfile
+        import time
+        from unittest.mock import patch
+        t = _tools()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'mail_order_card.js')
+            if content is not None:
+                with open(path, 'wb') as handle:
+                    handle.write(content)
+                stamp = time.time_ns() + next(_STAMPS) * 10 ** 9       # önbellek anahtarı benzersiz
+                os.utime(path, ns=(stamp, stamp))
+            with patch.object(t, 'MAIL_ORDER_JS_FILE', path):
+                return t.mail_order_script()
+
+    @staticmethod
+    def _digest(text):
+        import base64
+        import hashlib
+        return base64.b64encode(hashlib.sha256(text.encode('utf-8')).digest()).decode('ascii')
+
+    def test_gercek_dosya_sabitleri_ve_donus_bicimi(self):
+        t = _tools()
+        self.assertEqual(t.MAIL_ORDER_JS_PATH, '/sanal_pos/static/src/js/mail_order_card.js')
+        self.assertTrue(t.MAIL_ORDER_JS_FILE.replace('\\', '/').endswith(
+            'sanal_pos/static/src/js/mail_order_card.js'))
+        text, digest = t.mail_order_script()
+        self.assertIsInstance(text, str)
+        self.assertTrue(text.strip())
+        self.assertRegex(digest, r'^[A-Za-z0-9+/]{43}=$')
+        self.assertEqual(digest, self._digest(text))
+        self.assertNotIn('\r', text)
+        self.assertFalse(text.startswith('﻿'))
+
+    def test_lf_crlf_cr_ve_bom_ayni_metin_ayni_hash(self):
+        source = 'var a = 1;\n// ç ğ ş ı İ\nvar b = 2;\n'
+        variants = {
+            'lf': source.encode('utf-8'),
+            'crlf': source.replace('\n', '\r\n').encode('utf-8'),
+            'cr': source.replace('\n', '\r').encode('utf-8'),
+            'bom_lf': b'\xef\xbb\xbf' + source.encode('utf-8'),
+            'bom_crlf': b'\xef\xbb\xbf' + source.replace('\n', '\r\n').encode('utf-8'),
+        }
+        for name, content in variants.items():
+            with self.subTest(varyant=name):
+                text, digest = self._script(content)
+                self.assertEqual(text, source)
+                self.assertEqual(digest, self._digest(source))
+
+    def test_farkli_icerik_farkli_hash(self):
+        _, first = self._script(b'var a = 1;\n')
+        _, second = self._script(b'var a = 2;\n')
+        self.assertNotEqual(first, second)
+
+    def test_script_blogunu_bozan_icerik_reddedilir_value_error(self):
+        for content in (b'var s = "</script>";', b'var s = "</SCRIPT>";', b'x = "</ScRiPt >";',
+                        b'x = "</script", 1;', b'var c = "<!--";', b'/* <!-- */'):
+            with self.subTest(icerik=content):
+                with self.assertRaises(ValueError):
+                    self._script(content)
+
+    def test_zararsiz_kucuktur_isareti_reddedilmez(self):
+        text, _ = self._script(b'if (a < b && c <= d) { x = "<b"; }\n')
+        self.assertIn('a < b', text)
+
+    def test_dosya_yoksa_os_error(self):
+        with self.assertRaises(OSError):
+            self._script(None)
+
+    def test_icerik_degisince_onbellek_yenilenir(self):
+        import os
+        import tempfile
+        from unittest.mock import patch
+        t = _tools()
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'mail_order_card.js')
+            with open(path, 'w') as handle:
+                handle.write('var one = 1;\n')
+            os.utime(path, ns=(5 * 10 ** 18, 5 * 10 ** 18))
+            with patch.object(t, 'MAIL_ORDER_JS_FILE', path):
+                first = t.mail_order_script()
+                self.assertEqual(t.mail_order_script(), first)         # aynı dosya, aynı sonuç
+                with open(path, 'w') as handle:
+                    handle.write('var two = 2;\n')
+                os.utime(path, ns=(6 * 10 ** 18, 6 * 10 ** 18))
+                second = t.mail_order_script()
+        self.assertEqual(second[0], 'var two = 2;\n')
+        self.assertNotEqual(first[1], second[1])
+
+
+@tagged('post_install', '-at_install', 'sanal_pos')
+class TestInstallmentTableStage1(TransactionCase):
+    """Taksit kartı için ``label`` ve ``surcharge_text`` (KK-1.3/1.4); mevcut anahtarlar kalır."""
+
+    def test_kk_1_4_ornek_1450_tl_oran_13_57_uc_taksit(self):
+        t = _tools()
+        self.assertEqual(t.installment_totals(1450, 13.57, 3), (Decimal('1646.77'), Decimal('548.92')))
+        rows = t.installment_table(1450, [{'count': 3, 'networks': ['AXESS'], 'rate': 13.57}])['rows']
+        self.assertEqual([r['count'] for r in rows], [1, 3])
+        self.assertEqual(rows[1]['label'], '3 taksit')
+        self.assertEqual(rows[1]['total_text'], '1.646,77 TL')
+        self.assertEqual(rows[1]['monthly_text'], '548,92 TL')
+        self.assertEqual(rows[1]['rate_text'], '%13,57')
+        self.assertEqual(rows[1]['surcharge_text'], '196,77 TL')
+
+    def test_tek_cekim_etiketi_ve_vade_farki_yok(self):
+        rows = _tools().installment_table(1450, [])['rows']
+        self.assertEqual(rows[0]['label'], 'Tek çekim')
+        self.assertEqual(rows[0]['surcharge_text'], '')
+
+    def test_oran_sifirsa_vade_farki_tutari_bos(self):
+        rows = _tools().installment_table(1000, [{'count': 2, 'networks': [], 'rate': 0},
+                                                 {'count': 3, 'networks': [], 'rate': 1.5}])['rows']
+        self.assertEqual([r['label'] for r in rows], ['Tek çekim', '2 taksit', '3 taksit'])
+        self.assertEqual([r['surcharge_text'] for r in rows], ['', '', '15,00 TL'])
+
+    def test_vade_farki_toplam_eksi_tutar_kurus_yuvarlamasi(self):
+        rows = _tools().installment_table('100.05', [{'count': 2, 'networks': [], 'rate': 1}])['rows']
+        self.assertEqual(rows[1]['total_text'], '101,05 TL')
+        self.assertEqual(rows[1]['surcharge_text'], '1,00 TL')
+
+    def test_mevcut_anahtarlar_korunur(self):
+        table = _tools().installment_table(1000, [{'count': 3, 'networks': ['PARAF'], 'rate': 1.5}])
+        self.assertEqual(sorted(table), ['common_networks', 'per_row', 'rows'])
+        for key in ('count', 'networks', 'rate_text', 'total_text', 'monthly_text', 'select_text',
+                    'label', 'surcharge_text'):
+            self.assertIn(key, table['rows'][1], key)
+        # A1'de select_text KALDIRILMAZ: redeploy ile -u arasında eski şablon onu okur (02-tasarim §3.4)
+        self.assertEqual(table['rows'][1]['select_text'], '3 taksit — toplam 1.015,00 TL')
