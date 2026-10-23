@@ -131,7 +131,7 @@
                                         <span t-out="expires_hm"/> · <span id="mo-remaining" t-att-data-seconds="remaining_seconds" t-out="remaining_text"/>
                                     </dd>
                                 </dl>
-                                <p class="mo-alert mo-alert-danger" id="mo-expired" role="alert" hidden="hidden">Oturum süresi doldu; yeni bir mail order oluşturun.</p>
+                                <p class="mo-alert mo-alert-danger" id="mo-expired" role="alert" hidden="hidden">Oturum süresi doldu; kayda dönüp yeni deneme açın.</p>
                                 <div class="mo-alert mo-alert-warning" role="note">
                                     <p class="mo-alert-title">
                                         <svg class="mo-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true">
@@ -161,7 +161,9 @@
                             </div>
                             <div class="mo-card-body">
                                 <!-- Form doğrudan Paratika'ya gider; Odoo bu alanları hiçbir yolla almaz (K-13). -->
-                                <form id="mo-form" class="mo-form" method="post" t-att-action="form_action" autocomplete="off">
+                                <!-- data-now-ym: SKT "bu ay" sınırı (İstanbul, sunucu saati); script istemci saatini kullanmaz. -->
+                                <form id="mo-form" class="mo-form" method="post" t-att-action="form_action" autocomplete="off"
+                                      t-att-data-now-ym="now_ym">
                                     <div class="mo-field">
                                         <label for="cardOwner">Kart sahibinin adı</label>
                                         <input id="cardOwner" name="cardOwner" class="mo-input" type="text" maxlength="32"
@@ -255,6 +257,8 @@
                                            t-out="'Taksit yapılabilen kartlar: %s' % ', '.join(installment_table['common_networks'])"/>
                                         <p class="mo-hint">Kartın desteklemediği taksit banka tarafından reddedilir. Vade farkı çekim tutarına eklenir; kesin tutar banka sayfasında görünür.</p>
                                     </fieldset>
+                                    <!-- Script gönderimde beklenmedik hata alırsa (fail-closed, gönderim yok) burada uyarır. -->
+                                    <p id="mo-form-error" class="mo-error" role="alert" hidden="hidden"/>
                                     <div class="mo-actions">
                                         <button type="submit" id="mo-pay" class="mo-btn mo-btn-primary">
                                             <svg class="mo-icon" width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round" focusable="false" aria-hidden="true">

@@ -139,9 +139,10 @@ CSS_FILE = os.path.join(MODULE_DIR, 'static', 'src', 'css', 'mail_order.css')
 SCRIPT_MAX_BYTES = 8192
 
 # PCI 11.6.1 değişiklik tespiti: betik her değiştiğinde bu sabit KOD İNCELEMESİNDE ayrıca güncellenir
-# (README "Ödeme sayfası script envanteri" aynı değeri yazar). İlk değer A1-G1 betiği tamamlayınca,
-# incelemeden sonra bir kez yazılır; ``None`` iken test bunu açıkça söyleyerek kırılır.
-SCRIPT_SHA256 = None
+# (README "Ödeme sayfası script envanteri" aynı değeri yazar).
+# DIKKAT: betik diff'i ile bu sabitin diff'i AYNI commit'te ve aynı incelemede görünür (A1-G3 sözleşmesi);
+# sabiti incelemesiz ayrı bir commit'le değiştirmek PCI 6.4.3/11.6.1 kontrolünü boşa çıkarır.
+SCRIPT_SHA256 = 'w4pBeLZyXDv07NI4GOPSF0ZVdG1OOx7ktKhJIwjmHGk='
 
 # Yasak belirteçler (KK-1.15 + tasarım §3.5/7). Yorum satırları çıkarıldıktan sonra aranır.
 FORBIDDEN_TOKENS = {

@@ -560,6 +560,21 @@ class TestCardPageMarkup(CardPageCase):
         self.assertIn('Oturum süresi doldu', norm(expired[0].text_content()))
         self.assertRegex(self.text_of(response), r'Son geçerlilik \d{2}:\d{2} · 4[23] dk kaldı')
 
+    def test_a1_g3_betik_baglama_noktalari_now_ym_genel_hata_satiri(self):
+        """Betik bunlardan biri eksikse kurulmaz (script'siz mod); sessiz gerilemeyi burada yakala."""
+        doc = self.doc(self.page(self.make_mail_order()))
+        istanbul_now = datetime.now(pytz.timezone('Europe/Istanbul'))
+        form = doc.xpath('//form[@id="mo-form"]')[0]
+        self.assertEqual(form.get('data-now-ym'), istanbul_now.strftime('%Y-%m'))
+        years = doc.xpath('//select[@id="expiryYear"]/option[@value!=""]/@value')
+        self.assertEqual(years[0], str(istanbul_now.year), 'yıl listesi ve now-ym aynı andan')
+        error = form.xpath('.//*[@id="mo-form-error"]')
+        self.assertEqual(len(error), 1)
+        self.assertIsNotNone(error[0].get('hidden'))
+        self.assertEqual((error[0].get('role'), error[0].get('class')), ('alert', 'mo-error'))
+        expired = doc.xpath('//*[@id="mo-expired"]')[0]
+        self.assertIn('kayda dönüp yeni deneme açın', norm(expired.text_content()))     # KK-1.12
+
     # ---- KK-1.11 özet kartı + maskeleme
     def test_kk_1_11_ozet_kartinda_maskeli_telefon_eposta_aciklama_olusturan(self):
         payment = self.make_mail_order(customer_phone='5321112233', customer_email=EMAIL)

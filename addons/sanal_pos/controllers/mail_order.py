@@ -22,7 +22,7 @@ from odoo import http
 from odoo.exceptions import AccessError, MissingError, UserError
 from odoo.http import request
 
-from ..models.provider_paratika import DIRECT_POST_HOSTS
+from ..models.provider_paratika import _ISTANBUL, DIRECT_POST_HOSTS
 from ..tools import installment_table, mail_order_css_url, mail_order_script
 from .main import MO_RESULT_PATH, MPID_RE, PAYMENT_LIST_PATH
 
@@ -111,7 +111,10 @@ class SanalPosMailOrderController(http.Controller):
             _logger.error('sanal_pos: kart sayfası adresi geçersiz, ödeme id=%s', payment_id)
             return self._error_page('Ödeme adresi yapılandırması geçersiz; yöneticinize başvurun.',
                                     status=500, payment_id=payment_id)
-        this_year = datetime.now().year
+        # NEDEN: script SKT'nin "bu ay" sınırını istemci saatinden değil buradan alır (data-now-ym);
+        # yıl listesi de aynı (İstanbul) andan türer, ikisi ay/yıl geçişinde çelişmesin.
+        now = datetime.now(_ISTANBUL)
+        this_year = now.year
         # NEDEN: biçimleme/hesap burada (tools); şablon ifadesindeki '%%' kaçışı görünüm kaydında korunmadı
         values['installment_table'] = installment_table(
             values.get('amount'), values.get('installments'))
@@ -120,6 +123,7 @@ class SanalPosMailOrderController(http.Controller):
             'nav': self._nav_values(),
             'expiry_months': ['%02d' % m for m in range(1, 13)],
             'expiry_years': [str(y) for y in range(this_year, this_year + EXPIRY_YEAR_SPAN + 1)],
+            'now_ym': '%04d-%02d' % (now.year, now.month),
         })
         try:
             with request.env.cr.savepoint():
