@@ -80,7 +80,8 @@ class BinHttpCase(MoHttpCase):
         return self.env['sanal.pos.log'].sudo().search([('action', '=', 'QUERYBIN')])
 
     def credit_card(self, rates=((2, 0), (3, 1.5), (6, 3.0)), **kw):
-        self.mock.default('QUERYBIN', lambda p: querybin_body('CREDIT', 'AKBANK', 'AXESS', 'VISA', 'TUR', **kw))
+        kw.setdefault('country', 'TUR')
+        self.mock.default('QUERYBIN', lambda p: querybin_body('CREDIT', 'AKBANK', 'AXESS', 'VISA', **kw))
         self.mock.default('QUERYPAYMENTSYSTEMS', lambda p: paymentsystems_body(list(rates)))
 
 
@@ -1047,8 +1048,12 @@ class TestConnectSrc(CardPageCase):
         for host in bad_hosts:
             with self.subTest(host=host):
                 response = self.proxied(host)
-                if response.status_code == 400:
-                    continue          # sunucu katmanı reddederse de güvenli (connect-src üretilmez)
+                if response.status_code in (400, 500):
+                    # Odoo çekirdeği (http.py) bozuk Host'u addon'a girmeden 400/500 ile reddeder: güvenli yön,
+                    # sayfa/CSP/betik hiç sunulmaz (connect-src'de host yok, enjeksiyon yok).
+                    self.assertNotIn('connect-src', response.headers.get('Content-Security-Policy', ''))
+                    self.assertNotIn('evil', response.headers.get('Content-Security-Policy', ''))
+                    continue
                 self.assertNoConnect(response)
                 policy = self.csp(response)
                 self.assertEqual(policy.get('script-src', [''])[0][:8], "'sha256-", 'script-src enjekte edilmedi')

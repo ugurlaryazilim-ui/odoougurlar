@@ -290,11 +290,11 @@ class TestCardPageScriptCsp(CardPageCase):
         """D-1/Ö-2: anahtar get_bool_param ile okunur; elle yazılan 'false'/'0' de kapatır."""
         params = self.env['ir.config_parameter'].sudo()
         # D-4 (A2): izin listesi dışındaki HER değer kapatır (yazım hatası, boş, boşluk dahil)
-        for value in ('false', '0', 'FALSE', ' False', 'no', 'off', 'hayır', 'kapalı', '', '   ',
-                      'tru', 'acik', '2'):
+        for index, value in enumerate(('false', '0', 'FALSE', ' False', 'no', 'off', 'hayır', 'kapalı', '', '   ',
+                                       'tru', 'acik', '2')):
             with self.subTest(deger=value):
                 params.set_param(SCRIPT_ICP, value)
-                response = self.page(self.make_mail_order(invoice_no='OFF-%s' % value.strip()))
+                response = self.page(self.make_mail_order(invoice_no='OFF-%02d' % index))   # benzersiz fatura no
                 self.assertEqual(response.status_code, 200)
                 self.assertNotIn('<script', self.body(response).lower())
                 self.assertNotIn('script-src', self.csp(response))
@@ -304,10 +304,10 @@ class TestCardPageScriptCsp(CardPageCase):
 
     def test_kapatma_anahtari_acikken_script_var_yalniz_izin_listesi(self):
         params = self.env['ir.config_parameter'].sudo()
-        for value in ('True', '1', 'evet', 'yes', ' TRUE ', 'Evet'):
+        for index, value in enumerate(('True', '1', 'evet', 'yes', ' TRUE ', 'Evet')):
             with self.subTest(deger=value):
                 params.set_param(SCRIPT_ICP, value)
-                response = self.page(self.make_mail_order(invoice_no='ON-%s' % value.strip()))
+                response = self.page(self.make_mail_order(invoice_no='ON-%02d' % index))
                 self.assertEqual(self.body(response).lower().count('<script'), 1)
                 self.assertIn('script-src', self.csp(response))
                 self.assertIn('connect-src', self.csp(response))
