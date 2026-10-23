@@ -272,7 +272,9 @@ class TestBinNotStored(BinCase):
         self.assertIn('BIN', rows.request_body, 'parametre adı kayıtta var, değeri yok')
         self.assertIn('***', rows.request_body)
         self.assertTrue(rows.success)
-        self.assertEqual(rows.payment_id, payment)
+        # Ö-3/KK-2.8: satır ödemeye FK ile bağlanmaz; ödeme yalnız request_body işaretiyle izlenir
+        self.assertFalse(rows.payment_id, 'BIN log satırı payment_id=False yazılır (FK/FOR KEY SHARE yok)')
+        self.assertTrue(rows.request_body.endswith('"_payment_id": %d}' % payment.id), rows.request_body)
 
     def test_querybin_yanitindaki_bin_yankisi_ve_kart_adi_maskelenir(self):
         self._run_both()
@@ -348,7 +350,11 @@ class TestLogFkNowait(BinCase):
         payment = self.make_mail_order()
         self.queue_bin(querybin_body())
         self.provider().query_bin(payment, LEAK_BIN)
-        self.assertEqual(self.logs('QUERYBIN').payment_id, payment)
+        row = self.logs('QUERYBIN')
+        self.assertEqual(len(row), 1)
+        self.assertFalse(row.payment_id, 'kilit olsun olmasın satır ödemeye FK ile bağlanmaz (KK-2.8)')
+        self.assertTrue(row.request_body.endswith('"_payment_id": %d}' % payment.id), row.request_body)
+        self.assertNotIn(LEAK_BIN, (row.request_body or '') + (row.response_body or ''))
 
     def test_lock_timeout_savepoint_icinde_set_local_ve_eski_deger_geri_gelir(self):
         """``SET LOCAL lock_timeout`` yalnız savepoint içindedir; çağrıdan sonra oturum değeri bozulmaz."""
@@ -487,6 +493,10 @@ class TestBinLookupModel(BinCase):
                     self.queue_systems(qps)
                 res = self.lookup(payment)
                 self.assertEqual(res['status'], status)
+                if status == 200:
+                    self.assertIs(res['installments'], installments, 'installments bayrağı kural tablosuna uyar')
+                else:
+                    self.assertNotIn('installments', res)
                 expected_calls = 2 if qps is not None else 1
                 self.assertEqual(len(self.mock.calls) - before, expected_calls, self.mock.actions[before:])
 

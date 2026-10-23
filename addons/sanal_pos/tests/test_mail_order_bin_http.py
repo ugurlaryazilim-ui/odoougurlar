@@ -472,8 +472,18 @@ class TestBinEndpointValidation(BinHttpCase):
                 self.assertBad(self.post_bin(self.pid, value))
         self.assertNoParatikaCalls()
 
+    def test_diners_oneki_300_305_36_38_39_reddedilir(self):
+        """R6: 14-15 haneli ağlar (Amex ve Diners) için BIN sorgusu yapılmaz, uç 400."""
+        for value in ('30000000', '30012345', '30299999', '30500000', '30599999',
+                      '36000000', '36123456', '38000000', '38999999', '39000000', '39999999'):
+            with self.subTest(bin=value):
+                self.assertBad(self.post_bin(self.pid, value))
+        self.assertNoParatikaCalls()
+        self.assertFalse(self.qbin_logs(), 'reddedilen önek kayıt bırakmaz')
+
     def test_amex_disi_oneks_kabul_edilir(self):
-        for index, value in enumerate(('35000000', '33000000', '36000000', '30000000', '00000000', '99999999')):
+        # 306/307 Diners aralığı (300-305) dışında; 35 JCB; 33 ve 00/99 genel önekler
+        for index, value in enumerate(('35000000', '33000000', '30600000', '30999999', '00000000', '99999999')):
             with self.subTest(bin=value):
                 response = self.post_bin(self.pid, value)
                 self.assertEqual(response.status_code, 200, response.text)
@@ -774,7 +784,8 @@ class TestBinEndpointNoSideEffects(BinHttpCase):
         self.assertEqual(self.lookup(payment).status_code, 200)
         rows = self.qbin_logs()
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows.payment_id, payment)
+        self.assertFalse(rows.payment_id, 'Ö-3/KK-2.8: satır ödemeye FK ile bağlanmaz')
+        self.assertTrue((rows.request_body or '').endswith('"_payment_id": %d}' % payment.id), rows.request_body)
         self.assertEqual(rows.create_uid, self.user_sp, 'kullanıcı sayacı create_uid ile tutulur')
         self.assertNotIn(LEAK_BIN, (rows.request_body or '') + (rows.response_body or ''))
 
@@ -876,12 +887,16 @@ class TestBinEndpointLock(BinHttpCase):
         return responses, time.monotonic() - started
 
     def test_satir_kilitsizken_uc_gorur_ve_log_payment_a_baglanir(self):
-        """Olumlu çapa: kilit yokken uç satırı görür (200) ve QUERYBIN günlüğü ödeme kaydına bağlanır."""
+        """Olumlu çapa: kilit yokken uç satırı görür (200); QUERYBIN günlüğü ödemeye FK ile bağlanmaz
+        (payment_id boş), ödeme yalnız ``_payment_id`` işaretiyle izlenir; BIN kayıtta yok."""
         responses, _elapsed = self.lookup_locked()
         self.assertEqual(responses[0].status_code, 200, responses[0].text)
         rows = self.qbin_logs()
         self.assertEqual(len(rows), 1)
-        self.assertEqual(rows.payment_id.id, self.lock_payment_id)
+        self.assertFalse(rows.payment_id)
+        self.assertTrue((rows.request_body or '').endswith('"_payment_id": %d}' % self.lock_payment_id),
+                        rows.request_body)
+        self.assertNotIn(LEAK_BIN, (rows.request_body or '') + (rows.response_body or ''))
 
     def test_baska_islem_odeme_satirini_for_update_tutarken_uc_bloklanmaz(self):
         holder = self.hold_lock()
