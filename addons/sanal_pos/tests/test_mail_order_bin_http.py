@@ -19,7 +19,6 @@ from urllib.parse import urlsplit
 
 import psycopg2
 from lxml import html as lxml_html
-from psycopg2.extras import Json
 
 from odoo import fields
 from odoo.exceptions import AccessError
@@ -789,92 +788,137 @@ class TestBinEndpointNoSideEffects(BinHttpCase):
 # ======================================================================================
 @tagged('post_install', '-at_install', 'sanal_pos')
 class TestBinEndpointLock(BinHttpCase):
+    """Başka bir işlem ödeme satırını ``FOR UPDATE`` ile tutarken BIN ucu beklemez.
+
+    HttpCase sınıf imlecinin işlemi REPEATABLE READ'dir ve HTTP isteği aynı işlemi kullanır: başka bağlantıda
+    SONRADAN commit edilen satır uçta görünmez (404). Bu yüzden kilitlenecek satır, test imleci açılmadan
+    ÖNCE (``setUpClass`` içinde ``super()`` çağrısından önce) ayrı bir bağlantıda commit edilir; böylece hem uç
+    hem kilidi tutan ikinci bağlantı aynı satırı görür. Kullanıcı: commit'li yönetici (id 2); grup ve parola
+    test işleminde verilir.
+    """
+    LOCK_REF = 'LOCKREAL-A2'
+
+    @classmethod
+    def _real_cursor(cls):
+        from odoo import sql_db
+        from odoo.tests.common import get_db_name
+        return sql_db.db_connect(get_db_name()).cursor()
+
+    @classmethod
+    def _purge_lock_rows(cls):
+        cr = cls._real_cursor()
+        try:
+            cr.execute("SET lock_timeout = '5s'")
+            cr.execute("DELETE FROM sanal_pos_log WHERE payment_id IN "
+                       "(SELECT id FROM sanal_pos_payment WHERE invoice_no = %s)", [cls.LOCK_REF])
+            cr.execute('DELETE FROM sanal_pos_payment WHERE invoice_no = %s', [cls.LOCK_REF])
+            cr.commit()
+        finally:
+            cr.close()
+
+    @classmethod
+    def setUpClass(cls):
+        from odoo import SUPERUSER_ID, api
+        cls._purge_lock_rows()                       # önceki yarım kalmış koşudan artık varsa
+        cr = cls._real_cursor()
+        try:
+            env = api.Environment(cr, SUPERUSER_ID, {})
+            now = fields.Datetime.now()
+            payment = env['sanal.pos.payment'].create({
+                'provider': 'paratika', 'environment': 'test', 'invoice_source': 'nebim',
+                'invoice_no': cls.LOCK_REF, 'invoice_ref': '0A1B2C3D-0000-4000-8000-0000000000A2',
+                'customer_code': 'M-555', 'customer_name': 'Kilit Testi', 'customer_phone': '5321112233',
+                'customer_email': 'kilit@example.com', 'amount': 9000.0,
+                'currency_id': env.ref('base.TRY').id, 'channel_sms': False, 'channel_email': False,
+                'expiry_hours': 1, 'state': 'sent', 'attempt_no': 1, 'merchant_payment_id': cls.LOCK_REF + '-1',
+                'provider_token': 'MOT-LOCK-A2', 'sent_at': now, 'expires_at': now + timedelta(minutes=55),
+                'user_id': 2, 'payment_method': 'mail_order',
+            })
+            cr.execute('UPDATE sanal_pos_payment SET create_uid = 2 WHERE id = %s', [payment.id])
+            cls.lock_payment_id = payment.id
+            cr.commit()
+        finally:
+            cr.close()
+        try:
+            super().setUpClass()
+        except BaseException:
+            cls._purge_lock_rows()
+            raise
+        cls.addClassCleanup(cls._purge_lock_rows)
+
+    def setUp(self):
+        super().setUp()
+        self.admin = self.env.ref('base.user_admin')
+        self.admin.write({'group_ids': [(4, self.env.ref('sanal_pos.group_sanal_pos_user').id)]})
+        self.mock.default('QUERYBIN', lambda p: querybin_body('DEBIT'))
+        self.assertTrue(self.env['sanal.pos.payment'].sudo().browse(self.lock_payment_id).exists(),
+                        'commit li satır test işleminde görünür (setUpClass içinde, imleçten önce)')
 
     def real_connection(self):
         from odoo import sql_db
-        _name, info = sql_db.connection_info_for(self.env.cr.dbname)
+        from odoo.tests.common import get_db_name
+        _name, info = sql_db.connection_info_for(get_db_name())
         conn = psycopg2.connect(info['dsn']) if 'dsn' in info else psycopg2.connect(**info)
         conn.autocommit = False
         return conn
 
-    def committed_copy(self, template):
-        """Test işleminin görmediği BAĞIMSIZ bir bağlantıda COMMIT'li ödeme satırı (başka işlem kilitleyebilsin).
+    def hold_lock(self):
+        holder = self.real_connection()
+        cur = holder.cursor()
+        cur.execute('SELECT id FROM sanal_pos_payment WHERE id = %s FOR UPDATE', [self.lock_payment_id])
+        self.assertEqual(cur.fetchone()[0], self.lock_payment_id, 'kilitlenecek satır ikinci bağlantıda görünür')
+        return holder
 
-        Satır, test işleminde üretilen şablonun kopyasıdır; yalnız kullanıcı/benzersiz alanlar değişir
-        (test kullanıcıları commit'li değildir).
-        """
-        cr = self.env.cr
-        cr.execute('SELECT * FROM sanal_pos_payment WHERE id = %s', [template.id])
-        columns = [d[0] for d in cr.description]
-        values = dict(zip(columns, cr.fetchone()))
-        conn = self.real_connection()
-        cur = conn.cursor()
-        cur.execute("SELECT id FROM res_users WHERE login = '__system__' OR id = 1 ORDER BY id LIMIT 1")
-        system_id = cur.fetchone()[0]
-        values.pop('id')
-        for key in ('create_uid', 'write_uid', 'user_id'):
-            if key in values:
-                values[key] = system_id
-        values['merchant_payment_id'] = 'LOCKREAL-%d' % int(time.time() * 1000)
-        values['invoice_no'] = values['merchant_payment_id']
-        names = list(values)
-        cur.execute('INSERT INTO sanal_pos_payment (%s) VALUES (%s) RETURNING id' % (
-            ', '.join('"%s"' % n for n in names), ', '.join(['%s'] * len(names))),
-            [Json(v) if isinstance(v, (dict, list)) else v for v in values.values()])
-        new_id = cur.fetchone()[0]
-        conn.commit()
-        conn.close()
+    def lookup_locked(self, times=1):
+        started = time.monotonic()
+        responses = [self.post_bin(self.lock_payment_id, user=self.admin, timeout=10) for _ in range(times)]
+        return responses, time.monotonic() - started
 
-        def cleanup():
-            conn2 = self.real_connection()
-            try:
-                cur2 = conn2.cursor()
-                cur2.execute("SET lock_timeout = '3s'")
-                cur2.execute('DELETE FROM sanal_pos_log WHERE payment_id = %s', [new_id])
-                cur2.execute('DELETE FROM sanal_pos_payment WHERE id = %s', [new_id])
-                conn2.commit()
-            except psycopg2.Error:                  # pragma: no cover - temizlik elinden geleni yapar
-                conn2.rollback()
-            finally:
-                conn2.close()
-        self.addCleanup(cleanup)
-        return new_id
+    def test_satir_kilitsizken_uc_gorur_ve_log_payment_a_baglanir(self):
+        """Olumlu çapa: kilit yokken uç satırı görür (200) ve QUERYBIN günlüğü ödeme kaydına bağlanır."""
+        responses, _elapsed = self.lookup_locked()
+        self.assertEqual(responses[0].status_code, 200, responses[0].text)
+        rows = self.qbin_logs()
+        self.assertEqual(len(rows), 1)
+        self.assertEqual(rows.payment_id.id, self.lock_payment_id)
 
     def test_baska_islem_odeme_satirini_for_update_tutarken_uc_bloklanmaz(self):
-        template = self.make_mail_order(invoice_no='LOCK-T', merchant_payment_id='LOCK-T-1')
-        pid = self.committed_copy(template)
-        self.mock.default('QUERYBIN', lambda p: querybin_body('DEBIT'))
-        holder = self.real_connection()
+        holder = self.hold_lock()
         try:
-            cur = holder.cursor()
-            cur.execute('SELECT id FROM sanal_pos_payment WHERE id = %s FOR UPDATE', [pid])
-            started = time.monotonic()
-            response = self.post_bin(pid, timeout=10)
-            elapsed = time.monotonic() - started
+            responses, elapsed = self.lookup_locked()
         finally:
             holder.rollback()
             holder.close()
+        response = responses[0]
         self.assertEqual(response.status_code, 200, response.text)
-        self.assertLess(elapsed, 4.0, 'uç kilit nedeniyle beklemez (lock_timeout=1s + yeniden yazım): %.1f sn' % elapsed)
+        self.assertLess(elapsed, 4.0, 'uç kilit nedeniyle beklemez: %.1f sn' % elapsed)
         rows = self.qbin_logs()
         self.assertEqual(len(rows), 1)
-        self.assertFalse(rows.payment_id, 'kilit alınamadı: günlük satırı payment_id=False ile yazılır (KK-2.8)')
-        self.assertEqual(rows.create_uid, self.user_sp)
+        self.assertFalse(rows.payment_id, 'kilit alınamadı: günlük satırı payment_id=False ile yazılır')
+        self.assertEqual(rows.create_uid, self.admin)
         self.assertNotIn(LEAK_BIN, (rows.request_body or '') + (rows.response_body or ''))
 
     def test_kilit_varken_hiz_siniri_sayaci_kullanici_uzerinden_calisir(self):
-        template = self.make_mail_order(invoice_no='LOCK-U', merchant_payment_id='LOCK-U-1')
-        pid = self.committed_copy(template)
-        self.mock.default('QUERYBIN', lambda p: querybin_body('DEBIT'))
-        holder = self.real_connection()
+        holder = self.hold_lock()
         try:
-            holder.cursor().execute('SELECT id FROM sanal_pos_payment WHERE id = %s FOR UPDATE', [pid])
-            statuses = [self.post_bin(pid, timeout=10).status_code for _ in range(2)]
+            responses, elapsed = self.lookup_locked(times=2)
         finally:
             holder.rollback()
             holder.close()
-        self.assertEqual(statuses, [200, 200])
+        self.assertEqual([r.status_code for r in responses], [200, 200])
+        self.assertLess(elapsed, 8.0)
         self.assertEqual(len(self.qbin_logs()), 2, 'payment_id\'siz satırlar kullanıcı sayacında görünür')
+
+    def test_kilit_varken_odeme_satiri_degismez(self):
+        holder = self.hold_lock()
+        try:
+            self.lookup_locked()
+        finally:
+            holder.rollback()
+            holder.close()
+        self.env.cr.execute('SELECT state, provider_token FROM sanal_pos_payment WHERE id = %s',
+                            [self.lock_payment_id])
+        self.assertEqual(self.env.cr.fetchone(), ('sent', 'MOT-LOCK-A2'))
 
 
 # ======================================================================================
