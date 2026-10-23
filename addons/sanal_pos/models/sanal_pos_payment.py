@@ -22,7 +22,7 @@ from odoo import api, fields, models
 from odoo.exceptions import AccessError, UserError, ValidationError
 from odoo.tools import float_compare
 
-from ..tools import format_rate, format_try, match_surcharge_rate
+from ..tools import format_rate, format_try, mask_email, mask_phone, match_surcharge_rate
 from .res_config_settings import get_bool_param
 
 _logger = logging.getLogger(__name__)
@@ -826,7 +826,37 @@ class SanalPosPayment(models.Model):
             'expires_local': rec._format_local(rec.expires_at),
             'is_test': rec.environment == 'test',
             'installments': installments,
+            # NEDEN (KK-1.11): özet kartı yalnız MASKELİ telefon/e-posta gösterir; tam değer bu
+            # sözlüğe hiç girmez (şablon yanlışlıkla basamasın).
+            'phone_masked': mask_phone(rec.customer_phone),
+            'email_masked': mask_email(rec.customer_email),
+            'description': 'Fatura %s tahsilatı · Ödeme no %s' % (rec.invoice_no, rec.merchant_payment_id),
+            'merchant_payment_id': rec.merchant_payment_id,
+            'creator_name': (rec.user_id or rec.create_uid).name or '',
+            # NEDEN: _format_local 'gg.aa.yyyy SS:DD' verir (İstanbul); özet yalnız saati gösterir.
+            'expires_hm': rec._format_local(rec.expires_at)[-5:],
+            **rec._mail_order_remaining(),
         }
+
+    def _mail_order_remaining(self):
+        """Son geçerlilik sayacı değerleri (KK-1.12): ``remaining_seconds`` (int >= 0) ve metin.
+
+        NEDEN: sunucu saatiyle hesaplanır; script istemci saatine değil bu saniyeyi (monotonic
+        farkıyla) kullanır (saat kayması). Script'siz modda metin açılış anındaki değerdir.
+        """
+        self.ensure_one()
+        seconds = 0
+        if self.expires_at:
+            seconds = max(0, int((self.expires_at - fields.Datetime.now()).total_seconds()))
+        minutes = -(-seconds // 60)     # yukarı yuvarla: 42 dk 30 sn -> "43 dk kaldı"
+        if not seconds:
+            text = 'Süre doldu'
+        elif minutes < 60:
+            text = '%d dk kaldı' % minutes
+        else:
+            hours, minutes = divmod(minutes, 60)
+            text = '%d sa %d dk kaldı' % (hours, minutes) if minutes else '%d sa kaldı' % hours
+        return {'remaining_seconds': seconds, 'remaining_text': text}
 
     def _mail_order_after_return(self):
         """Sonuç sayfası (3D dönüşü sonrası, oturumlu GET): durumu hemen sorgular. Raise etmez.

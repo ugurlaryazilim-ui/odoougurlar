@@ -4,6 +4,7 @@
 Telefon, metin, ASCII, e-posta, TL biçimi ve maskeleme. Sır maskeleme
 (KK-37 / NFR-4): loglara ve kullanıcı mesajlarına sır değeri yazılmaz.
 """
+import base64
 import hashlib
 import os
 import re
@@ -28,6 +29,16 @@ MAIL_ORDER_CSS_PATH = '/sanal_pos/static/src/css/mail_order.css'
 MAIL_ORDER_CSS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
                                    'static', 'src', 'css', 'mail_order.css')
 _VERSION_CACHE = {}
+
+# Kart sayfasının tek satır içi script'inin kaynağı (KARARLAR K-16). Dosya hiçbir assets paketine
+# girmez; yol yalnız README/envanter içindir, sunucu dosyayı diskten okur.
+MAIL_ORDER_JS_PATH = '/sanal_pos/static/src/js/mail_order_card.js'
+MAIL_ORDER_JS_FILE = os.path.join(os.path.dirname(os.path.abspath(__file__)),
+                                  'static', 'src', 'js', 'mail_order_card.js')
+_SCRIPT_CACHE = {}
+# NEDEN: bu iki dizi satır içi script bloğunu erken kapatır ya da HTML ayrıştırıcısını "script
+# data double escaped" durumuna sokar; hash ile korunan bloğun içinde bulunamaz.
+_SCRIPT_FORBIDDEN_RE = re.compile(r'</script|<!--', re.IGNORECASE)
 
 
 # ---------------------------------------------------------------- telefon
@@ -185,7 +196,7 @@ def installment_table(amount, options):
 
     ``options``: ``[{'count', 'networks', 'rate'}]`` (provider çıktısı). Dönüş:
     ``{'common_networks': [ad], 'per_row': bool, 'rows': [{'count', 'networks', 'rate_text', 'total_text',
-    'monthly_text', 'select_text'}]}``. Tüm satırlarda program listesi aynıysa
+    'monthly_text', 'select_text', 'label', 'surcharge_text'}]}``. Tüm satırlarda program listesi aynıysa
     ``common_networks`` dolu, satırlarda ``networks`` boş olur; farklıysa tersi.
     İlk satır tek çekimdir (vade farkı yok, toplam = tutar).
     """
@@ -193,15 +204,23 @@ def installment_table(amount, options):
     first = per_row[0] if per_row else []
     same = all(sorted(n) == sorted(first) for n in per_row)
     rows = [{'count': 1, 'networks': [], 'rate_text': 'Vade farkı yok',
+             'label': 'Tek çekim', 'surcharge_text': '',
              'total_text': format_try(Decimal(str(amount or 0))),
              'monthly_text': format_try(Decimal(str(amount or 0))),
+             # EKIP-BORC: select_text eski şablon için kalır (redeploy ile -u arasında eski şablon onu
+             # okur; kaldırılırsa kart sayfası 500 verir); A2-G3'te kaldırılır.
              'select_text': 'Tek çekim — %s' % format_try(Decimal(str(amount or 0)))}]
     for option, networks in zip(options or [], per_row):
         rate = Decimal(str(option.get('rate') or 0))
         total, monthly = installment_totals(amount, rate, option['count'])
         shown = [] if same else networks
+        # NEDEN: vade farkı tutarı tek hesap kaynağında (KK-1.3/1.4): toplam - tutar; oran 0 ya da
+        # tutar farkı yok ise boş (kart "Vade farkı yok" gösterir)
+        surcharge = total - Decimal(str(amount or 0))
         rows.append({
             'count': option['count'],
+            'label': '%s taksit' % option['count'],
+            'surcharge_text': format_try(surcharge) if rate and surcharge > 0 else '',
             'networks': shown,
             'rate_text': format_rate(rate) if rate else 'Vade farkı yok',
             'total_text': format_try(total),
@@ -342,3 +361,36 @@ def static_file_version(path):
 def mail_order_css_url():
     """Mail Order stil dosyasının sürümlü adresi (göreli, aynı köken: CSP style-src 'self')."""
     return '%s?v=%s' % (MAIL_ORDER_CSS_PATH, static_file_version(MAIL_ORDER_CSS_FILE))
+
+
+def mail_order_script():
+    """Kart sayfasının tek satır içi script'i: ``(metin, sha256_base64)`` (02-tasarim §3.1).
+
+    Hem sayfaya basılan metin hem CSP ``script-src`` değeri BU çıktıdan türer; elle yazılmış hash
+    yoktur (NFR-1.2). Dosya okunamazsa ``OSError``, içerik script bloğunu bozacaksa ``ValueError``
+    (UTF-8 çözülemezse de ``ValueError`` alt sınıfı); çağıran script'siz sunar (fail-closed).
+
+    NEDEN (bkz. KARARLAR K-16): HTML ayrıştırıcısı ``<script>`` metnindeki CRLF/CR'yi LF'ye çevirir ve
+    tarayıcı hash'i ayrıştırılmış metin üzerinden hesaplar. Dosya Windows'ta CRLF ile çekilirse ham
+    bayt hash'i tarayıcınınkiyle tutmaz ve script sessizce çalışmaz; bu yüzden BOM atılır, satır
+    sonları LF yapılır ve basılan metin ile hash'lenen metin aynı normalleştirilmiş metindir.
+    DIKKAT: ``MAIL_ORDER_JS_FILE`` çağrı anında okunur (testler yamar); önbellek anahtarı
+    dosya yolu + mtime_ns + boyuttur.
+    """
+    path = MAIL_ORDER_JS_FILE
+    info = os.stat(path)
+    stamp = (info.st_mtime_ns, info.st_size)
+    cached = _SCRIPT_CACHE.get(path)
+    if cached and cached[0] == stamp:
+        return cached[1]
+    with open(path, 'rb') as handle:
+        text = handle.read().decode('utf-8')
+    if text.startswith('\ufeff'):
+        text = text[1:]
+    text = text.replace('\r\n', '\n').replace('\r', '\n')
+    if _SCRIPT_FORBIDDEN_RE.search(text):
+        raise ValueError('mail_order_card.js script bloğunu bozan dizi içeriyor')
+    digest = base64.b64encode(hashlib.sha256(text.encode('utf-8')).digest()).decode('ascii')
+    result = (text, digest)
+    _SCRIPT_CACHE[path] = (stamp, result)
+    return result
