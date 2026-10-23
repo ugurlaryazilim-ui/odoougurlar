@@ -1,15 +1,18 @@
 # -*- coding: utf-8 -*-
 """Mail Order kart sayfası ve sonuç rotası (tasarım §5.2, KARARLAR K-13).
 
-Kart sayfası Odoo'nun sunduğu, arka uç varlığı ve script İÇERMEYEN bir HTML sayfasıdır; formun
-``action``'ı Paratika Direct POST 3D (``sale3d``) adresidir. Kart alanları tarayıcıdan doğrudan
+Kart sayfası Odoo'nun sunduğu, arka uç varlığı İÇERMEYEN bir HTML sayfasıdır (tek script istisnası
+aşağıdaki DIKKAT'te); formun ``action``'ı Paratika Direct POST 3D (``sale3d``) adresidir. Kart alanları tarayıcıdan doğrudan
 Paratika'ya gider; bu modülün hiçbir rotası kart alanı kabul etmez (yalnız GET).
 
-DIKKAT: Bu dosyaya ve ``views/mail_order_templates.xml``'e script, satır içi olay işleyicisi,
-arka uç varlığı (web.layout, /web/assets), kart alanına ``value`` ya da Odoo'ya POST eden form
-eklemek kart verisini Odoo koduna/sunucusuna açar ve PCI kapsamını değiştirir (bkz. KARARLAR K-13).
+DIKKAT: Sayfada yalnız ``tools.mail_order_script()``'in ürettiği tek hash'li script bulunur (bkz.
+KARARLAR K-16); ikinci script, harici script, satır içi olay işleyicisi, ``'self'``/``unsafe-*``/nonce
+eklemek yasaktır. Bu dosyaya ve ``views/mail_order_templates.xml``'e arka uç varlığı (web.layout,
+/web/assets), kart alanına ``value`` ya da Odoo'ya POST eden form eklemek kart verisini Odoo
+koduna/sunucusuna açar ve PCI kapsamını değiştirir (bkz. KARARLAR K-13).
 """
 import logging
+import re
 from datetime import datetime
 from urllib.parse import urlsplit
 
@@ -19,8 +22,9 @@ from odoo import http
 from odoo.exceptions import AccessError, MissingError, UserError
 from odoo.http import request
 
-from ..models.provider_paratika import DIRECT_POST_HOSTS
-from ..tools import installment_table, mail_order_css_url
+from ..models.provider_paratika import _ISTANBUL, DIRECT_POST_HOSTS
+from ..models.res_config_settings import get_bool_param
+from ..tools import installment_table, mail_order_css_url, mail_order_script
 from .main import MO_RESULT_PATH, MPID_RE, PAYMENT_LIST_PATH
 
 _logger = logging.getLogger(__name__)
@@ -28,6 +32,10 @@ _logger = logging.getLogger(__name__)
 PAY_PATH = '/sanal_pos/mail_order/pay/<int:payment_id>'
 RECORD_PATH = PAYMENT_LIST_PATH + '/%d'
 EXPIRY_YEAR_SPAN = 15
+# Dağıtımsız kapatma anahtarı (tasarım §3.9): get_bool_param ile okunur ('False', 'false', '0',
+# 'no', boş -> kapalı; yoksa açık). NEDEN: acil kapatmada elle yazılan 'false'/'0' de kapatmalı;
+# tam metin eşlemesi bu durumda script'i sessizce açık bırakıyordu (D-1, PROJE.md Boolean kuralı).
+SCRIPT_SWITCH_PARAM = 'sanal_pos.mail_order_script'
 
 # G0-Q2: sale3d yanıtı Paratika dışı bir kökene (banka ACS) 302 ile yönlendiriyorsa tarayıcılar
 # form-action'ı yönlendirmede de uygular; o durumda buraya ('https:',) yazılır (tek değişim yeri).
@@ -43,6 +51,9 @@ NAV_ITEMS = (
     ('İşlem Kayıtları', 'sanal_pos.action_sanal_pos_log', 'sanal_pos.group_sanal_pos_manager'),
 )
 
+_SHA256_B64_RE = re.compile(r'[A-Za-z0-9+/]{43}=')
+_CSP_SOURCE_RE = re.compile(r'https?://[A-Za-z0-9.\-]+(?::[0-9]{1,5})?(?:/[A-Za-z0-9._~/\-]*)?')
+
 PAGE_HEADERS = [
     # G-3: arka uç sekmesi (aynı köken) window.open ile açıp kart alanlarının DOM'una erişemesin
     ('Cross-Origin-Opener-Policy', 'same-origin'),
@@ -53,16 +64,33 @@ PAGE_HEADERS = [
 ]
 
 
-def card_page_csp(form_origin=None):
+def card_page_csp(form_origin=None, script_hash=None, connect_src=None):
     """Kart/hata sayfası CSP'si. ``form_origin`` yoksa form gönderimi tamamen yasak.
 
-    NEDEN: script-src yok (default-src 'none'): sayfada çalışan kod olmadığından kart alanları
-    tarayıcıda bile okunamaz; form-action yalnız Paratika kökeni: değiştirilmiş bir form bile
-    kartı başka adrese gönderemez (bkz. KARARLAR K-13).
+    ``script_hash`` (``tools.mail_order_script()[1]``) verilirse ``script-src 'sha256-<hash>'``
+    eklenir; ``connect_src`` (Aşama 2) verilirse ``connect-src <url>`` eklenir. İkisi de yoksa çıktı
+    önceki script'siz sayfayla aynıdır.
+
+    NEDEN: script-src yokken (default-src 'none') sayfada çalışan kod olmaz; varken yalnız içeriği
+    hash ile sabitlenmiş tek satır içi script çalışır ('self'/nonce/unsafe-* kasten yok: bkz.
+    KARARLAR K-16). form-action yalnız Paratika kökeni: değiştirilmiş bir form bile kartı başka
+    adrese gönderemez (bkz. KARARLAR K-13).
     """
     sources = ' '.join((form_origin,) + FORM_ACTION_EXTRA_SOURCES) if form_origin else "'none'"
-    return ("default-src 'none'; style-src 'self'; img-src 'self'; form-action %s; "
-            "frame-ancestors 'none'; base-uri 'none'" % sources)
+    directives = ["default-src 'none'"]
+    if script_hash:
+        # DIKKAT: değer CSP başlığına doğrudan girer; base64 dışı karakter (boşluk, ';') ek kaynak ya da
+        # yönerge sokabilir, bu yüzden biçim zorunlu denetlenir.
+        if not _SHA256_B64_RE.fullmatch(script_hash):
+            raise ValueError('script_hash sha256 base64 biçiminde değil')
+        directives.append("script-src 'sha256-%s'" % script_hash)
+    if connect_src:
+        if not _CSP_SOURCE_RE.fullmatch(connect_src):
+            raise ValueError('connect_src geçersiz')
+        directives.append('connect-src %s' % connect_src)
+    directives += ["style-src 'self'", "img-src 'self'", 'form-action %s' % sources,
+                   "frame-ancestors 'none'", "base-uri 'none'"]
+    return '; '.join(directives)
 
 
 class SanalPosMailOrderController(http.Controller):
@@ -86,7 +114,10 @@ class SanalPosMailOrderController(http.Controller):
             _logger.error('sanal_pos: kart sayfası adresi geçersiz, ödeme id=%s', payment_id)
             return self._error_page('Ödeme adresi yapılandırması geçersiz; yöneticinize başvurun.',
                                     status=500, payment_id=payment_id)
-        this_year = datetime.now().year
+        # NEDEN: script SKT'nin "bu ay" sınırını istemci saatinden değil buradan alır (data-now-ym);
+        # yıl listesi de aynı (İstanbul) andan türer, ikisi ay/yıl geçişinde çelişmesin.
+        now = datetime.now(_ISTANBUL)
+        this_year = now.year
         # NEDEN: biçimleme/hesap burada (tools); şablon ifadesindeki '%%' kaçışı görünüm kaydında korunmadı
         values['installment_table'] = installment_table(
             values.get('amount'), values.get('installments'))
@@ -95,6 +126,7 @@ class SanalPosMailOrderController(http.Controller):
             'nav': self._nav_values(),
             'expiry_months': ['%02d' % m for m in range(1, 13)],
             'expiry_years': [str(y) for y in range(this_year, this_year + EXPIRY_YEAR_SPAN + 1)],
+            'now_ym': '%04d-%02d' % (now.year, now.month),
         })
         try:
             with request.env.cr.savepoint():
@@ -102,7 +134,12 @@ class SanalPosMailOrderController(http.Controller):
         except Exception as exc:  # noqa: BLE001 - not yazılamasa da sayfa açılır
             _logger.warning('sanal_pos: kart sayfası notu yazılamadı (%s), ödeme id=%s',
                             type(exc).__name__, payment_id)
-        return self._render('sanal_pos.mail_order_card_page', values, card_page_csp(origin))
+        card_script, script_hash = self._card_script()
+        # NEDEN: Markup değilse QWeb '<' -> '&lt;' yapar; basılan metin hash'lenenden farklı olur
+        # (script hiç çalışmaz). card_script ve CSP aynı çağrıdan türer (tek kaynak, K-16).
+        values['card_script'] = Markup(card_script) if card_script else None
+        return self._render('sanal_pos.mail_order_card_page', values,
+                            card_page_csp(origin, script_hash=script_hash))
 
     @http.route(MO_RESULT_PATH, type='http', auth='user', methods=['GET'])
     def mail_order_result(self, mpid=None, **_kwargs):
@@ -119,6 +156,22 @@ class SanalPosMailOrderController(http.Controller):
         return request.redirect(RECORD_PATH % payment.id, code=303)
 
     # ------------------------------------------------------------------ yardımcılar
+    @staticmethod
+    def _card_script():
+        """``(metin, sha256_b64)``; anahtar kapalı, dosya sorunlu ya da hash onaysızsa ``(None, None)``.
+
+        DIKKAT: fail-closed: script okunamaz/geçersizse sayfa script'siz (CSP'de script-src yok)
+        sunulur; ödeme yolu bozulmaz. İstisna metni loglanmaz (yalnız sınıf adı).
+        """
+        if not get_bool_param(request.env, SCRIPT_SWITCH_PARAM, default=True):
+            return None, None
+        try:
+            return mail_order_script()
+        except (OSError, ValueError) as exc:
+            _logger.error("sanal_pos: kart sayfası betiği yüklenemedi, betiksiz sunuluyor (%s)",
+                          type(exc).__name__)
+            return None, None
+
     @staticmethod
     def _https_origin(url):
         """Form/CSP kökeni; yalnız https + kodda sabit Paratika host'u (G-1), aksi ``None``."""

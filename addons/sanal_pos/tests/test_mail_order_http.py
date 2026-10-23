@@ -21,9 +21,12 @@ from .common import (
 PW = 'Mo!Test-9981'
 LINK_ACTIONS = ('PAYBYLINKPAYMENT', 'PAYBYLINKPAYMENTRESEND', 'PAYBYLINKPAYMENTCANCEL',
                 'QUERYPAYBYLINKPAYMENT')
-WARNING_TEXT = ('Kart bilgisini yalnız bu ekrandan açılan kart sayfasına girin; not almayın, '
-                'e-posta/mesajla almayın, tarayıcıya kaydettirmeyin. Banka doğrulama (SMS) kodunu '
-                'müşteriden alıp yalnız banka sayfasına girin.')
+# Aşama 1 (KK-1.10): güvenlik uyarısı paragraf yerine en çok 4 maddelik liste
+WARNING_ITEMS = ('Kartı yalnız bu sayfaya girin',
+                 'Kart bilgisini not almayın, mesajla/e-postayla almayın',
+                 'Tarayıcıya kart kaydettirmeyin',
+                 'SMS kodunu yalnız banka sayfasına girin')
+SCRIPT_HASH_RE = re.compile(r"^'sha256-[A-Za-z0-9+/]{43}='$")
 CARD_FIELDS = {'cardOwner', 'pan', 'expiryMonth', 'expiryYear', 'cvv', 'installmentCount'}
 PAYMENT_LIST = '/odoo/action-sanal_pos.action_sanal_pos_payment'
 CSS_PATH = '/sanal_pos/static/src/css/mail_order.css'
@@ -97,7 +100,9 @@ class TestCardPage(MoHttpCase):
         self.assertEqual(policy.get('frame-ancestors'), ["'none'"])
         self.assertEqual(policy.get('base-uri'), ["'none'"])
         self.assertIn('https://test.paratika.com.tr', ' '.join(policy.get('form-action', [])))
-        self.assertNotIn('script-src', policy)
+        # Aşama 1 (KK-1.14b): kart sayfasında yalnız tek hash'li script kaynağı (ayrıntı: test_mail_order_card.py)
+        self.assertEqual(len(policy.get('script-src', [])), 1, policy.get('script-src'))
+        self.assertRegex(policy['script-src'][0], SCRIPT_HASH_RE)
         self.assertNotIn("'unsafe-inline'", response.headers['Content-Security-Policy'])
         self.assertNotIn("'unsafe-eval'", response.headers['Content-Security-Policy'])
         self.assertEqual(response.headers.get('X-Frame-Options'), 'DENY')
@@ -155,10 +160,12 @@ class TestCardPage(MoHttpCase):
     def test_aktif_icerik_ve_dis_kaynak_yok(self):
         text = self.page(self.make_mail_order()).text
         lowered = text.lower()
-        for needle in ('<script', '/web/assets', '<iframe', 'javascript:', 'csrf_token', '<object',
-                       '<embed'):
+        for needle in ('/web/assets', '<iframe', 'javascript:', 'csrf_token', '<object', '<embed'):
             self.assertNotIn(needle, lowered, needle)
-        self.assertIsNone(re.search(r'\son[a-z]+\s*=', lowered), 'satır içi olay işleyicisi')
+        # Aşama 1 (KK-1.14a): tam 1 script (hash'li, satır içi); olay işleyicisi script dışında aranır
+        self.assertEqual(lowered.count('<script'), 1)
+        markup = re.sub(r'<script\b.*?</script>', '<script></script>', lowered, flags=re.S)
+        self.assertIsNone(re.search(r'\son[a-z]+\s*=', markup), 'satır içi olay işleyicisi')
         doc = lxml_html.fromstring(text)
         links = doc.xpath('//link/@href')
         self.assertEqual(len(links), 1)
@@ -223,9 +230,11 @@ class TestCardPage(MoHttpCase):
         self.assertEqual(pan.get('pattern'), '[0-9]{12,19}')
         self.assertEqual(pan.get('maxlength'), '19')
         self.assertEqual(pan.get('autocomplete'), 'off')
-        self.assertEqual(pan.get('placeholder'), '0000 0000 0000 0000')
-        for field_id in ('cardOwner', 'pan', 'expiryMonth', 'expiryYear', 'cvv', 'installmentCount'):
+        # Aşama 1 (KK-1.1): script'siz mod örneği boşluksuz; boşluklu örnek yalnız .mo-js-only ipucunda
+        self.assertEqual(pan.get('placeholder'), '1234567812345678')
+        for field_id in ('cardOwner', 'pan', 'expiryMonth', 'expiryYear', 'cvv'):
             self.assertTrue(main.xpath('.//label[@for="%s"]' % field_id), field_id)
+        self.assertTrue(main.xpath('.//fieldset[contains(@class,"mo-inst")]/legend'))       # KK-1.3
         cvv = main.xpath('.//input[@name="cvv"]')[0]
         self.assertEqual(cvv.get('maxlength'), '4')
         self.assertEqual(cvv.get('autocomplete'), 'off')
@@ -235,32 +244,28 @@ class TestCardPage(MoHttpCase):
         self.assertIn("Kart bilgisi doğrudan Paratika'ya iletilir, Odoo'da saklanmaz.", footer)
         self.assertIn(self.user_sp.company_id.name, footer)
 
-    def test_taksit_tablosu_katlanabilir_details_icinde(self):
+    def test_taksit_tablosu_ve_details_kaldirildi_bilgi_kartlarda(self):
+        # Aşama 1 (KK-1.3): "Taksit seçenekleri" katlanabilir tablosu kalkar; bilgi radyo kartlarındadır
         self.mock.queue('QUERYINSTALLMENT', installment_body(('A', 'PARAF', [(2, 0), (3, 1.5)])))
         doc = self.doc(self.page(self.make_mail_order()))
-        details = doc.xpath('//main//details')
-        self.assertEqual(len(details), 1)
-        self.assertIsNone(details[0].get('open'))          # varsayılan kapalı (JS'siz katlanır)
-        self.assertEqual(details[0].xpath('./summary')[0].text_content().strip(),
-                         'Taksit seçenekleri ve vade farkı')
-        self.assertEqual(len(details[0].xpath('.//table/tbody/tr')), 3)
-        self.assertFalse(doc.xpath('//form//table'))
-        # tablo yoksa (sorgu hatası) katlanabilir alan da yok
-        self.mock.queue('QUERYINSTALLMENT', timeout_exc())
-        self.assertFalse(self.doc(self.page(self.make_mail_order(invoice_no='D-2'))).xpath('//details'))
+        self.assertFalse(doc.xpath('//details'))
+        self.assertFalse(doc.xpath('//table'))
+        self.assertEqual(len(doc.xpath('//input[@type="radio"][@name="installmentCount"]')), 3)
 
     def test_satir_ici_stil_ve_betik_yok_tum_sayfalarda(self):
         pages = [self.page(self.make_mail_order()).text,
                  self.page(self.make_mail_order(invoice_no='E-1', state='paid')).text,       # hata sayfası
                  self.page(self.make_mail_order(invoice_no='E-2'), self.user_plain).text,        # 403
                  self.url_open(MAIL_ORDER_RETURN_PATH, data={'MERCHANTPAYMENTID': 'X-1-1'}, method='POST').text]
-        for text in pages:
+        for index, text in enumerate(pages):
             lowered = text.lower()
-            self.assertNotIn('<script', lowered)
+            # Aşama 1 (KK-1.14a/f): yalnız kart sayfasında (ilk) tam 1 script; hata/403/dönüş sayfaları script'siz
+            self.assertEqual(lowered.count('<script'), 1 if index == 0 else 0, index)
             self.assertNotIn(' style=', lowered)
             self.assertNotIn('<iframe', lowered)
             self.assertNotIn('/web/assets', lowered)
-            self.assertIsNone(re.search(r'\son[a-z]+\s*=', lowered))
+            markup = re.sub(r'<script\b.*?</script>', '<script></script>', lowered, flags=re.S)
+            self.assertIsNone(re.search(r'\son[a-z]+\s*=', markup))
             links = lxml_html.fromstring(text).xpath('//link/@href')
             self.assertEqual(len(links), 1)
             self.assertRegex(links[0], CSS_HREF_RE)
@@ -336,7 +341,8 @@ class TestCardPage(MoHttpCase):
 
     def test_uyari_test_bandi_ve_musteri_adi(self):
         text = re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', self.page(self.make_mail_order()).text))
-        self.assertIn(WARNING_TEXT, text)
+        for item in WARNING_ITEMS:
+            self.assertIn(item, text)
         self.assertIn('TEST', text)
 
     def test_canlida_test_bandi_yok(self):
@@ -352,7 +358,7 @@ class TestCardPage(MoHttpCase):
     def test_taksit_secenekleri(self):
         self.mock.queue('QUERYINSTALLMENT', installment_body(('AXESS', 'AXESS', [(2, 0), (3, 1.5), (6, 3.0)])))
         doc = self.doc(self.page(self.make_mail_order()))
-        values = doc.xpath('//select[@name="installmentCount"]/option/@value')
+        values = doc.xpath('//input[@type="radio"][@name="installmentCount"]/@value')
         self.assertEqual(values[0], '1')
         self.assertEqual(sorted(int(v) for v in values), [1, 2, 3, 6])
         self.assertEqual(self.mock.count('QUERYINSTALLMENT'), 1)
@@ -366,24 +372,25 @@ class TestCardPage(MoHttpCase):
         payment = self.make_mail_order()
         doc = self.doc(self.page(payment))
         text = ' '.join(doc.xpath('//main')[0].text_content().split())
-        self.assertIn('Taksit yapılabilen kartlar: Paraf, Kuveyt Türk (Sağlam Kart)', text)
+        # Aşama 1 (KK-1.3): tablo/başlık/option kalktı; ortak program adları okunur biçimde görünür
+        self.assertIn('Paraf', text)
+        self.assertIn('Kuveyt Türk (Sağlam Kart)', text)
         self.assertNotIn('UNKNOWN', text)
         self.assertNotIn('KVY_NTW', text)
-        self.assertEqual(text.count('Taksit yapılabilen kartlar'), 1)
-        headers = [' '.join(th.text_content().split()) for th in doc.xpath('//table/thead//th')]
-        self.assertEqual(headers, ['Taksit', 'Vade farkı (%)', 'Çekilecek toplam (TL)', 'Aylık taksit (TL)'])
-        self.assertEqual(len(doc.xpath('//table/tbody/tr')), 3)       # tek çekim + 2 + 3
-        options = doc.xpath('//select[@name="installmentCount"]/option')
-        self.assertEqual([o.get('value') for o in options], ['1', '2', '3'])
-        self.assertIn('3 taksit — toplam ', options[2].text)
-        self.assertIn('Vade farkı banka/Paratika tarafından', text)
+        self.assertFalse(doc.xpath('//table'))
+        radios = doc.xpath('//input[@type="radio"][@name="installmentCount"]')
+        self.assertEqual([r.get('value') for r in radios], ['1', '2', '3'])
+        card3 = ' '.join(radios[2].xpath('./ancestor::label')[0].text_content().split())
+        self.assertIn('3 taksit', card3)
+        self.assertIn('toplam', card3.lower())
+        self.assertIn('kesin tutar banka sayfasında görünür', text.lower())      # KK-1.6
 
     def test_taksit_sorgusu_hatasinda_tek_cekim(self):
         self.mock.queue('QUERYINSTALLMENT', timeout_exc())
         response = self.page(self.make_mail_order())
         self.assertEqual(response.status_code, 200)
         doc = self.doc(response)
-        values = doc.xpath('//select[@name="installmentCount"]/option/@value')
+        values = doc.xpath('//input[@type="radio"][@name="installmentCount"]/@value')
         self.assertEqual(values, ['1'])
         self.assertEqual(len(doc.xpath('//input[@name="pan"]')), 1)
 

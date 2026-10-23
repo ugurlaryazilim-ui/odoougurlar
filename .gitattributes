@@ -1,0 +1,3 @@
+# NEDEN: core.autocrlf=true ile Windows checkout'ta CRLF olursa betiğin bayt boyutu şişer ve boyut sınırı payı azalır
+# (hash zaten CRLF->LF normalize edilerek hesaplanır). Yalnız bu dosyaya özel kural.
+addons/sanal_pos/static/src/js/mail_order_card.js text eol=lf

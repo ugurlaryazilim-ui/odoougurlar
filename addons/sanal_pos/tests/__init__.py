@@ -23,3 +23,4 @@ from . import test_mail_order
 from . import test_mail_order_http
 from . import test_mail_order_pci
 from . import test_installment_surcharge
+from . import test_mail_order_card
