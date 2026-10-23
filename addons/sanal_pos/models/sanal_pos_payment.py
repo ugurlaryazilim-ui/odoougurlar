@@ -24,7 +24,7 @@ from odoo.tools import float_compare
 
 from ..tools import (
     BIN_PAYMENT_MARK, bank_label, brand_key, card_label, format_rate, format_try, installment_table, mask_email,
-    mask_phone, match_surcharge_rate, program_label, valid_bin,
+    mask_phone, match_surcharge_rate, program_label, valid_bin, validate_email,
 )
 from .res_config_settings import get_bool_param
 
@@ -99,6 +99,18 @@ CRON_SYNC_LIMIT = 200
 # G-1: webhook kaynaklı sorgu çoğaltmasına karşı
 SYNC_REQUEST_MIN_INTERVAL = timedelta(minutes=1)   # ödeme başına iki sorgu arası en az
 CRON_TIME_BUDGET = 8 * 60  # saniye; aşılırsa cron kendini hemen yeniden planlar
+# Dekont e-postası (Aşama 4, K-18)
+RECEIPT_CRON_XMLID = 'sanal_pos.cron_sanal_pos_receipt'
+RECEIPT_TEMPLATE_XMLID = 'sanal_pos.mail_template_mail_order_receipt'
+RECEIPT_CRON_LIMIT = 50
+RECEIPT_STATES = [
+    ('pending', 'Gönderilecek'), ('sending', 'Gönderiliyor'), ('sent', 'Gönderildi'),
+    ('no_email', 'E-posta yok'), ('failed', 'Gönderilemedi'),
+]
+RECEIPT_SENT_NOTE = 'Dekont %s adresine gönderildi.'
+RECEIPT_NO_EMAIL_NOTE = 'Müşteri e-postası yok; dekont gönderilmedi.'
+RECEIPT_FAILED_NOTE = 'Dekont gönderilemedi; dekontu kayıttan elle gönderebilirsiniz.'
+RECEIPT_QUEUE_FAILED_NOTE = 'Dekont e-postası otomatik gönderim için kuyruğa alınamadı; dekontu elle gönderin.'
 QUERY_FAILED_MSG = 'Paratika durum sorgusu yanıt vermedi; durum değiştirilmedi.'
 LINK_NOT_FOUND_MSG = "Link Paratika'da bulunamadı; yeni link oluşturabilirsiniz."
 LINK_NOT_FOUND_PENDING_MSG = "Link Paratika'da henüz bulunamadı; durum tekrar kontrol edilecek."
@@ -354,6 +366,11 @@ class SanalPosPayment(models.Model):
     can_void = fields.Boolean(string='İptal edilebilir', compute='_compute_can_void')
     can_refund = fields.Boolean(string='İade edilebilir', compute='_compute_can_refund')
     can_resend = fields.Boolean(string='Yeniden gönderilebilir', compute='_compute_can_resend')
+
+    # ---------------------------------------------------------------- dekont (K-18)
+    # Boş = kuyruğa hiç alınmadı (link, Aşama 4 öncesi ödeme). Yazım yalnız sudo kod yollarında.
+    receipt_state = fields.Selection(
+        RECEIPT_STATES, string='Dekont E-postası', readonly=True, copy=False)
 
     # ---------------------------------------------------------------- varsayılanlar
     @api.model
@@ -2197,6 +2214,9 @@ class SanalPosPayment(models.Model):
             self._notify_creator('%s – %s ödendi (%s)' % (
                 self.invoice_no, format_try(tran.get('amount')), ', '.join(detail)))
             self._sync_refunds(transactions)
+            # NEDEN: iade/iptal senkronundan SONRA: aynı sorguda iptal edilen ödemeye dekont gitmez
+            # (_queue_receipt yalnız 'paid' kaydı alır; bkz. KARARLAR K-18)
+            self._queue_receipt()
             return
         if code:
             self.write(values)
@@ -2594,6 +2614,7 @@ class SanalPosPayment(models.Model):
                    'last_error_code': False, 'last_error_message': False})
         rec._notify_creator('%s – %s ödendi (inceleme sonucu kabul eden yönetici: %s)' % (
             rec.invoice_no, format_try(amount), self.env.user.name))
+        rec._queue_receipt()
         return self._form_action()
 
     def action_review_close(self):
@@ -2981,6 +3002,181 @@ class SanalPosPayment(models.Model):
                                     type(exc2).__name__, pid)
             Payment._sp_commit()
         return True
+
+    # ---------------------------------------------------------------- dekont e-postası (K-18)
+    def _queue_receipt(self):
+        """Ödendi'ye geçen mail order kaydını dekont kuyruğuna alır (boş -> pending), cron'u tetikler.
+
+        PDF/e-posta burada üretilmez (NFR-4.1). Raise etmez: kuyruk ödemenin yan işidir ve hatası
+        ödeme yazımını geri almaz (DERSLER-14). Yalnız boş durumdan geçiş "bir kez" kuralını sağlar
+        (KK-4.2): ikinci senkron, paid'e yeniden yazım ya da iade reddi sonrası dönüş kuyruğa almaz.
+        """
+        todo = self.sudo().filtered(
+            lambda r: r.payment_method == 'mail_order' and r.state == 'paid' and not r.receipt_state)
+        if not todo:
+            return
+        # DIKKAT: savepoint girişi flush yapar; ödemenin kendi (paid) yazımının flush hatası aşağıdaki
+        # except'e düşüp yutulmasın diye bekleyen yazımlar savepoint DIŞINDA kalıcılaştırılır.
+        self.env.flush_all()
+        queued = False
+        for rec in todo:
+            try:
+                with self.env.cr.savepoint():
+                    rec.write({'receipt_state': 'pending'})
+                queued = True
+            except Exception as exc:  # noqa: BLE001 - kuyruk hatası ödemeyi geri almaz
+                _logger.warning('sanal_pos: dekont kuyruğa alınamadı (%s), ödeme id=%s',
+                                type(exc).__name__, rec.id)
+                # NEDEN: telafi taraması yok (Aşama 4 öncesi paid kayıtlardan ayırt edilemez);
+                # personel elle göndersin diye kayda not düşer (bkz. KARARLAR K-18)
+                rec._post_receipt_note(RECEIPT_QUEUE_FAILED_NOTE)
+        if queued:
+            self._trigger_receipt_cron()
+
+    @api.model
+    def _trigger_receipt_cron(self):
+        """Dekont cron'unu hemen çalıştırır; tetik kurulamazsa kayıt 'pending' kalır, 10 dk'lık tur alır."""
+        cron = self.env.ref(RECEIPT_CRON_XMLID, raise_if_not_found=False)
+        if not cron:
+            return
+        try:
+            with self.env.cr.savepoint():
+                cron.sudo()._trigger()
+        except Exception as exc:  # noqa: BLE001 - tetik yan iştir
+            _logger.warning('sanal_pos: dekont cron tetiği kurulamadı (%s)', type(exc).__name__)
+
+    def _post_receipt_note(self, body):
+        """Dekont notu; hatası yutulur (not yazılamadı diye ödeme/dekont durumu geri alınmaz)."""
+        self.ensure_one()
+        try:
+            with self.env.cr.savepoint():
+                self.sudo()._post_note(body)
+        except Exception as exc:  # noqa: BLE001
+            _logger.warning('sanal_pos: dekont notu yazılamadı (%s), ödeme id=%s',
+                            type(exc).__name__, self.id)
+
+    @api.model
+    def _cron_send_receipts(self, limit=RECEIPT_CRON_LIMIT):
+        """Dekont e-postası turu: kayıt başına claim (SKIP LOCKED) + commit, sonra kilitsiz gönderim.
+
+        Bir kez kuralı: yalnız pending -> sending geçişini kazanan gönderir. 'sending'de kalan kayıt
+        (gönderim sırasında çöken süreç) otomatik yeniden denenmez, elle gönderilir (K-9 ilkesi).
+        """
+        Payment = self.sudo()
+        Payment.flush_model()
+        # NEDEN: adayda state='paid' de aranır; iptal edilmiş 'pending' kayıtlar 50'lik payı kalıcı
+        # olarak işgal etmesin. Claim koşulu yine iki alanı birlikte denetler (tasarım §6.2).
+        ids = Payment.search([('payment_method', '=', 'mail_order'), ('state', '=', 'paid'),
+                              ('receipt_state', '=', 'pending')], order='id', limit=limit).ids
+        started = time.monotonic()
+        progressed = False
+        for pid in ids:
+            if time.monotonic() - started > CRON_TIME_BUDGET:
+                Payment._trigger_receipt_cron()
+                return True
+            progressed = Payment.browse(pid)._send_receipt_one() or progressed
+        # NEDEN: yalnız ilerleme varsa: kilitli kayıtlar yüzünden kendini sürekli tetiklemesin
+        if progressed and len(ids) >= limit:
+            Payment._trigger_receipt_cron()
+        return True
+
+    def _send_receipt_one(self):
+        """Tek kayıt: claim -> commit -> kilitsiz gönderim -> sonuç -> commit. True: bu tur işlendi."""
+        self.ensure_one()
+        if not self._claim_receipt():
+            return False
+        # DIKKAT: 'sending' e-postadan ÖNCE kalıcı olmalı; yoksa gönderim sonrası çöküşte kayıt
+        # 'pending'e döner ve sonraki tur ikinci e-postayı yollar (K-6/K-9 kalıbı). Commit satır
+        # kilidini de bırakır: rapor/SMTP süresince kayıt (senkron, sihirbaz) kilitli kalmaz.
+        self._sp_commit()
+        email = (self.customer_email or '').strip()
+        if not validate_email(email):
+            result, note = 'no_email', RECEIPT_NO_EMAIL_NOTE
+        elif self._send_receipt_mail(email):
+            result, note = 'sent', RECEIPT_SENT_NOTE % email
+        else:
+            result, note = 'failed', RECEIPT_FAILED_NOTE
+        self._finish_receipt(result)
+        # NEDEN: sonuç yazılamasa da (elle gönderim önce sonuçlandırdı) olan biten kayda geçer
+        self._post_receipt_note(note)
+        self._sp_commit()
+        return True
+
+    def _claim_receipt(self):
+        """pending -> sending. Satır kilitliyse, artık uygun değilse ya da eşzamanlı değiştiyse False."""
+        self.ensure_one()
+        try:
+            with self.env.cr.savepoint():
+                self.env.cr.execute(
+                    "SELECT id FROM sanal_pos_payment WHERE id = %s AND payment_method = 'mail_order' "
+                    "AND state = 'paid' AND receipt_state = 'pending' FOR UPDATE SKIP LOCKED", [self.id])
+                if not self.env.cr.fetchone():
+                    return False
+                self.invalidate_recordset()
+                self.write({'receipt_state': 'sending'})
+        except Exception as exc:  # noqa: BLE001 - SerializationFailure (RR) dahil: bu tur atlanır
+            _logger.warning('sanal_pos: dekont kaydı alınamadı (%s), ödeme id=%s',
+                            type(exc).__name__, self.id)
+            return False
+        return True
+
+    def _send_receipt_mail(self, email):
+        """Şablonla dekont e-postası (PDF eki şablonun raporundan). Raise etmez; True: SMTP kabul etti."""
+        self.ensure_one()
+        payment_id = self.id
+        template = self.env.ref(RECEIPT_TEMPLATE_XMLID, raise_if_not_found=False)
+        if not template:
+            _logger.error('sanal_pos: dekont e-posta şablonu yok, ödeme id=%s', payment_id)
+            return False
+        try:
+            with self.env.cr.savepoint():
+                # NEDEN: alıcı yalnız email_values ile verilir (şablonda partner_to yok): müşteri için
+                # res.partner kaydı açılmaz. sudo: rapor ve şablon cron/root bağlamında üretilir.
+                mail_id = template.sudo().send_mail(
+                    payment_id, force_send=True, raise_exception=False,
+                    email_values={'email_to': email})
+                mail = self.env['mail.mail'].sudo().browse(mail_id).exists()
+                # auto_delete: başarılı gönderim mail.mail'i siler; kalan kayıt 'exception' vb.
+                return not mail or mail.state == 'sent'
+        except Exception as exc:  # noqa: BLE001 - metin müşteri/SMTP verisi içerebilir: yalnız sınıf adı
+            _logger.error('sanal_pos: dekont e-postası gönderilemedi (%s), ödeme id=%s',
+                          type(exc).__name__, payment_id)
+            return False
+
+    def _lock_receipt_sending(self):
+        """Sonuç yazımı için satırı kilitler (bekler); kayıt artık 'sending' değilse False."""
+        self.env.cr.execute(
+            "SELECT id FROM sanal_pos_payment WHERE id = %s AND receipt_state = 'sending' FOR UPDATE",
+            [self.id])
+        return bool(self.env.cr.fetchone())
+
+    def _finish_receipt(self, result):
+        """Gönderim sonucunu yazar; yalnız kayıt hâlâ 'sending' ise (elle gönderimin sonucu ezilmez).
+
+        REPEATABLE READ: claim commit'inden sonra başkası satırı değiştirip commit ettiyse FOR UPDATE
+        SerializationFailure verir; commit + taze anlık görüntüyle bir kez yeniden denenir. Yine
+        olmazsa kayıt 'sending' kalır (çift e-posta yerine sessizlik, K-9).
+        """
+        self.ensure_one()
+        for attempt in (1, 2):
+            try:
+                with self.env.cr.savepoint():
+                    if self._lock_receipt_sending():
+                        self.invalidate_recordset(['receipt_state'])
+                        self.write({'receipt_state': result})
+                return
+            except pg_errors.SerializationFailure:
+                if attempt == 2:
+                    break
+                # NEDEN: commit yeni anlık görüntü açar ve gönderimin mail.mail kaydını korur;
+                # savepoint dışında (bkz. _sp_commit)
+                self._sp_commit()
+            except Exception as exc:  # noqa: BLE001
+                _logger.warning('sanal_pos: dekont sonucu yazılamadı (%s), ödeme id=%s',
+                                type(exc).__name__, self.id)
+                return
+        _logger.warning('sanal_pos: dekont sonucu eşzamanlı değişiklik yüzünden yazılamadı, ödeme id=%s',
+                        self.id)
 
     @api.model
     def _cron_daily(self):

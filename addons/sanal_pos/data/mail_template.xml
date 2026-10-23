@@ -1,0 +1,25 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- Aşama 4 (K-18): otomatik dekont e-postası. noupdate: yönetici konu/gövdeyi değiştirebilir.
+     Alıcı şablonda yok: cron ve sihirbaz email_values ile verir (müşteri için res.partner açılmaz).
+     Gövdede kart bilgisi YOK (son 4 hane yalnız PDF ekinde). -->
+<odoo noupdate="1">
+    <record id="mail_template_mail_order_receipt" model="mail.template">
+        <field name="name">Sanal POS: Mail Order ödeme dekontu</field>
+        <field name="model_id" ref="model_sanal_pos_payment"/>
+        <field name="subject">{{ object.company_id.name }} ödeme dekontu – Fatura {{ object.invoice_no }}</field>
+        <field name="email_from">{{ object.company_id.email_formatted }}</field>
+        <field name="report_template_ids" eval="[(6, 0, [ref('sanal_pos.action_report_mail_order_receipt')])]"/>
+        <field name="auto_delete" eval="True"/>
+        <field name="body_html" type="html">
+<div style="margin: 0; padding: 0; font-size: 13px;">
+    <p>Sayın <t t-out="object.customer_name or 'Müşterimiz'"/>,</p>
+    <p>
+        <t t-out="object.invoice_no"/> numaralı faturanız için
+        <strong><t t-out="format_amount(object.paid_amount or object.amount, object.currency_id)"/></strong>
+        tutarındaki ödemeniz alınmıştır. Ödeme dekontunuz ektedir.
+    </p>
+    <p>Teşekkür ederiz.<br/><t t-out="object.company_id.name"/></p>
+</div>
+        </field>
+    </record>
+</odoo>

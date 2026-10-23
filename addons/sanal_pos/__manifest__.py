@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Sanal POS (Ödeme Linki)',
-    'version': '19.0.1.4.0',
+    'version': '19.0.1.5.0',
     'category': 'Accounting/Payment',
     'summary': 'Nebim faturasına bağlı Paratika ödeme linki oluşturma, takip, iptal ve iade',
     'description': """
@@ -25,6 +25,7 @@ Sanal POS / Ödeme Linki
         'data/ir_sequence.xml',
         'data/ir_cron.xml',
         'report/mail_order_receipt.xml',
+        'data/mail_template.xml',          # rapora başvurur: raporun ARDINDAN
         'wizard/payment_create_wizard_views.xml',
         'wizard/mail_order_wizard_views.xml',
         'wizard/review_close_wizard_views.xml',

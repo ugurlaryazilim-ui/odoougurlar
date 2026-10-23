@@ -117,18 +117,35 @@ class ReceiptMixin:
             self.env.cr.execute('SELECT COALESCE(MAX(id), 0) FROM %s' % table)
             self.before[table] = self.env.cr.fetchone()[0]
         self.sent = []
+        self.smtp_all = []
         self.smtp_error = None
         test = self
 
         def fake_send_email(this, message, *args, **kwargs):
             if test.smtp_error is not None:
                 raise test.smtp_error
-            test.sent.append(SentMail(message, test.receipt_probe()))
+            mail = SentMail(message, test.receipt_probe())
+            test.smtp_all.append(mail)
+            # FİKSTÜR DÜZELTMESİ (A4-G2): gönderim açılınca chatter bildirimleri de (ör. KK-30 oluşturana
+            # bildirim) SMTP'ye gider; "kaç dekont gitti" sayımına yalnız bildirim olmayan e-postalar girer.
+            # PCI taraması (leak_texts) giden her e-postayı (smtp_all) tarar.
+            if not test.is_notification_mail(message['Message-Id']):
+                test.sent.append(mail)
             return message['Message-Id'] or '<receipt-test@example.com>'
 
         patcher = patch.object(type(self.env['ir.mail_server']), 'send_email', fake_send_email)
         patcher.start()
         self.addCleanup(patcher.stop)
+        # FİKSTÜR DÜZELTMESİ (A4-G2): test kipinde ``ir.mail_server._disable_send()`` True döner ve
+        # ``mail.mail._send`` hiçbir şey göndermeden çıkar (çekirdek: "skip sending e-mails unless
+        # monkeypatched"); yakalayıcının çalışması için gönderim açılır (çekirdek MockEmail kalıbı).
+        # Gönderim açılınca ``_connect__`` gerçek SMTP'ye bağlanmaya çalışır; bağlantı da taklit edilir.
+        server_cls = type(self.env['ir.mail_server'])
+        for name, fake in (('_disable_send', classmethod(lambda cls: False)),
+                           ('_connect__', lambda this, *args, **kwargs: None)):
+            enabler = patch.object(server_cls, name, fake)
+            enabler.start()
+            self.addCleanup(enabler.stop)
 
     # ------------------------------------------------------------------ izleme
     def receipt_probe(self):
@@ -140,11 +157,21 @@ class ReceiptMixin:
         except Exception:      # alan henüz yok: kırmızı sebep zaten başka testlerde görünür
             return None
 
+    def is_notification_mail(self, message_id):
+        with self.env.cr.savepoint(flush=False):
+            self.env.cr.execute(
+                'SELECT bool_or(mm.is_notification) FROM mail_mail mm'
+                ' JOIN mail_message m ON m.id = mm.mail_message_id WHERE m.message_id = %s', [message_id])
+            return bool(self.env.cr.fetchone()[0])
+
     def count_notes(self, payment, needle):
         return self.chatter(payment).count(needle)
 
     def queued_mails(self, payment):
-        return self.env['mail.mail'].sudo().search([('model', '=', PAYMENT), ('res_id', '=', payment.id)])
+        # FİKSTÜR DÜZELTMESİ (A4-G2): oluşturana giden KK-30 bildirimi (message_post, is_notification)
+        # dekont e-postası değildir; yalnız şablon/sihirbaz e-postaları sayılır.
+        return self.env['mail.mail'].sudo().search([('model', '=', PAYMENT), ('res_id', '=', payment.id),
+                                                    ('is_notification', '=', False)])
 
     # ------------------------------------------------------------------ fikstür
     def next_inv(self):
@@ -212,7 +239,7 @@ class ReceiptMixin:
     def leak_texts(self):
         """Bu testte üretilen her kalıcı/giden metin: SMTP, mail_mail, mail_message, ir_attachment, sanal_pos_*."""
         cr = self.env.cr
-        found = [('smtp', mail.everything) for mail in self.sent]
+        found = [('smtp', mail.everything) for mail in self.smtp_all]
         cr.execute('SELECT t::text FROM mail_mail t WHERE id > %s', [self.before['mail_mail']])
         found += [('mail_mail', row) for (row,) in cr.fetchall()]
         cr.execute('SELECT t::text FROM mail_message t WHERE id > %s', [self.before['mail_message']])

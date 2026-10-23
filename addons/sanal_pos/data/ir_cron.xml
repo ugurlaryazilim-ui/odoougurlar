@@ -34,4 +34,16 @@
         <field name="user_id" ref="base.user_root"/>
         <field name="active" eval="True"/>
     </record>
+    <!-- Aşama 4 (K-18): ödendi mail order için otomatik dekont e-postası. Asıl çalışması paid
+         geçişindeki tetikledir; 10 dakikalık çalışma kaçan tetik için güvenlik ağıdır. -->
+    <record id="cron_sanal_pos_receipt" model="ir.cron">
+        <field name="name">Sanal POS: dekont e-postası</field>
+        <field name="model_id" ref="model_sanal_pos_payment"/>
+        <field name="state">code</field>
+        <field name="code">model._cron_send_receipts()</field>
+        <field name="interval_number">10</field>
+        <field name="interval_type">minutes</field>
+        <field name="user_id" ref="base.user_root"/>
+        <field name="active" eval="True"/>
+    </record>
 </odoo>
