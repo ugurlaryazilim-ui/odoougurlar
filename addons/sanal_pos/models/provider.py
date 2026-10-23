@@ -34,8 +34,6 @@ bu arayüzü uygulayan bir ``sanal.pos.provider.<kod>`` AbstractModel'i ve ayar 
 """
 import logging
 
-from psycopg2 import errors as pg_errors
-
 from odoo import api, models
 from odoo.exceptions import UserError
 
@@ -45,8 +43,6 @@ _logger = logging.getLogger(__name__)
 
 # Log gövdesi sınırı (KK-39): ~20 KB
 LOG_BODY_LIMIT = 20 * 1024
-# NEDEN 1s: BIN ucunun süre bütçesi (NFR-2.1, ≤ 5 sn) log kilidi beklemesini de taşır (§4.3).
-LOG_FK_LOCK_TIMEOUT = '1s'
 
 
 class SanalPosProvider(models.AbstractModel):
@@ -149,8 +145,10 @@ class SanalPosProvider(models.AbstractModel):
         Log yazımı başarısız olsa bile iş akışı kesilmez (dış çağrıdan sonra raise yok);
         hata yalnız istisna sınıf adıyla loglanır (gövde/sır içermesin).
 
-        ``fk_nowait=True`` (BIN ucu, KK-2.8): ödeme satırı başka işlemde kilitliyse en çok
-        ``LOG_FK_LOCK_TIMEOUT`` beklenir, sonra satır ``payment_id=False`` ile yazılır.
+        ``fk_nowait=True`` (BIN ucu, KK-2.8): satır ödemeye FK ile BAĞLANMAZ (``payment_id=False``);
+        kayıt ``request_body`` sonundaki ``_payment_id`` işaretiyle tanınır (hız sınırı sayacı buna bakar).
+        NEDEN: FK denetimi ödeme satırında ``FOR KEY SHARE`` alır; BIN isteği hem cron/Kapat/dönüşün
+        ``FOR UPDATE``'ini beklerdi hem de işlem sonuna kadar onların NOWAIT kilidini düşürürdü.
         """
         # NEDEN: Mail Order'da kart verisi Odoo'ya hiç girmemeli (bkz. KARARLAR K-13); yanıt gövdesi
         # ya da istisna metni yanlışlıkla PAN taşısa bile her sağlayıcı için tek noktada maskelenir.
@@ -173,42 +171,15 @@ class SanalPosProvider(models.AbstractModel):
             'response_body': response_body,
             'is_financial': bool(is_financial),
         }
+        if fk_nowait and values['payment_id']:
+            # DIKKAT: işaret kaybolursa satır kayıt başına hız sınırı sayacından düşer (``_bin_counts``)
+            values['request_body'] = tools.mark_payment(values['request_body'], values['payment_id'])
+            values['payment_id'] = False
         try:
-            if fk_nowait and values['payment_id']:
-                try:
-                    self._create_log_fk_nowait(values)
-                    return
-                except (pg_errors.LockNotAvailable, pg_errors.SerializationFailure):
-                    # NEDEN: satır cron/Kapat/dönüş FOR UPDATE'i altında; log yine yazılır (hız sınırı
-                    # sayacı kullanıcı üzerinden çalışır), yalnız kayda bağlanmaz.
-                    # DIKKAT: işaret kaybolursa bu satır kayıt başına hız sınırı sayacından düşer (sayaç
-                    # ``_bin_counts`` işarete bakar)
-                    values['request_body'] = tools.mark_payment(values['request_body'], values['payment_id'])
-                    values['payment_id'] = False
             with self.env.cr.savepoint():
                 self.env['sanal.pos.log'].sudo().create(values)
         except Exception as exc:  # noqa: BLE001 - log yazımı akışı bozmamalı
             _logger.warning('sanal_pos: işlem kaydı yazılamadı (%s)', type(exc).__name__)
-
-    def _create_log_fk_nowait(self, values):
-        """Log satırını, ödeme satırının FK kilidini en çok ``LOG_FK_LOCK_TIMEOUT`` bekleyerek yazar.
-
-        DIKKAT: kilit INSERT'ten önce ayrı bir ``FOR KEY SHARE`` ile alınır (FK denetiminin alacağı
-        kilidin aynısı). INSERT'in kendisi beklerse Odoo ``sql_db`` hatalı sorguyu parametreleri
-        (maskeli gövdeler) ile ERROR seviyesinde loglar (§4.5: sunucu loguna gövde yazılmaz);
-        ``log_exceptions=False`` bunu önler. Kilit alındıktan sonra INSERT beklemez.
-        NEDEN set_config: ``SET LOCAL`` RELEASE SAVEPOINT ile geri dönmez, işlem sonuna kadar
-        sürerdi; eski değer elle geri yazılır. Hata olursa savepoint geri alması değeri zaten döndürür.
-        """
-        cr = self.env.cr
-        with cr.savepoint():
-            cr.execute("SELECT current_setting('lock_timeout')")
-            previous = cr.fetchone()[0]
-            cr.execute("SET LOCAL lock_timeout = '%s'" % LOG_FK_LOCK_TIMEOUT)
-            cr.execute('SELECT 1 FROM sanal_pos_payment WHERE id = %s FOR KEY SHARE',
-                       [values['payment_id']], log_exceptions=False)
-            self.env['sanal.pos.log'].sudo().create(values)
-            cr.execute("SELECT set_config('lock_timeout', %s, true)", [previous])
 
 
 class SanalPosPaymentProviderLookup(models.Model):

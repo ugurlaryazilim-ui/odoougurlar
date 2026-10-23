@@ -910,6 +910,24 @@ class TestBinEndpointLock(BinHttpCase):
         self.assertLess(elapsed, 8.0)
         self.assertEqual(len(self.qbin_logs()), 2, 'payment_id\'siz satırlar kullanıcı sayacında görünür')
 
+    def test_uc_sonrasi_odeme_satirinda_fk_kilidi_kalmaz(self):
+        """Ö-3/KK-2.8: uç işlemi açıkken başka işlem ödeme satırını NOWAIT ile kilitleyebilir.
+
+        Eski davranışta QUERYBIN satırının FK denetimi satırda işlem sonuna kadar ``FOR KEY SHARE``
+        tutuyordu; cron/Kapat/dönüşün ``FOR UPDATE NOWAIT``'i bu yüzden düşerdi."""
+        self.credit_card()
+        responses, _elapsed = self.lookup_locked()
+        self.assertEqual(responses[0].status_code, 200, responses[0].text)
+        self.assertEqual(len(self.qbin_logs()), 1, 'önkoşul: satır bu (açık) işlemde yazıldı')
+        holder = self.real_connection()
+        try:
+            cur = holder.cursor()
+            cur.execute('SELECT id FROM sanal_pos_payment WHERE id = %s FOR UPDATE NOWAIT', [self.lock_payment_id])
+            self.assertEqual(cur.fetchone()[0], self.lock_payment_id)
+        finally:
+            holder.rollback()
+            holder.close()
+
     def test_kilit_varken_odeme_satiri_degismez(self):
         holder = self.hold_lock()
         try:

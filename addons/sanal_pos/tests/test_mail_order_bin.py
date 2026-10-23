@@ -525,3 +525,84 @@ class TestBinLookupModel(BinCase):
         self.queue_bin(querybin_body('DEBIT'))
         self.lookup(self.make_mail_order())
         self.assertEqual(self.cron_trigger_count(), before)
+
+    def test_yabanci_kredi_kartinda_program_yazilmaz(self):
+        """Ö-8 / §4.1: yabancı kredi kartı "Banka · Tür · Yurt dışı"; taksit programı geçmez."""
+        self.queue_bin(querybin_body('CREDIT', 'AKBANK', 'AXESS', 'VISA', 'USA'))
+        res = self.lookup(self.make_mail_order())
+        self.assertEqual(res['detected'], 'Akbank · Kredi kartı · Yurt dışı')
+        self.assertEqual(res['program'], '')
+        self.assertEqual(self.mock.actions, ['QUERYBIN'])
+
+    def test_yurt_ici_kredi_kartinda_program_yazilir(self):
+        """Olumlu çapa: yurt içi kredi kartında program kalır (R7 yalnız yabancı kartı değiştirir)."""
+        self.queue_bin(querybin_body('CREDIT', 'AKBANK', 'AXESS', 'VISA', 'TUR'))
+        self.queue_systems(paymentsystems_body([(2, 0)]))
+        res = self.lookup(self.make_mail_order())
+        self.assertEqual(res['detected'], 'Akbank · Axess · Kredi kartı')
+
+    def test_kisa_pan_onekleri_model_yolunda_reddedilir(self):
+        payment = self.make_mail_order()
+        for value in ('36000000', '30012345', '38000000', '39000000', '34000000'):
+            with self.subTest(bin=value):
+                with self.assertRaises(ValueError):
+                    self.lookup(payment, bin_digits=value)
+        self.assertNoParatikaCalls()
+        self.assertFalse(self.logs('QUERYBIN'))
+
+
+# ======================================================================================
+# Düzeltme turu #1: FK bağı yok (Ö-3/KK-2.8) ve BIN adres izin listesi (G2-3)
+# ======================================================================================
+@tagged('post_install', '-at_install', 'sanal_pos')
+class TestBinLogUnlinked(BinCase):
+
+    def test_bin_satirlari_odemeye_baglanmaz_isaret_tasir(self):
+        payment = self.make_mail_order()
+        self.queue_bin(querybin_body('CREDIT'))
+        self.queue_systems(paymentsystems_body([(2, 0)]))
+        self.assertEqual(payment.with_user(self.user_sp)._mail_order_bin_lookup(LEAK_BIN)['status'], 200)
+        mark = '"_payment_id": %d}' % payment.id
+        for action in ('QUERYBIN', 'QUERYPAYMENTSYSTEMS'):
+            with self.subTest(action=action):
+                row = self.logs(action)
+                self.assertEqual(len(row), 1)
+                self.assertFalse(row.payment_id, 'FK yok: ödeme satırında FOR KEY SHARE alınmaz')
+                self.assertTrue(row.request_body.endswith(mark), row.request_body)
+                self.assertNotIn(LEAK_BIN, row.request_body)
+
+    def test_diger_cagrilar_odemeye_bagli_kalir(self):
+        """Kardeş yol: ``fk_nowait=False`` (varsayılan) çağrılarda satır ödemeye bağlanır, işaret yok."""
+        payment = self.make_paid(self.make_payment(invoice_no='BIN-FK'), tran_ref='BF1')
+        self.mock.default('QUERYTRANSACTION', lambda p: qt_body(tran(ref='BF1')))
+        self.provider().query_status(payment)
+        row = self.logs('QUERYTRANSACTION')[-1:]
+        self.assertEqual(row.payment_id, payment)
+        self.assertNotIn('_payment_id', row.request_body or '')
+
+
+@tagged('post_install', '-at_install', 'sanal_pos')
+class TestBinUrlAllowList(BinCase):
+
+    BAD_URLS = ('http://test.paratika.com.tr/paratika/api/v2', 'https://paratika.evil.example/paratika/api/v2',
+                'https://test.paratika.com.tr:8443/paratika/api/v2',
+                'https://x@test.paratika.com.tr/paratika/api/v2')
+
+    def test_izinsiz_adreste_bin_gitmez_satir_yazilmaz_502(self):
+        params = self.env['ir.config_parameter'].sudo()
+        for index, url in enumerate(self.BAD_URLS):
+            with self.subTest(url=url):
+                params.set_param('sanal_pos.paratika_test_url', url)
+                payment = self.make_mail_order(invoice_no='UA-%d' % index, merchant_payment_id='UA-%d-1' % index)
+                self.assertFalse(self.provider().query_bin(payment, LEAK_BIN)['ok'])
+                self.assertFalse(self.provider().query_card_installments(payment, LEAK_BIN)['ok'])
+                self.assertEqual(payment.with_user(self.user_sp)._mail_order_bin_lookup(LEAK_BIN), {'status': 502})
+        self.assertNoParatikaCalls()
+        self.assertFalse(self.logs('QUERYBIN') | self.logs('QUERYPAYMENTSYSTEMS'), 'sayaç artmaz')
+
+    def test_izinli_ozel_yol_calisir(self):
+        self.env['ir.config_parameter'].sudo().set_param(
+            'sanal_pos.paratika_test_url', 'https://TEST.paratika.com.tr/ozel/api/v2/')
+        self.queue_bin(querybin_body('DEBIT'))
+        self.assertTrue(self.provider().query_bin(self.make_mail_order(), LEAK_BIN)['ok'])
+        self.assertEqual(self.mock.actions, ['QUERYBIN'])

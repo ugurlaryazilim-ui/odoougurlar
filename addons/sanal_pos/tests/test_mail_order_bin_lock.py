@@ -100,6 +100,53 @@ class TestBinUserLock(BinLockCase):
         finally:
             other.close()
 
+    def test_baska_baglanti_kayit_kilidini_tutarken_baska_kullanici_429(self):
+        """G2-1: farklı kullanıcılar aynı kayda sorarken 20/sa kayıt sayacı da sıralanır."""
+        from odoo.addons.sanal_pos.models.sanal_pos_payment import BIN_RECORD_LOCK_NAMESPACE
+        payment = self.make_mail_order()
+        sibling = self.make_mail_order(invoice_no='BIN-SIB', merchant_payment_id='BIN-SIB-1')
+        other = self.real_cursor()
+        try:
+            other.execute('SELECT pg_advisory_lock(%s, %s)', [BIN_RECORD_LOCK_NAMESPACE, payment.id])
+            with patch(PAYMENT_MODULE + '.BIN_LOCK_TIMEOUT', '300ms'), self.capture_logs() as captured:
+                result = self.lookup(payment, user=self.user_mgr)
+            self.assertEqual(result, {'status': 429})
+            self.assertNoParatikaCalls()
+            self.assertFalse(self.logs('QUERYBIN'))
+            self.assertTrue(any('sıralama kilidi alınamadı' in line for line in captured), captured)
+            self.assertEqual(self.lookup(sibling, user=self.user_mgr)['status'], 200, 'kilit kayda özel')
+            other.execute('SELECT pg_advisory_unlock(%s, %s)', [BIN_RECORD_LOCK_NAMESPACE, payment.id])
+            self.assertEqual(self.lookup(payment, user=self.user_mgr)['status'], 200)
+            self.env.cr.execute("""SELECT count(*) FROM pg_locks WHERE locktype = 'advisory' AND classid = %s
+                                      AND objid = %s AND pid = pg_backend_pid()""",
+                                [BIN_RECORD_LOCK_NAMESPACE, payment.id])
+            self.assertEqual(self.env.cr.fetchone()[0], 1, 'kayıt kilidi işlem sonuna kadar tutulur')
+        finally:
+            other.close()
+
+    def test_sure_butcesi_kilit_beklemesini_kapsar(self):
+        """Ö-1: ikinci çağrı sınırı (1,0 sn) istek başından ölçülür; kilit beklemesi de içindedir."""
+        payment = self.make_mail_order()
+        model = type(payment)
+        original_lock = model._bin_user_lock
+        offset = [0.0]
+        real = time.monotonic
+
+        def slow_lock(this):
+            offset[0] += 0.8                 # kilit beklemesi
+            return original_lock(this)
+
+        def quick_bin(params):
+            offset[0] += 0.3                 # tek başına 1,0 sn altında
+            return querybin_body('CREDIT')
+
+        self.mock.queue('QUERYBIN', quick_bin)
+        with patch.object(model, '_bin_user_lock', slow_lock), patch('time.monotonic', lambda: real() + offset[0]):
+            self.assertEqual(self.lookup(payment), {'status': 502})
+        self.assertEqual(self.mock.actions, ['QUERYBIN'], '0,8 + 0,3 > 1,0: ikinci çağrı yapılmaz')
+        from odoo.addons.sanal_pos.models import sanal_pos_payment as module
+        self.assertEqual(module.BIN_LOCK_TIMEOUT, '500ms', 'NFR-2.1: 2 x 0,5 + 3,5 = 4,5 sn')
+
 
 @tagged('post_install', '-at_install', 'sanal_pos')
 class TestBinRecordCounter(BinLockCase):
@@ -165,13 +212,17 @@ class TestBinFreshSnapshot(BinLockCase):
         finally:
             cr.close()
 
-    def commit_marked_rows(self, payment, count):
+    def commit_marked_rows(self, payment, count, uid=SUPERUSER_ID, warning=False):
         cr = self.real_cursor()
         try:
-            Log = api.Environment(cr, SUPERUSER_ID, {})['sanal.pos.log']
-            rows = Log.create([{'action': 'QUERYBIN', 'provider': 'paratika', 'environment': 'test',
-                                'request_body': mark_payment('{"ACTION": "QUERYBIN"}', payment.id)}
-                               for _ in range(count)])
+            Log = api.Environment(cr, uid, {}, su=True)['sanal.pos.log']
+            vals = [{'action': 'QUERYBIN', 'provider': 'paratika', 'environment': 'test',
+                     'request_body': mark_payment('{"ACTION": "QUERYBIN"}', payment.id)}
+                    for _ in range(count)]
+            if warning:
+                vals.append({'action': 'BIN_RATE_LIMIT', 'provider': 'paratika', 'environment': 'test',
+                             'request_body': json.dumps({'user_id': uid, 'payment_id': payment.id})})
+            rows = Log.create(vals)
             self.committed += rows.ids
             cr.commit()
         finally:
@@ -188,3 +239,21 @@ class TestBinFreshSnapshot(BinLockCase):
         with patch.object(self.registry, 'cursor', self.real_cursor):
             self.assertEqual(self.lookup(payment), {'status': 429})
         self.assertEqual(self.mock.count('QUERYBIN'), 1, 'reddedilen istek sağlayıcıya gitmez')
+
+    def test_baska_baglantinin_commitli_uyari_satiri_varken_ikinci_uyari_yok(self):
+        """G2-2: eşzamanlı istekten commit'lenmiş BIN_RATE_LIMIT satırı yeni imleçte görülür; çift satır/uyarı yok.
+
+        Kullanıcı commit'li yönetici (id 2): diğer bağlantıda ``create_uid`` FK'si test işlemindeki kullanıcıyı görmez.
+        """
+        admin = self.env.ref('base.user_admin')
+        admin.write({'group_ids': [(4, self.env.ref('sanal_pos.group_sanal_pos_user').id)]})
+        payment = self.make_mail_order()
+        Log = self.env['sanal.pos.log'].sudo()
+        self.commit_marked_rows(payment, 20, uid=admin.id, warning=True)
+        self.assertFalse(Log.search([('action', '=', 'BIN_RATE_LIMIT')]),
+                         'önkoşul: ana işlem commit\'li uyarı satırını görmez (eski anlık görüntü)')
+        with patch.object(self.registry, 'cursor', self.real_cursor), self.capture_logs() as captured:
+            self.assertEqual(self.lookup(payment, user=admin), {'status': 429})
+        self.assertFalse([line for line in captured if 'hız sınırı aşıldı' in line], 'ikinci uyarı yazılmaz')
+        self.assertFalse(Log.search([('action', '=', 'BIN_RATE_LIMIT')]), 'ikinci BIN_RATE_LIMIT satırı yazılmaz')
+        self.assertNoParatikaCalls()

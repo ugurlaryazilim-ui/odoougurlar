@@ -147,7 +147,7 @@ BIN_PATH = '/sanal_pos/mail_order/bin'
 # değeri yazar; eşitlik test edilir).
 # DIKKAT: betik diff'i ile bu sabitin diff'i AYNI commit'te ve aynı incelemede görünür (A1-G3 sözleşmesi);
 # sabiti incelemesiz ayrı bir commit'le değiştirmek PCI 6.4.3/11.6.1 kontrolünü boşa çıkarır.
-SCRIPT_SHA256 = 'ac92Na799IAc62rP+Mqew7KvniDjhvb11SFRR1TGbCk='
+SCRIPT_SHA256 = 'shzuFBD/bBX6iqmULEIgTR1nKugJ2sWS6Fr6eosXgo0='
 
 # Yasak belirteçler (KK-1.15 + tasarım §3.5/7). Yorum satırları çıkarıldıktan sonra aranır.
 FORBIDDEN_TOKENS = {

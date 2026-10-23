@@ -547,14 +547,20 @@ class SanalPosProviderParatika(models.AbstractModel):
         payment = payment.sudo()
         if not payment.provider_token:
             return None
+        api_url = self._card_data_api_url(payment, 'kart formu')
+        return '%s/post/sale3d/%s' % (api_url, payment.provider_token) if api_url else None
+
+    def _card_data_api_url(self, payment, purpose):
+        """Kart verisi (form ya da BIN) taşıyan isteğin API adresi; https + ``DIRECT_POST_HOSTS``
+        dışındaysa ``None`` ve hata logu (G-1). DIKKAT: izin listesi kodda sabittir, ayarla genişletilemez."""
         api_url = self._api_url(payment)
         parts = urlsplit(api_url)
         if (parts.scheme != 'https' or (parts.hostname or '') not in DIRECT_POST_HOSTS
                 or parts.port or '@' in parts.netloc):
-            _logger.error('sanal_pos: kart formu adresi izin listesinde değil (host=%s), ödeme id=%s',
-                          parts.hostname, payment.id)
+            _logger.error('sanal_pos: %s adresi izin listesinde değil (host=%s), ödeme id=%s',
+                          purpose, parts.hostname, payment.id)
             return None
-        return '%s/post/sale3d/%s' % (api_url, payment.provider_token)
+        return api_url
 
     @api.private
     def query_installments(self, payment):
@@ -616,6 +622,16 @@ class SanalPosProviderParatika(models.AbstractModel):
     # DIKKAT: BIN yalnız bu iki çağrının isteğinde bulunur. ``sanal_pos_extra_secrets`` onu istek/yanıt
     # günlüğünden, ham yanıttan ve hata metninden siler (CARD_PARAM_KEYS ve ``bin$`` maskesinin üstüne
     # üçüncü katman); dönüş sözlüğüne yalnız kod alanları girer (KK-2.9).
+    def _bin_call(self, payment, action, bin_digits):
+        """BIN taşıyan çağrı. NEDEN adres denetimi (K-16): BIN yalnız Paratika'ya https ile gider; ayar
+        http ya da başka host gösterirse istek hiç yapılmaz, satır yazılmaz (sayaç artmaz), ``ok=False``."""
+        payment.ensure_one()
+        payment = payment.sudo()
+        if not self._card_data_api_url(payment, 'BIN sorgusu'):
+            return self._result(error_code='URL_NOT_ALLOWED')
+        return self.with_context(sanal_pos_extra_secrets=[bin_digits])._call(
+            payment, action, {'BIN': bin_digits}, timeout=BIN_TIMEOUT, fk_nowait=True)
+
     @api.private
     def query_bin(self, payment, bin_digits):
         """QUERYBIN: ``card_type`` (``credit|debit|prepaid|unknown``), ``bank_code``, ``network``,
@@ -624,9 +640,7 @@ class SanalPosProviderParatika(models.AbstractModel):
         NEDEN yalnız kod alanları: ``issuer``/``cardName`` serbest metindir ve Türkçe karakter
         çözümlemesi doğrulanmadı (spike); ekrandaki ad ``tools.bank_label`` eşlemesinden gelir.
         """
-        payment.ensure_one()
-        res = self.with_context(sanal_pos_extra_secrets=[bin_digits])._call(
-            payment.sudo(), 'QUERYBIN', {'BIN': bin_digits}, timeout=BIN_TIMEOUT, fk_nowait=True)
+        res = self._bin_call(payment, 'QUERYBIN', bin_digits)
         data = res.pop('data', None)
         # NEDEN: errorMsg sağlayıcı metnidir ve girdiyi yankılayabilir; çağıran yalnız kodu kullanır
         res.pop('error_message', None)
@@ -655,9 +669,7 @@ class SanalPosProviderParatika(models.AbstractModel):
         gideceği POS'tur, okunmaz. ``paymentSystem`` kimlik olarak kullanılmaz (QUERYINSTALLMENT
         numaralandırmasıyla tutmuyor, spike). Liste/sistem yoksa ``ok=True, options=[]`` (taksitsiz).
         """
-        payment.ensure_one()
-        res = self.with_context(sanal_pos_extra_secrets=[bin_digits])._call(
-            payment.sudo(), 'QUERYPAYMENTSYSTEMS', {'BIN': bin_digits}, timeout=BIN_TIMEOUT, fk_nowait=True)
+        res = self._bin_call(payment, 'QUERYPAYMENTSYSTEMS', bin_digits)
         data = res.pop('data', None)
         res.pop('error_message', None)
         res['options'] = []

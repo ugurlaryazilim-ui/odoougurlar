@@ -173,6 +173,11 @@ html.mo-js .mo-nojs-only { display: none; }
  * gidiyordu. Gizliyken visibility:hidden, erişilebilirlik ağacına girmez. #mo-form-error .mo-field dışında. */
 html.mo-js .mo-field .mo-error { min-height: 1.5em; }
 html.mo-js .mo-field .mo-error[hidden] { display: block !important; visibility: hidden; }
+/* NEDEN (B-3): 360 px altında en uzun kart numarası hatası iki satıra sarılır; yer iki satır ayrılır
+ * (360 px ve üstünde tek satıra sığar). Metin betikte; kısaltmak betik hash'ini değiştirirdi. */
+@media (max-width: 22.49rem) {
+    html.mo-js .mo-field #pan-error { min-height: 3em; }
+}
 .mo-row { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: .75rem; align-items: start; }
 .mo-row .mo-field { margin-bottom: 1rem; }
 .mo-expiry { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }

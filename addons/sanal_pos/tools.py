@@ -44,7 +44,7 @@ _SCRIPT_FORBIDDEN_RE = re.compile(r'</script|<!--', re.IGNORECASE)
 # bu değer, tests/test_mail_order_pci.SCRIPT_SHA256 ve README envanteri AYNI commit'te güncellenir.
 # NEDEN: repoda CI yok; testsiz birleştirilen bir değişiklik CSP hash'i otomatik türediği için
 # tarayıcıda çalışırdı. Kasıtlı içeriden değişikliği durdurmaz (sabit aynı repoda).
-MAIL_ORDER_SCRIPT_SHA256 = 'ac92Na799IAc62rP+Mqew7KvniDjhvb11SFRR1TGbCk='
+MAIL_ORDER_SCRIPT_SHA256 = 'shzuFBD/bBX6iqmULEIgTR1nKugJ2sWS6Fr6eosXgo0='
 
 
 class MailOrderScriptHashMismatch(ValueError):
@@ -140,11 +140,38 @@ def network_label(code):
 
 # ---------------------------------------------------------------- kart tanıma (A2, K-19)
 # QUERYBIN issuerType kodu -> ekrandaki banka adı. issuer/cardName serbest metni kullanılmaz (spike).
-# EKIP-BORC: spike'ta yalnız AKBANK görüldü; canlıda görülen kodlar (Garanti, İş, YKB...) duman testinden
-# sonra eklenir. Eklenene kadar bilinmeyen kod başlık biçiminde gösterilir (kaybolmaz).
-BANK_NAMES = {
-    'AKBANK': 'Akbank',
+# Anahtar normalize koddur (büyük harf, yalnız A-Z0-9): 'YAPI_KREDI' ve 'YAPIKREDI' aynı satıra düşer.
+# EKIP-BORC: spike'ta yalnız AKBANK ve GARANTI kodları görüldü; diğerleri banka adının olası kod
+# yazımlarıdır (Paratika belgesi kodları listelemiyor). Canlı duman testinde görülen kod burada yoksa
+# eklenir; eklenene kadar bilinmeyen kod başlık biçiminde gösterilir (kaybolmaz).
+_BANK_ALIASES = {
+    'Akbank': ('AKBANK',),
+    'Garanti BBVA': ('GARANTI', 'GARANTIBBVA', 'GARANTIBANKASI'),
+    'Yapı Kredi': ('YAPIKREDI', 'YKB', 'YAPIVEKREDI'),
+    'İş Bankası': ('ISBANK', 'ISBANKASI', 'TISBANKASI'),
+    'Ziraat Bankası': ('ZIRAAT', 'ZIRAATBANKASI', 'TCZIRAAT'),
+    'Halkbank': ('HALKBANK', 'HALK', 'HALKBANKASI'),
+    'VakıfBank': ('VAKIFBANK', 'VAKIF', 'VAKIFLAR', 'VAKIFLARBANKASI'),
+    'QNB': ('QNB', 'QNBFINANSBANK', 'FINANSBANK'),
+    'DenizBank': ('DENIZBANK', 'DENIZ'),
+    'TEB': ('TEB', 'TURKEKONOMI', 'TURKEKONOMIBANKASI'),
+    'ING': ('ING', 'INGBANK'),
+    'HSBC': ('HSBC',),
+    'Şekerbank': ('SEKERBANK', 'SEKER'),
+    'Fibabanka': ('FIBABANKA', 'FIBA'),
+    'Odeabank': ('ODEABANK', 'ODEA'),
+    'Kuveyt Türk': ('KUVEYTTURK', 'KUVEYT'),
+    'Albaraka Türk': ('ALBARAKA', 'ALBARAKATURK'),
+    'Enpara': ('ENPARA',),
+    'Türkiye Finans': ('TURKIYEFINANS',),
+    'Anadolubank': ('ANADOLUBANK',),
+    'Burgan Bank': ('BURGAN', 'BURGANBANK'),
+    'Vakıf Katılım': ('VAKIFKATILIM',),
+    'Ziraat Katılım': ('ZIRAATKATILIM',),
+    'Emlak Katılım': ('EMLAKKATILIM',),
 }
+BANK_NAMES = {code: name for name, codes in _BANK_ALIASES.items() for code in codes}
+_BANK_KEY_RE = re.compile(r'[^A-Z0-9]', re.ASCII)
 CARD_TYPE_LABELS = {'credit': 'Kredi kartı', 'debit': 'Banka kartı', 'prepaid': 'Ön ödemeli kart'}
 # QUERYBIN cardBrand kodu -> kart sayfası logo anahtarı (``img[data-brand]``)
 BRAND_KEYS = {'VISA': 'visa', 'MC': 'mastercard', 'MASTERCARD': 'mastercard', 'TROY': 'troy',
@@ -152,12 +179,16 @@ BRAND_KEYS = {'VISA': 'visa', 'MC': 'mastercard', 'MASTERCARD': 'mastercard', 'T
 _BRAND_KEY_RE = re.compile(r'[a-z0-9_]{1,32}', re.ASCII)
 # NEDEN re.ASCII: \d / [0-9] Unicode modunda Arapça-Hint rakamlarını da kabul eder (KK-2.7)
 _BIN_RE = re.compile(r'[0-9]{8}', re.ASCII)
+# 16 haneden kısa PAN'lı ağlar: Amex 34/37 (15 hane), Diners 300-305/36/38/39 (14 hane). Betikteki
+# ``/^3(0[0-5]|[46-9])/`` ile aynı liste. NEDEN (01 §3, PCI SSC FAQ 1091): kısa PAN'da ilk 8 + son 4
+# kesme sınırını aşar; bu kartlarda BIN sorgulanmaz, sayfa uyarı gösterir, ödeme engellenmez (G2-4).
+SHORT_PAN_PREFIXES = ('34', '37', '36', '38', '39', '300', '301', '302', '303', '304', '305')
 
 
 def valid_bin(value):
-    """Tam 8 ASCII rakam, Amex (34/37) değil. BIN ucu ve model aynı kuralı kullanır (KK-2.7)."""
+    """Tam 8 ASCII rakam, kısa PAN'lı ağ (``SHORT_PAN_PREFIXES``) değil. Uç ve model aynı kuralı kullanır."""
     return (isinstance(value, str) and bool(_BIN_RE.fullmatch(value))
-            and not value.startswith(('34', '37')))
+            and not value.startswith(SHORT_PAN_PREFIXES))
 
 
 # NEDEN: ``sanal.pos.log``'da kaydı tanımlayan alan yok; ödemeye bağlanamayan (``payment_id=False``) QUERYBIN
@@ -176,9 +207,8 @@ def mark_payment(request_body, payment_id):
 def bank_label(code):
     """Banka kodu -> ad; bilinmeyen kod ``YENI_BANKA`` -> ``Yeni Banka``; boş -> ``''``."""
     code = code.strip().upper() if isinstance(code, str) else ''
-    if code in BANK_NAMES:
-        return BANK_NAMES[code]
-    return code.replace('_', ' ').title()
+    name = BANK_NAMES.get(_BANK_KEY_RE.sub('', code))
+    return name or code.replace('_', ' ').title()
 
 
 def program_label(code):

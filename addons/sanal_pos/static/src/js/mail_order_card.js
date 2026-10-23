@@ -1,8 +1,6 @@
-/* Mail Order kart sayfası betiği (K-16, tasarım §3.5).
- * DIKKAT: assets'e eklenmez; tools.mail_order_script() satır içi basar, sha256'sı CSP'dedir. Her
- * değişiklik kod incelemesi + SCRIPT_SHA256 (test_mail_order_pci) ister. Tek ağ isteği BIN ucuna (ilk
- * 8 hane, §4.7); depolama/console/HTML yazımı yok; CVV değeri okunmaz. Desen gevşetme ve mo-js EN
- * SONDA (yarım kurulum = script'siz). */
+/* Mail Order kart sayfası (K-16, §3.5). DIKKAT: assets'e girmez; tools.mail_order_script satır içi
+ * basar, sha256 CSP'de: değişiklik = inceleme + SCRIPT_SHA256. Tek ağ isteği BIN ucu (8 hane, §4.7);
+ * depolama/console/HTML yazımı yok, CVV okunmaz. Desen gevşetme, mo-js EN SONDA (yarım kurulum = betiksiz). */
 (function () {
   'use strict';
   var D = document;
@@ -95,13 +93,15 @@
       binSt.textContent = res.note || '';
       onInst();
     }
-    /* cache: 0 = istek sürüyor, nesne = başarılı yanıt. NEDEN: hata girmez, aynı BIN yeniden sorulur (S1). */
+    /* cache: 0 = istek sürüyor, nesne = başarılı yanıt. NEDEN: hata girmez, aynı BIN yeniden sorulur (S1).
+     * Amex/Diners sorulmaz (G2-4). */
     function onBin(n) {
-      var b = !isExpired && n.length >= 8 && !/^3[47]/.test(n) ? n.slice(0, 8) : '';
+      var b = isExpired ? '' : /^3(0[0-5]|[46-9])/.test(n) ? 's' : n.length > 7 ? n.slice(0, 8) : '';
       if (!binOn || b === want) { return; }
       want = b;
       reset();
-      if (!b) { return; }
+      if (b === 's') { binSt.textContent = 'Bu kartta taksit sorgulanmaz; desteklenmeyen taksiti banka reddeder.'; }
+      if (b.length < 8) { return; }
       var v = cache.get(b);
       if (v) { apply(v); return; }
       binSt.textContent = 'Taksitler yükleniyor…';

@@ -480,6 +480,25 @@ class TestBankCardLabelStage2(TransactionCase):
         self.assertNotIn('A.S.', t.bank_label('AKBANK'))
         self.assertTrue(isinstance(t.bank_label('AKBANK'), str))
 
+    def test_bank_label_turkce_adlar_ve_kod_yazim_bicimleri(self):
+        """B-5: kod sözlükte yoksa başlık biçimi Türkçe harfi kaybederdi (``Yapikredi``)."""
+        t = _tools()
+        for code, expected in (('YAPIKREDI', 'Yapı Kredi'), ('YAPI_KREDI', 'Yapı Kredi'), ('yapı kredi', 'Yapı Kredi'),
+                               ('GARANTI', 'Garanti BBVA'), ('ISBANK', 'İş Bankası'), ('VAKIFBANK', 'VakıfBank'),
+                               ('ZIRAAT', 'Ziraat Bankası'), ('HALKBANK', 'Halkbank'), ('AKBANK', 'Akbank')):
+            with self.subTest(kod=code):
+                self.assertEqual(t.bank_label(code), expected)
+
+    def test_valid_bin_kisa_pan_aglari_reddedilir(self):
+        """G2-4: 14-15 haneli ağlarda (Amex 34/37, Diners 300-305/36/38/39) 8 hane PAN'ın yarısını aşar."""
+        t = _tools()
+        for value in ('34000000', '37999999', '36000000', '38000000', '39000000', '30000000', '30599999'):
+            with self.subTest(bin=value):
+                self.assertFalse(t.valid_bin(value))
+        for value in ('43550843', '30600000', '35000000', '33000000', '52828282', '97920000'):
+            with self.subTest(bin=value):
+                self.assertTrue(t.valid_bin(value))
+
     def test_card_label_kredi_kartlari(self):
         t = _tools()
         self.assertEqual(t.card_label('Akbank', 'Axess', 'credit'), 'Akbank · Axess · Kredi kartı')

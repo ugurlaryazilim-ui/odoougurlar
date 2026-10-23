@@ -216,6 +216,24 @@ test('amex_onekleri_34_37_istek_atmaz', async () => {
   assert.equal(p.fetches.length, 0);
 });
 
+test('kisa_pan_aglari_diners_amex_istek_atmaz_not_yazar', async () => {
+  // G2-4: 14-15 haneli ağlarda ilk 8 hane PAN'ın yarısından fazlasıdır; sorulmaz, uyarı yazılır
+  const SKIP = 'Bu kartta taksit sorgulanmaz; desteklenmeyen taksiti banka reddeder.';
+  for (const value of ['36000000', '30000000', '30512345', '38000000', '39000000', '34000000', '37000000']) {
+    const p = page();
+    type(p, value);
+    await flush();
+    assert.equal(p.fetches.length, 0, value);
+    assert.equal(p.els['mo-bin-status'].textContent, SKIP, value);
+    assert.ok(p.radios.every(shown), 'tüm seçenekler görünür kalır: ' + value);
+    type(p, BIN);
+    assert.equal(p.fetches.length, 1, 'normal BIN sonrası sorgu çalışır: ' + value);
+  }
+  const p = page();
+  type(p, '30612345');               // 306 Diners aralığında değil (300-305)
+  assert.equal(p.fetches.length, 1);
+});
+
 test('beklerken_yukleniyor_gosterilir_dugme_kilitlenmez_gonderim_gecer', async () => {
   const p = page();
   p.els.cardOwner.value = 'AHMET YILMAZ';

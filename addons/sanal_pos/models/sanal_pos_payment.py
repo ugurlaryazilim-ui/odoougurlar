@@ -115,10 +115,16 @@ MAIL_ORDER_RESULT_MIN_INTERVAL = timedelta(seconds=10)
 BIN_RATE_WINDOW = timedelta(hours=1)
 BIN_RATE_PER_RECORD = 20
 BIN_RATE_PER_USER = 60
-# Kullanıcı başına BIN sorgusu sıralama kilidi (``pg_advisory_xact_lock(ad alanı, uid)``); bekleme sınırlı
+# BIN sorgusu sıralama kilitleri: önce kullanıcı ``(BIN1, uid)``, sonra kayıt ``(BIN2, payment_id)``
 BIN_LOCK_NAMESPACE = 0x42494E31     # 'BIN1'
-BIN_LOCK_TIMEOUT = '4s'
-# NEDEN: QUERYBIN bundan uzun sürdüyse ikinci çağrı NFR-2.1 bütçesini (≤ 5 sn) aşabilir; kredi kartı 502 alır
+BIN_RECORD_LOCK_NAMESPACE = 0x42494E32     # 'BIN2'
+# NEDEN süre bütçesi (NFR-2.1 / KK-2.5a, uç ≤ 5 sn; istemci 6 sn'de keser): her kilit en çok 0,5 sn
+# (iki kilit ≤ 1,0 sn; aynı kullanıcının önceki isteği normalde ≤ 0,3 sn sürer, betik aynı anda tek istek
+# atar) + QUERYBIN ≤ 3,5 sn (BIN_TIMEOUT: bağlantı 1,5 + okuma 2,0) = hesap/yabancı kart en çok 4,5 sn.
+# Kredi kartında QUERYPAYMENTSYSTEMS (≤ 3,5 sn) yalnız istek BAŞINDAN (kilit beklemesi dahil) bu yana
+# ≤ BIN_SECOND_CALL_MAX geçtiyse yapılır: 1,0 + 3,5 = 4,5 sn; aksi halde 502 (sayfa yedeğe düşer).
+# Log satırı ödeme satırını beklemez (``payment_id=False`` + işaret, KK-2.8), bütçeye girmez.
+BIN_LOCK_TIMEOUT = '500ms'
 BIN_SECOND_CALL_MAX = 1.0
 BIN_NOTE_DEBIT = 'Banka kartıyla taksit yapılamaz.'
 BIN_NOTE_PREPAID = 'Ön ödemeli kartla taksit yapılamaz.'
@@ -872,12 +878,13 @@ class SanalPosPayment(models.Model):
         self.check_access('read')
         self._check_card_page_open()
         rec = self.sudo()
+        # NEDEN kilitten önce: süre bütçesi kilit beklemesini de kapsar (bkz. BIN_LOCK_TIMEOUT)
+        started = time.monotonic()
         # DIKKAT: kilit sayaç kontrolünden ÖNCE alınır ve işlem sonuna (QUERYBIN satırının commit'i) kadar
         # tutulur; sırayı bozmak (ör. kontrolü kilidin önüne almak) hız sınırı yarışını geri getirir.
         if not rec._bin_user_lock() or rec._bin_rate_limited():
             return {'status': 429}
 
-        started = time.monotonic()
         info = rec._call_provider_safely('query_bin', 'BIN sorgusunda', bin_digits)
         elapsed = time.monotonic() - started
         card_type = info.get('card_type')
@@ -902,7 +909,8 @@ class SanalPosPayment(models.Model):
             options = listing.get('options') or []
             note = '' if options else BIN_NOTE_NONE
         bank = bank_label(info.get('bank_code'))
-        program = program_label(info.get('network')) if card_type == 'credit' else ''
+        # NEDEN yurt içi şartı: §4.1 yabancı kartta "Banka · Tür · Yurt dışı" yazar (taksit programı geçmez)
+        program = program_label(info.get('network')) if card_type == 'credit' and not foreign else ''
         return {
             'status': 200,
             'ok': True,
@@ -919,15 +927,17 @@ class SanalPosPayment(models.Model):
         }
 
     def _bin_user_lock(self):
-        """Kullanıcıya özel ``pg_advisory_xact_lock``; alınamazsa (``BIN_LOCK_TIMEOUT``) False.
+        """Kullanıcı, ardından kayıt ``pg_advisory_xact_lock``'u; biri alınamazsa (``BIN_LOCK_TIMEOUT``) False.
 
         NEDEN: hız sınırı sayacı ile QUERYBIN log satırı (sayacın kaynağı) ayrı adımlarda ve farklı
         zamanlarda yazılır; kilitsiz eşzamanlı istekler aynı eski sayıyı okuyup sınırı aşardı (TOCTOU).
-        Kilit yalnız aynı kullanıcının BIN sorgularını sıralar (başka kullanıcıyı ve ödeme satırını
-        etkilemez, saatte ≤ 60 sorgu ile sınırlı); işlem sonunda log satırı ile birlikte düşer, bir
-        sonraki istek kilidi aldığında bu satırı görür. Sağlayıcı çağrısı da kilit altındadır
+        Kullanıcı kilidi 60/sa sayacını, kayıt kilidi 20/sa sayacını (farklı kullanıcılar aynı kayda
+        sorarken, G2-1) sıralar; ödeme satırına dokunmaz. Kilitler işlem sonunda log satırı ile birlikte
+        düşer, sıradaki istek kilidi aldığında bu satırı görür. Sağlayıcı çağrısı da kilit altındadır
         (çağrıdan sonra yazılan satır sayaçtır; çağrıdan önce yer tutucu yazmak çift sayım yapardı).
-        DIKKAT: bekleme sınırlıdır; ``SET LOCAL`` RELEASE SAVEPOINT ile geri dönmez, eski değer elle yazılır.
+        DIKKAT sıra: her istek önce kullanıcı, sonra kayıt kilidini alır ve başka kilit beklemez; sabit sıra
+        kilitlenmeyi (deadlock) önler. ``SET LOCAL`` RELEASE SAVEPOINT ile geri dönmez, eski değer elle
+        yazılır (hata olursa savepoint geri alması değeri zaten döndürür).
         """
         cr = self.env.cr
         try:
@@ -935,24 +945,26 @@ class SanalPosPayment(models.Model):
                 cr.execute("SELECT current_setting('lock_timeout')")
                 previous = cr.fetchone()[0]
                 cr.execute("SET LOCAL lock_timeout = '%s'" % BIN_LOCK_TIMEOUT)
-                cr.execute('SELECT pg_advisory_xact_lock(%s, %s)', [BIN_LOCK_NAMESPACE, self.env.uid],
-                           log_exceptions=False)
+                for key in ((BIN_LOCK_NAMESPACE, self.env.uid), (BIN_RECORD_LOCK_NAMESPACE, self.id)):
+                    cr.execute('SELECT pg_advisory_xact_lock(%s, %s)', list(key), log_exceptions=False)
                 cr.execute("SELECT set_config('lock_timeout', %s, true)", [previous])
         except (pg_errors.LockNotAvailable, pg_errors.QueryCanceled):
+            _logger.info('sanal_pos: BIN sıralama kilidi alınamadı; kullanıcı id=%s, ödeme id=%s',
+                         self.env.uid, self.id)
             return False
         return True
 
     def _bin_counts(self, Log, since):
-        """(kayıt sayacı, kullanıcı sayacı); ``Log`` hangi imleçte sayılacağını belirler.
+        """(kayıt sayacı, kullanıcı sayacı, kullanıcının ``BIN_RATE_LIMIT`` satırı sayısı) son pencerede.
 
-        ``payment_id=False`` düşen satırlar (FK kilidi, ``_log_call`` yedek dalı) ``request_body``
-        içindeki ``_payment_id`` işaretiyle kayda bağlanır: log modelinde kaydı tanımlayan başka alan yok.
+        ``Log`` hangi imleçte sayılacağını belirler. QUERYBIN satırları ödemeye FK ile bağlanmaz
+        (KK-2.8); kayıt ``request_body`` sonundaki ``_payment_id`` işaretiyle tanınır.
         """
-        recent = [('action', '=', 'QUERYBIN'), ('create_date', '>', since)]
-        record = ['|', ('payment_id', '=', self.id),
-                  '&', ('payment_id', '=', False), ('request_body', 'like', BIN_PAYMENT_MARK % self.id)]
-        return (Log.search_count(recent + record),
-                Log.search_count(recent + [('create_uid', '=', self.env.uid)]))
+        recent = [('create_date', '>', since)]
+        qbin = recent + [('action', '=', 'QUERYBIN')]
+        return (Log.search_count(qbin + [('request_body', 'like', BIN_PAYMENT_MARK % self.id)]),
+                Log.search_count(qbin + [('create_uid', '=', self.env.uid)]),
+                Log.search_count(recent + [('action', '=', 'BIN_RATE_LIMIT'), ('create_uid', '=', self.env.uid)]))
 
     def _bin_rate_limited(self):
         """Son 1 saatte kayıt başına 20, kullanıcı başına 60 QUERYBIN aşıldıysa True.
@@ -965,21 +977,20 @@ class SanalPosPayment(models.Model):
         Log = self.env['sanal.pos.log'].sudo()
         # NEDEN Python saati: test/uzun işlemde create_date işlem başlangıcıdır; pencere duvar saatine göre
         since = fields.Datetime.now() - BIN_RATE_WINDOW
-        record_count, user_count = self._bin_counts(Log, since)
+        main = self._bin_counts(Log, since)
         # NEDEN yeni imleç: Odoo işlemi REPEATABLE READ'dir; anlık görüntü kilidi beklerken eskidi ve
-        # bekleyen isteğin bitirdiği QUERYBIN satırını göstermez. Yeni imleç commit'li satırları görür;
-        # bu işlemin kendi (commit'siz) satırları ana imleçte sayılır, ikisinin büyüğü alınır.
+        # bekleyen isteğin bitirdiği QUERYBIN / BIN_RATE_LIMIT satırını göstermez. Yeni imleç commit'li
+        # satırları görür; bu işlemin kendi (commit'siz) satırları ana imleçte sayılır, büyüğü alınır.
+        # DIKKAT: uyarı satırı denetimi de buradadır (G2-2); ana imleçte kalırsa eşzamanlı istekler çiftler.
         fresh_cr = self.pool.cursor()
         try:
-            fresh_log = api.Environment(fresh_cr, SUPERUSER_ID, {})['sanal.pos.log']
-            fresh_record, fresh_user = self._bin_counts(fresh_log, since)
+            fresh = self._bin_counts(api.Environment(fresh_cr, SUPERUSER_ID, {})['sanal.pos.log'], since)
         finally:
             fresh_cr.close()
-        record_count, user_count = max(record_count, fresh_record), max(user_count, fresh_user)
+        record_count, user_count, warned = (max(pair) for pair in zip(main, fresh))
         if record_count < BIN_RATE_PER_RECORD and user_count < BIN_RATE_PER_USER:
             return False
-        if not Log.search_count([('action', '=', 'BIN_RATE_LIMIT'), ('create_uid', '=', self.env.uid),
-                                 ('create_date', '>', since)]):
+        if not warned:
             details = {'user_id': self.env.uid, 'payment_id': self.id,
                        'record_count': record_count, 'user_count': user_count}
             # NEDEN payment_id=False: satır ödemeye bağlanırsa FK kilidi beklenebilirdi (KK-2.8)
