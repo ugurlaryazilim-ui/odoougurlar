@@ -203,20 +203,21 @@ def installment_table(amount, options):
     per_row = [_visible_networks(o.get('networks')) for o in options or []]
     first = per_row[0] if per_row else []
     same = all(sorted(n) == sorted(first) for n in per_row)
+    base = Decimal(str(amount or 0))
     rows = [{'count': 1, 'networks': [], 'rate_text': 'Vade farkı yok',
              'label': 'Tek çekim', 'surcharge_text': '',
-             'total_text': format_try(Decimal(str(amount or 0))),
-             'monthly_text': format_try(Decimal(str(amount or 0))),
+             'total_text': format_try(base),
+             'monthly_text': format_try(base),
              # EKIP-BORC: select_text eski şablon için kalır (redeploy ile -u arasında eski şablon onu
              # okur; kaldırılırsa kart sayfası 500 verir); A2-G3'te kaldırılır.
-             'select_text': 'Tek çekim — %s' % format_try(Decimal(str(amount or 0)))}]
+             'select_text': 'Tek çekim — %s' % format_try(base)}]
     for option, networks in zip(options or [], per_row):
         rate = Decimal(str(option.get('rate') or 0))
         total, monthly = installment_totals(amount, rate, option['count'])
         shown = [] if same else networks
         # NEDEN: vade farkı tutarı tek hesap kaynağında (KK-1.3/1.4): toplam - tutar; oran 0 ya da
         # tutar farkı yok ise boş (kart "Vade farkı yok" gösterir)
-        surcharge = total - Decimal(str(amount or 0))
+        surcharge = total - base
         rows.append({
             'count': option['count'],
             'label': '%s taksit' % option['count'],
