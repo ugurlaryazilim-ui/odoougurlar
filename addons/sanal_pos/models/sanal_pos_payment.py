@@ -157,6 +157,11 @@ MO_FAIL_WINDOW = timedelta(hours=24)
 MO_LIMIT_MSG = ('Bu fatura için 3 başarısız kart denemesi yapıldı; güvenlik nedeniyle mail order '
                 '24 saat kapalı. Müşteriye ödeme linki gönderin.')
 ATTEMPT_FAIL_STATES = ('failed', 'cancelled')
+# Aşama 3 sonuç sayfası (KK-3.4, KK-3.6, KK-3.8): yenileme tavanı n*5 sn ~ 2 dk, geçmiş satır sınırı
+RESULT_REFRESH_MAX = 24
+RESULT_HISTORY_LIMIT = 10
+# K-15/S3.2: açık banka oturumu bitmeden link açılamaz; saat Europe/Istanbul, "SS:DD" biçiminde
+MO_LINK_WAIT_MSG = "Link en erken %s'de gönderilebilir (açık banka oturumu)"
 # G10: yeniden gönder / link iptali (KK-31, KK-32)
 CHANNEL_MSG = 'En az bir gönderim kanalı seçin.'                                         # KK-9
 RESEND_CHANNELS = ('sms', 'email')
@@ -1067,6 +1072,99 @@ class SanalPosPayment(models.Model):
             return False
         self._sp_commit()
         return True
+
+    def _mail_order_link_wait(self):
+        """K-15 bekleme metni ("Link en erken SS:DD'de ...") ya da bekleme yoksa ``False``.
+
+        NEDEN: son SESSIONTOKEN'dan sonraki 1 saat boyunca banka sekmesi açıksa ödeme yapılabilir
+        (Kapat oturumu sonlandıramaz); aynı faturaya link açmak çift tahsilata yol açar. Sonuç
+        sayfası ve (A3-G3) link eylemi aynı metni bu tek yerden alır. Yazım/çağrı yapmaz.
+        """
+        self.ensure_one()
+        rec = self.sudo()
+        if not rec.sent_at:
+            return False
+        ends = rec.sent_at + timedelta(hours=MAIL_ORDER_EXPIRY_HOURS)
+        if fields.Datetime.now() >= ends:
+            return False
+        return MO_LINK_WAIT_MSG % rec._format_local(ends)[-5:]
+
+    def _mail_order_result_values(self, refresh_count=0):
+        """Sonuç sayfası değerleri (tasarım §5.4): ``view`` + gösterim alanları. Yazım/çağrı yapmaz.
+
+        ``view``: paid | review | declined | pending | closed | other. Kart verisi yoktur; yalnız
+        Paratika'nın verdiği son 4 hane. Düğme kararları (Tekrar dene / Link) burada, tek yerde.
+        """
+        self.ensure_one()
+        self._check_sanal_pos_user()
+        # DECLINE_ADVICE provider_paratika'dadır; o dosya bunu içe aktardığından döngü olmasın diye burada
+        from .provider_paratika import DECLINE_ADVICE
+        rec = self.sudo()
+        Attempt = self.env['sanal.pos.payment.attempt'].sudo()
+        newest = Attempt.search([('payment_id', '=', rec.id)], limit=1)    # _order: en yeni önce
+        values = {
+            'view': 'other', 'state_label': dict(self._fields['state'].selection).get(rec.state, rec.state),
+            'invoice_no': rec.invoice_no, 'customer_name': rec.customer_name,
+            'amount_text': format_try(rec.amount), 'refresh_next': 0, 'refresh_stopped': False,
+            'retry_label': False, 'link_wait': False, 'show_link': False,
+            'block_message': False, 'remaining': False,
+        }
+        if rec.state == 'paid':
+            last4 = (rec.card_last4 or '')[-4:]
+            values.update(
+                view='paid', amount_text=format_try(rec.paid_amount or rec.amount),
+                installments=rec.installment_count or 1,
+                card_masked='**** **** **** %s' % last4 if last4 else False,
+                tran_ref=rec.provider_tran_ref, paid_local=rec._format_local(rec.paid_at))
+        elif rec.state == 'review':
+            values['view'] = 'review'
+        elif rec.state == 'sent':
+            if newest and newest.status in ATTEMPT_FAIL_STATES:
+                code = newest.error_code
+                reason = newest.reason or rec.last_error_message or ''
+                # NEDEN: bilinmeyen kodda _error_message kodu zaten metne ekler; iki kez gösterme
+                values.update(
+                    view='declined', reason=reason, advice=DECLINE_ADVICE.get(code),
+                    code=code if code and code not in reason else False,
+                    retry_label='Tekrar dene')
+            else:
+                # NEDEN: başarısız olmayan en yeni deneme (bekleyen/onaylı ama kayıt henüz paid değil) ya da
+                # hiç deneme yok: Tekrar dene/Link çift tahsilata yol açar (KK-3.4); yalnız izlenir
+                refresh = min(max(int(refresh_count or 0), 0), RESULT_REFRESH_MAX)
+                values.update(view='pending', refresh_stopped=refresh >= RESULT_REFRESH_MAX,
+                              refresh_next=refresh + 1 if refresh < RESULT_REFRESH_MAX else 0)
+        elif rec.state in ('expired', 'error'):
+            values.update(view='closed', retry_label='Yeni deneme aç')
+        if values['view'] in ('declined', 'closed'):
+            blocked = self._mail_order_attempt_block(rec.invoice_no)
+            if blocked:
+                # NEDEN: sınır dolunca yalnız link yolu açık kalır (KK-3.7b/c)
+                values.update(retry_label=False, block_message=blocked)
+            elif values['view'] == 'declined':
+                values['remaining'] = max(0, MO_FAIL_LIMIT - self._mail_order_failed_count(rec.invoice_no))
+            values['link_wait'] = rec._mail_order_link_wait()
+            values['show_link'] = not values['link_wait']
+        # Geçmiş (KK-3.6): bu kaydın tüm denemeleri + aynı faturanın son 24 saatteki diğer mail order
+        # denemeleri; yeniden eskiye, en çok 10. Ödeme yönteni koşulu: aynı fatura no'lu link kaydı sayılmaz.
+        since = fields.Datetime.now() - MO_FAIL_WINDOW
+        rows = Attempt.search([
+            '|', ('payment_id', '=', rec.id),
+            '&', '&', ('payment_id.invoice_no', '=', rec.invoice_no),
+            ('payment_id.payment_method', '=', 'mail_order'), ('tran_time', '>=', since)],
+            limit=RESULT_HISTORY_LIMIT)
+        labels = dict(Attempt._fields['status'].selection)
+        history = []
+        for row in rows:
+            detail = row.reason or ''
+            if row.error_code and row.error_code not in detail:
+                detail = '%s (%s)' % (detail, row.error_code) if detail else '(%s)' % row.error_code
+            history.append({
+                'time': rec._format_local(row.tran_time), 'status': row.status,
+                'label': labels.get(row.status, row.status), 'detail': detail,
+                'installments': row.installment_count or 1,
+                'last4': (row.card_last4 or '')[-4:], 'user': row.user_id.name or ''})
+        values['history'] = history
+        return values
 
     def action_mail_order_close(self):
         """'Mail Order'ı Kapat' (KK-21): açık oturumu kapatır ama önce Paratika'ya sorar.

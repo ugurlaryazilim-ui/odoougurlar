@@ -6,17 +6,19 @@ aşağıdaki DIKKAT'te); formun ``action``'ı Paratika Direct POST 3D (``sale3d`
 Paratika'ya gider; bu modülün hiçbir rotası kart alanı kabul etmez. Tek POST rotası BIN ucudur (Aşama 2,
 K-19): yalnız kartın ilk 8 hanesini ve ödeme kimliğini JSON olarak alır, hiçbir yere yazmaz/loglamaz.
 
-DIKKAT: Sayfada yalnız ``tools.mail_order_script()``'in ürettiği tek hash'li script bulunur (bkz.
+DIKKAT: Kart sayfasında yalnız ``tools.mail_order_script()``'in ürettiği tek hash'li script bulunur (bkz.
 KARARLAR K-16); ikinci script, harici script, satır içi olay işleyicisi, ``'self'``/``unsafe-*``/nonce
 eklemek yasaktır. Bu dosyaya ve ``views/mail_order_templates.xml``'e arka uç varlığı (web.layout,
-/web/assets), kart alanına ``value`` ya da Odoo'ya POST eden form eklemek kart verisini Odoo
-koduna/sunucusuna açar ve PCI kapsamını değiştirir (bkz. KARARLAR K-13).
+/web/assets), kart alanına ``value`` ya da kart sayfasına Odoo'ya POST eden form eklemek kart verisini
+Odoo koduna/sunucusuna açar ve PCI kapsamını değiştirir (bkz. KARARLAR K-13).
+Tek istisna SONUÇ sayfasıdır (Aşama 3, KK-3.9): kart alanı ve script içermez, CSP ``form-action 'self'``;
+yalnız CSRF'li Tekrar dene / Link gönder formları bulunur.
 """
 import json
 import logging
 import re
 from datetime import datetime
-from urllib.parse import urlsplit
+from urllib.parse import quote, urlsplit
 
 from markupsafe import Markup
 
@@ -32,6 +34,9 @@ _logger = logging.getLogger(__name__)
 
 PAY_PATH = '/sanal_pos/mail_order/pay/<int:payment_id>'
 BIN_PATH = '/sanal_pos/mail_order/bin'
+# Aşama 3 POST rotaları (A3-G3); sonuç sayfası formlarının hedefi
+RETRY_PATH = '/sanal_pos/mail_order/retry/%d'
+LINK_PATH = '/sanal_pos/mail_order/link/%d'
 RECORD_PATH = PAYMENT_LIST_PATH + '/%d'
 EXPIRY_YEAR_SPAN = 15
 # Dağıtımsız kapatma anahtarı (tasarım §3.9, D-4): İZİN LİSTESİ. Parametre yoksa ya da değeri
@@ -217,8 +222,11 @@ class SanalPosMailOrderController(http.Controller):
         return self._bin_response(status, result if status == 200 else None)
 
     @http.route(MO_RESULT_PATH, type='http', auth='user', methods=['GET'])
-    def mail_order_result(self, mpid=None, **_kwargs):
-        """3D dönüşünden sonra: durumu sorgular ve ödeme kaydının formuna yönlendirir (303)."""
+    def mail_order_result(self, mpid=None, n=None, **_kwargs):
+        """3D dönüşünden sonra: durumu sorgular ve standalone sonuç sayfasını gösterir (Aşama 3).
+
+        ``n``: meta refresh sayacı (yalnız 0..24 rakam, aksi 0). MPID bulunamazsa listeye 303.
+        """
         if not request.env.user.has_group('sanal_pos.group_sanal_pos_user'):
             return self._error_page('Bu sayfa için Sanal POS kullanıcı yetkisi gerekir.', status=403)
         payment = request.env['sanal.pos.payment']
@@ -228,9 +236,38 @@ class SanalPosMailOrderController(http.Controller):
         if not payment:
             return request.redirect(PAYMENT_LIST_PATH, code=303)
         payment._mail_order_after_return()
-        return request.redirect(RECORD_PATH % payment.id, code=303)
+        # NEDEN: yalnız en çok 3 rakam kabul edilir; sınır dışı/bozuk değer 0'a düşer ve sayaç 24'te durur,
+        # yani yenileme istemci girdisiyle sonsuza uzatılamaz (KK-3.4)
+        refresh_count = int(n) if n and re.fullmatch(r'[0-9]{1,3}', n) else 0
+        return self._result_page(payment, refresh_count)
 
     # ------------------------------------------------------------------ yardımcılar
+    @classmethod
+    def _result_page(cls, payment, refresh_count=0, notice=None, status=200):
+        """Sonuç sayfası (script'siz). ``notice``: üstte kırmızı uyarı (POST rotalarının UserError'u, A3-G3).
+
+        DIKKAT: CSP'de ``form-action 'self'`` yalnız burada açıktır (Tekrar dene / Link POST'ları, CSRF'li);
+        formlarda kart alanı yoktur ve script-src hiç yoktur.
+        """
+        values = payment._mail_order_result_values(refresh_count)
+        rec = payment.sudo()
+        result_url = '%s?mpid=%s' % (MO_RESULT_PATH, quote(rec.merchant_payment_id, safe='/'))
+        values.update({
+            'payment_id': rec.id,
+            'payment_name': '' if rec.name == '/' else rec.name,
+            'record_url': RECORD_PATH % rec.id,
+            'is_test': rec.environment == 'test',
+            'nav': cls._nav_values(),
+            'csrf_token': request.csrf_token(),
+            'retry_action': RETRY_PATH % rec.id,
+            'link_action': LINK_PATH % rec.id,
+            'result_url': result_url,
+            'refresh_url': '%s&n=%d' % (result_url, values['refresh_next']) if values['refresh_next'] else None,
+            'notice': notice,
+        })
+        return cls._render('sanal_pos.mail_order_result_page', values,
+                           card_page_csp("'self'"), status=status)
+
     @staticmethod
     def _card_script():
         """``(metin, sha256_b64)``; anahtar kapalı, dosya sorunlu ya da hash onaysızsa ``(None, None)``.
