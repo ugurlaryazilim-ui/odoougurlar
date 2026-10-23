@@ -17,6 +17,10 @@ Ortak sonuç anahtarları: ``ok``, ``timeout``, ``error_code``, ``error_message`
 * ``query_installments`` -> ``options`` (``[{'count': int, 'networks': [str], 'rate': float,
   'systems': [{'keys': [str], 'rate': float}]}]``) + ``system_keys`` (tüm sistem kimlikleri);
   hata -> ``ok=False``, ``options=[]``)
+* ``query_bin(payment, bin_digits)`` -> ``card_type`` (``credit|debit|prepaid|unknown``), ``bank_code``,
+  ``network``, ``brand``, ``country`` (yalnız sağlayıcının kod alanları; BIN ve serbest metin dönmez)
+* ``query_card_installments(payment, bin_digits)`` -> ``options`` (``[{'count', 'networks': [], 'rate'}]``,
+  kartın programına ait taksitler; taksitsiz program ``ok=True, options=[]``)
 * ``resend``       -> -
 * ``cancel_link``  -> ``already_closed``
 * ``find_link``    -> ``found``, ``token``, ``status`` (+ ``ambiguous``)
@@ -65,6 +69,17 @@ class SanalPosProvider(models.AbstractModel):
     @api.private
     def query_installments(self, payment):
         """İşyerinin taksit seçenekleri (kart verisi gönderilmez)."""
+        raise NotImplementedError()
+
+    @api.private
+    def query_bin(self, payment, bin_digits):
+        """Kartın ilk 8 hanesinden kart türü/banka/program (K-13 daraltılmış istisnası, K-19).
+        BIN yalnız istekte bulunur; log/kayıt/dönüşe girmez."""
+        raise NotImplementedError()
+
+    @api.private
+    def query_card_installments(self, payment, bin_digits):
+        """BIN'in kredi programına ait taksit seçenekleri."""
         raise NotImplementedError()
 
     @api.private
@@ -123,12 +138,17 @@ class SanalPosProvider(models.AbstractModel):
 
     def _log_call(self, payment, action, provider, environment, duration_ms=0,
                   http_status=0, response_code=None, error_code=None, success=False,
-                  request_body=None, response_body=None, is_financial=False):
+                  request_body=None, response_body=None, is_financial=False, fk_nowait=False):
         """``sanal.pos.log`` satırı yazar (KK-39). Sırlar ÇAĞIRANDA maskelenmiş olmalıdır;
         kart numarası (Luhn-geçerli PAN) ise burada MERKEZİ olarak maskelenir.
 
         Log yazımı başarısız olsa bile iş akışı kesilmez (dış çağrıdan sonra raise yok);
         hata yalnız istisna sınıf adıyla loglanır (gövde/sır içermesin).
+
+        ``fk_nowait=True`` (BIN ucu, KK-2.8): satır ödemeye FK ile BAĞLANMAZ (``payment_id=False``);
+        kayıt ``request_body`` sonundaki ``_payment_id`` işaretiyle tanınır (hız sınırı sayacı buna bakar).
+        NEDEN: FK denetimi ödeme satırında ``FOR KEY SHARE`` alır; BIN isteği hem cron/Kapat/dönüşün
+        ``FOR UPDATE``'ini beklerdi hem de işlem sonuna kadar onların NOWAIT kilidini düşürürdü.
         """
         # NEDEN: Mail Order'da kart verisi Odoo'ya hiç girmemeli (bkz. KARARLAR K-13); yanıt gövdesi
         # ya da istisna metni yanlışlıkla PAN taşısa bile her sağlayıcı için tek noktada maskelenir.
@@ -151,6 +171,10 @@ class SanalPosProvider(models.AbstractModel):
             'response_body': response_body,
             'is_financial': bool(is_financial),
         }
+        if fk_nowait and values['payment_id']:
+            # DIKKAT: işaret kaybolursa satır kayıt başına hız sınırı sayacından düşer (``_bin_counts``)
+            values['request_body'] = tools.mark_payment(values['request_body'], values['payment_id'])
+            values['payment_id'] = False
         try:
             with self.env.cr.savepoint():
                 self.env['sanal.pos.log'].sudo().create(values)

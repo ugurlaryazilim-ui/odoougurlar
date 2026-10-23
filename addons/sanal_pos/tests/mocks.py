@@ -124,6 +124,48 @@ def installment_body(*systems):
     return ok_body(paymentSystemList=listing)
 
 
+def querybin_body(card_type='CREDIT', issuer='AKBANK', network='AXESS', brand='VISA',
+                  country='TUR', bin_echo='43550843', **extra):
+    """QUERYBIN yanıtı (spike-bin-sonuc.md D/G biçimi; değerler SAHTE/herkese açık test değeri).
+
+    Yanıt ``bin.bin`` anahtarında BIN'i yankılar ve ``cardName`` banka adı taşır; sağlayıcı
+    katmanı bunları kayda MASKELİ yazmak zorundadır (KK-2.9).
+    """
+    info = {
+        'bin': bin_echo, 'cardBrand': brand, 'cardType': card_type, 'cardLevel': 'UNKNOWN',
+        'cardNetwork': network, 'issuer': 'TEST BANKASI A.S.', 'virtual': 'NO',
+        'cardName': 'TEST BANKASI A.S. KART', 'countryIsoA3': country, 'issuerType': issuer,
+        'is6Digit': 'NO', 'is8Digit': 'YES',
+    }
+    info.update(extra)
+    return ok_body(bin=info)
+
+
+def paymentsystems_body(options=(), name='TEST POS', eft='0046', not_on_us=True,
+                        installment_system=True):
+    """QUERYPAYMENTSYSTEMS yanıtı: ``options`` = ``[(sayı, oran), ...]`` (spike C biçimi).
+
+    ``installment_system=False`` -> ``installmentPaymentSystem`` anahtarı hiç yok.
+    ``options`` içinde ``'NOT_ON_US'`` metni konabilir (sayı olmayan öğe).
+    """
+    body = {}
+    if installment_system:
+        listing = []
+        for count, rate in options:
+            item = {'count': str(count)}
+            if count != 'NOT_ON_US':
+                item['customerCostCommissionRate'] = rate
+            listing.append(item)
+        body['installmentPaymentSystem'] = {
+            'name': name, 'paymentSystem': 1, 'paymentSystemEftCode': eft,
+            'installmentList': listing}
+    if not_on_us:
+        body['oneShotPaymentSystem'] = {
+            'name': 'BASKA POS', 'paymentSystem': 7, 'paymentSystemEftCode': '0099',
+            'installmentList': [{'count': 'NOT_ON_US'}]}
+    return ok_body(**body)
+
+
 def timeout_exc():
     return requests.exceptions.ReadTimeout('read timed out')
 

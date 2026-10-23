@@ -31,6 +31,10 @@ _logger = logging.getLogger(__name__)
 DEFAULT_TEST_URL = 'https://test.paratika.com.tr/paratika/api/v2'
 DEFAULT_LIVE_URL = 'https://vpos.paratika.com.tr/paratika/api/v2'
 TIMEOUT = (10, 30)                    # (bağlanma, okuma) sn - NFR-2
+# NEDEN: BIN ucu kullanıcı yazarken çağrılır (NFR-2.1, toplam ≤ 5 sn); QUERYBIN spike'ta ~0,1 sn.
+BIN_TIMEOUT = (1.5, 2.0)
+# QUERYBIN cardType -> normalize kart türü; boş ya da başka değer 'unknown' (uç 502 verir, K-19)
+_CARD_TYPES = {'CREDIT': 'credit', 'DEBIT': 'debit', 'PREPAID': 'prepaid'}
 CONTENT_TYPE = 'application/x-www-form-urlencoded; charset=UTF-8'
 RETURN_PATH = '/sanal_pos/paratika/return'
 RETURN_PATH_MO = '/sanal_pos/paratika/mo_return'     # Mail Order: Direct POST 3D dönüşü
@@ -100,8 +104,9 @@ PERMISSION_ERROR_CODES = ('ERR10047', 'ERR10053', 'ERR10266')
 
 # NEDEN: kart verisi hiçbir isteğe girmez (bkz. KARARLAR K-13); yine de bir kart anahtarı ileride
 # yanlışlıkla parametreye eklenirse günlükte değeri yerine ``***`` görünür (büyük/küçük harf duyarsız).
+# BIN (A2, K-13 daraltılmış istisnası) da isteğe girer ama günlüğe değeri yazılmaz (KK-2.9).
 CARD_PARAM_KEYS = ('CARDPAN', 'PAN', 'CVV', 'CARDCVV', 'CARDEXPIRY', 'EXPIRYMONTH', 'EXPIRYYEAR',
-                   'NAMEONCARD', 'CARDOWNER', 'CARDTOKEN')
+                   'NAMEONCARD', 'CARDOWNER', 'CARDTOKEN', 'BIN')
 
 # Paratika transactionType -> normalize tür
 _KIND_BY_TYPE = {
@@ -252,11 +257,11 @@ class SanalPosProviderParatika(models.AbstractModel):
         return tools.scrub(text, secrets)
 
     # ---------------------------------------------------------------- HTTP
-    def _post(self, url, body):
+    def _post(self, url, body, timeout=None):
         """Tek HTTP noktası (testte ``requests.Session.send`` seviyesinde yakalanır)."""
         return requests.post(
             url, data=body, headers={'Content-Type': CONTENT_TYPE},
-            timeout=TIMEOUT, allow_redirects=False)
+            timeout=timeout or TIMEOUT, allow_redirects=False)
 
     def _error_message(self, code, message, violator=''):
         text = ERROR_MESSAGES.get(code)
@@ -271,7 +276,8 @@ class SanalPosProviderParatika(models.AbstractModel):
         # DIKKAT: errorMsg sağlayıcıdan gelir ve kayda/sohbete yazılır; kart numarası sızarsa maskelenir
         return tools.scrub(tools.mask_card_data(text), self._secrets())
 
-    def _call(self, payment, action, params, environment=None, credentials=None, api_url=None):
+    def _call(self, payment, action, params, environment=None, credentials=None, api_url=None,
+              timeout=None, fk_nowait=False):
         """Paratika'ya tek istek. Asla istisna fırlatmaz; ham sonuç sözlüğü döner.
 
         Dönüş: ``ok, timeout, error_code, error_message, raw_code, data``
@@ -279,6 +285,7 @@ class SanalPosProviderParatika(models.AbstractModel):
 
         ``environment`` / ``credentials`` / ``api_url`` yalnız bağlantı testinde verilir
         (``payment`` boş kayıt kümesidir; ayar ekranındaki kaydedilmemiş değerler denenir).
+        ``timeout`` (``None`` = ``TIMEOUT``) ve ``fk_nowait`` (bkz. ``_log_call``) yalnız BIN ucunda.
         """
         environment = environment or payment.environment
         credentials = credentials or self._credentials()
@@ -303,7 +310,7 @@ class SanalPosProviderParatika(models.AbstractModel):
         data = None
         raw_text = ''
         try:
-            response = self._post(url, body)
+            response = self._post(url, body, timeout=timeout)
         except requests.exceptions.RequestException as exc:
             # Zaman aşımı, ağ ve TLS hataları: isteğin ulaşıp ulaşmadığı bilinemez
             result = self._result(
@@ -326,7 +333,7 @@ class SanalPosProviderParatika(models.AbstractModel):
             http_status=http_status, response_code=raw_code,
             error_code=result['error_code'], success=result['ok'],
             request_body=request_log, response_body=self._mask_response(data, raw_text),
-            is_financial=financial)
+            is_financial=financial, fk_nowait=fk_nowait)
         # Python log'una gövde/kişisel veri yazılmaz (yalnız tanılama alanları)
         _logger.info('Paratika %s mpid=%s responseCode=%s errorCode=%s süre=%dms',
                      action, payment.merchant_payment_id, raw_code,
@@ -540,22 +547,28 @@ class SanalPosProviderParatika(models.AbstractModel):
         payment = payment.sudo()
         if not payment.provider_token:
             return None
+        api_url = self._card_data_api_url(payment, 'kart formu')
+        return '%s/post/sale3d/%s' % (api_url, payment.provider_token) if api_url else None
+
+    def _card_data_api_url(self, payment, purpose):
+        """Kart verisi (form ya da BIN) taşıyan isteğin API adresi; https + ``DIRECT_POST_HOSTS``
+        dışındaysa ``None`` ve hata logu (G-1). DIKKAT: izin listesi kodda sabittir, ayarla genişletilemez."""
         api_url = self._api_url(payment)
         parts = urlsplit(api_url)
         if (parts.scheme != 'https' or (parts.hostname or '') not in DIRECT_POST_HOSTS
                 or parts.port or '@' in parts.netloc):
-            _logger.error('sanal_pos: kart formu adresi izin listesinde değil (host=%s), ödeme id=%s',
-                          parts.hostname, payment.id)
+            _logger.error('sanal_pos: %s adresi izin listesinde değil (host=%s), ödeme id=%s',
+                          purpose, parts.hostname, payment.id)
             return None
-        return '%s/post/sale3d/%s' % (api_url, payment.provider_token)
+        return api_url
 
     @api.private
     def query_installments(self, payment):
         """İşyerinin taksit seçenekleri: ``options=[{'count', 'networks', 'rate'}]``.
 
         G0: yanıt biçimi Paratika belgesinden (paymentSystemList[].installmentList[]); gerçek
-        yanıtla doğrulanmadı. EKIP-BORC: liste karta göre değil işyerine göre (BIN gönderilmez,
-        K-13); BIN'e göre liste gerekirse tarayıcıdan CORS'lu çağrı için sayfaya script gerekir.
+        yanıtla doğrulanmadı. Liste işyerinindir (BIN gönderilmez): sayfa açılışında ve vade farkı
+        eşleşmesinde kullanılır; karta göre liste ``query_card_installments``'tadır (A2).
         Hata/zaman aşımında ``options=[]`` (sayfa yalnız "Tek çekim" gösterir).
         """
         payment.ensure_one()
@@ -574,27 +587,100 @@ class SanalPosProviderParatika(models.AbstractModel):
             keys = sorted({str(system.get(k)).strip() for k in ('name', 'paymentSystemNetwork', 'paymentSystem')
                            if system.get(k) not in (None, '')})
             all_keys.update(keys)
-            for item in system.get('installmentList') or []:
-                try:
-                    count = int(str(item.get('count')).strip())      # 'NOT_ON_US' atlanır
-                except (AttributeError, TypeError, ValueError):
-                    continue
-                if count < 2:
-                    continue
+            for count, rate in self._installment_items(system.get('installmentList')):
                 option = merged.setdefault(count, {'count': count, 'networks': [], 'rate': 0.0,
                                                    'systems': []})
                 if network and network not in option['networks']:
                     option['networks'].append(network)
-                try:
-                    rate = float(item.get('customerCostCommissionRate') or 0)
-                except (TypeError, ValueError):
-                    rate = 0.0
                 option['systems'].append({'keys': keys, 'rate': rate})
                 # Aynı sayı birden çok ağda farklı oranlıysa en yüksek oran gösterilir (güvenli taraf)
                 option['rate'] = max(option['rate'], rate)
         res['options'] = [merged[count] for count in sorted(merged)]
         # Taksit seçeneği olmayan sistemler dahil tüm sistem kimlikleri (vade farkı: "ağ tabloda var mı")
         res['system_keys'] = sorted(all_keys)
+        return res
+
+    @staticmethod
+    def _installment_items(items):
+        """``installmentList`` öğeleri -> ``(count, rate)``; sayı olmayan (``NOT_ON_US``) ve 1 atlanır."""
+        for item in items or []:
+            if not isinstance(item, dict):
+                continue
+            try:
+                count = int(str(item.get('count')).strip())
+            except (TypeError, ValueError):
+                continue
+            if count < 2:
+                continue
+            try:
+                rate = float(item.get('customerCostCommissionRate') or 0)
+            except (TypeError, ValueError):
+                rate = 0.0
+            yield count, rate
+
+    # ---------------------------------------------------------------- arayüz: BIN (A2, K-19)
+    # DIKKAT: BIN yalnız bu iki çağrının isteğinde bulunur. ``sanal_pos_extra_secrets`` onu istek/yanıt
+    # günlüğünden, ham yanıttan ve hata metninden siler (CARD_PARAM_KEYS ve ``bin$`` maskesinin üstüne
+    # üçüncü katman); dönüş sözlüğüne yalnız kod alanları girer (KK-2.9).
+    def _bin_call(self, payment, action, bin_digits):
+        """BIN taşıyan çağrı. NEDEN adres denetimi (K-16): BIN yalnız Paratika'ya https ile gider; ayar
+        http ya da başka host gösterirse istek hiç yapılmaz, satır yazılmaz (sayaç artmaz), ``ok=False``."""
+        payment.ensure_one()
+        payment = payment.sudo()
+        if not self._card_data_api_url(payment, 'BIN sorgusu'):
+            return self._result(error_code='URL_NOT_ALLOWED')
+        return self.with_context(sanal_pos_extra_secrets=[bin_digits])._call(
+            payment, action, {'BIN': bin_digits}, timeout=BIN_TIMEOUT, fk_nowait=True)
+
+    @api.private
+    def query_bin(self, payment, bin_digits):
+        """QUERYBIN: ``card_type`` (``credit|debit|prepaid|unknown``), ``bank_code``, ``network``,
+        ``brand``, ``country``. Yanıtta ``bin`` nesnesi yoksa ``ok=False``.
+
+        NEDEN yalnız kod alanları: ``issuer``/``cardName`` serbest metindir ve Türkçe karakter
+        çözümlemesi doğrulanmadı (spike); ekrandaki ad ``tools.bank_label`` eşlemesinden gelir.
+        """
+        res = self._bin_call(payment, 'QUERYBIN', bin_digits)
+        data = res.pop('data', None)
+        # NEDEN: errorMsg sağlayıcı metnidir ve girdiyi yankılayabilir; çağıran yalnız kodu kullanır
+        res.pop('error_message', None)
+        info = (data or {}).get('bin') if res['ok'] else None
+        if not isinstance(info, dict):
+            info = {}
+            if res['ok']:
+                res.update(ok=False, error_code='NO_BIN')
+
+        def code(key):
+            return str(info.get(key) or '').strip()
+
+        res.update(
+            card_type=_CARD_TYPES.get(code('cardType').upper(), 'unknown'),
+            bank_code=code('issuerType'),
+            network=code('cardNetwork'),
+            brand=code('cardBrand'),
+            country=code('countryIsoA3').upper())
+        return res
+
+    @api.private
+    def query_card_installments(self, payment, bin_digits):
+        """QUERYPAYMENTSYSTEMS: kartın programına ait taksitler, ``options=[{'count', 'networks': [], 'rate'}]``.
+
+        Kaynak yalnız ``installmentPaymentSystem.installmentList``; ``oneShotPaymentSystem`` tek çekimin
+        gideceği POS'tur, okunmaz. ``paymentSystem`` kimlik olarak kullanılmaz (QUERYINSTALLMENT
+        numaralandırmasıyla tutmuyor, spike). Liste/sistem yoksa ``ok=True, options=[]`` (taksitsiz).
+        """
+        res = self._bin_call(payment, 'QUERYPAYMENTSYSTEMS', bin_digits)
+        data = res.pop('data', None)
+        res.pop('error_message', None)
+        res['options'] = []
+        if not res['ok']:
+            return res
+        system = (data or {}).get('installmentPaymentSystem')
+        rates = {}
+        for count, rate in self._installment_items(system.get('installmentList') if isinstance(system, dict) else None):
+            # Aynı sayı iki kez gelirse yüksek oran gösterilir (query_installments ile aynı güvenli taraf)
+            rates[count] = max(rates.get(count, rate), rate)
+        res['options'] = [{'count': count, 'networks': [], 'rate': rates[count]} for count in sorted(rates)]
         return res
 
     @api.private

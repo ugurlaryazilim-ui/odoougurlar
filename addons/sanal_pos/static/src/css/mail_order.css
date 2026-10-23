@@ -139,6 +139,10 @@ html.mo-js .mo-nojs-only { display: none; }
 .mo-checklist li { margin: 0 0 .25rem; }
 .mo-checklist li:last-child { margin-bottom: 0; }
 #mo-amex { margin: .5rem 0 0; }
+/* BIN yuvaları (Aşama 2): betik doldurana kadar yer kaplamaz; mo-bin-status canlı bölge olduğundan gizlenmez. */
+.mo-detected { margin: .25rem 0 0; font-size: .875rem; font-weight: 500; }
+.mo-detected:empty, .mo-inst-note:empty { display: none; }
+.mo-bin-status:empty { margin: 0; }
 
 /* kart formu (o_form görünümü) */
 .mo-cards { display: inline-flex; align-items: center; gap: .375rem; }
@@ -164,6 +168,16 @@ html.mo-js .mo-nojs-only { display: none; }
 .mo-pan { font-variant-numeric: tabular-nums; letter-spacing: .06em; }
 .mo-hint { margin: .25rem 0 0; font-size: .8125rem; color: var(--mo-muted); }
 .mo-error { margin: .25rem 0 0; font-size: .8125rem; font-weight: 500; color: var(--mo-error); }
+/* G-9: script'li modda alan hata satırının yeri baştan ayrılır (bir satır = 1.5em, body line-height).
+ * NEDEN: blur'da gelen satır Öde'yi kaydırınca mousedown/mouseup farklı yere düşüyor, ilk tıklama boşa
+ * gidiyordu. Gizliyken visibility:hidden, erişilebilirlik ağacına girmez. #mo-form-error .mo-field dışında. */
+html.mo-js .mo-field .mo-error { min-height: 1.5em; }
+html.mo-js .mo-field .mo-error[hidden] { display: block !important; visibility: hidden; }
+/* NEDEN (B-3): 360 px altında en uzun kart numarası hatası iki satıra sarılır; yer iki satır ayrılır
+ * (360 px ve üstünde tek satıra sığar). Metin betikte; kısaltmak betik hash'ini değiştirirdi. */
+@media (max-width: 22.49rem) {
+    html.mo-js .mo-field #pan-error { min-height: 3em; }
+}
 .mo-row { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: .75rem; align-items: start; }
 .mo-row .mo-field { margin-bottom: 1rem; }
 .mo-expiry { display: grid; grid-template-columns: 1fr 1fr; gap: .5rem; }

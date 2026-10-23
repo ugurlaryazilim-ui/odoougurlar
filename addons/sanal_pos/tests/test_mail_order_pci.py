@@ -95,6 +95,7 @@ class TestPciStatic(SanalPosCase):
         # olumlu çapalar: kart rotası (mail_order.py) ve dönüş rotası (main.py) taranmış olmalı
         self.assertIn('/sanal_pos/mail_order/pay/<int:payment_id>', found)
         self.assertIn('/sanal_pos/mail_order/result', found)
+        self.assertIn(BIN_PATH, found)           # A2: BIN ucu (yalnız ``payment_id`` ve ``bin`` alır)
         self.assertIn('/sanal_pos/paratika/mo_return', found)
         self.assertEqual(offenders, [])
 
@@ -136,18 +137,21 @@ class TestPciStatic(SanalPosCase):
 MODULE_DIR = os.path.dirname(os.path.dirname(__file__))
 JS_FILE = os.path.join(MODULE_DIR, 'static', 'src', 'js', 'mail_order_card.js')
 CSS_FILE = os.path.join(MODULE_DIR, 'static', 'src', 'css', 'mail_order.css')
-SCRIPT_MAX_BYTES = 8192
+# NEDEN: NFR-1.1 betik bütçesi; Aşama 2'de BIN sorgusuyla 8 KB'tan 12 KB'a çıktı, aşılırsa sınır
+# yükseltilmez, tasarım mimara döner (bkz. KARARLAR K-16 eki).
+SCRIPT_MAX_BYTES = 12288
+BIN_PATH = '/sanal_pos/mail_order/bin'
 
 # PCI 11.6.1 değişiklik tespiti: betik her değiştiğinde bu sabit KOD İNCELEMESİNDE ayrıca güncellenir
 # (README "Ödeme sayfası script envanteri" ve çalışma anı onayı tools.MAIL_ORDER_SCRIPT_SHA256 aynı
 # değeri yazar; eşitlik test edilir).
 # DIKKAT: betik diff'i ile bu sabitin diff'i AYNI commit'te ve aynı incelemede görünür (A1-G3 sözleşmesi);
 # sabiti incelemesiz ayrı bir commit'le değiştirmek PCI 6.4.3/11.6.1 kontrolünü boşa çıkarır.
-SCRIPT_SHA256 = 'A44tqgwD9BZp4Grx1S6Oy0HAcGkDJFHXz15naS7Jfj8='
+SCRIPT_SHA256 = 'shzuFBD/bBX6iqmULEIgTR1nKugJ2sWS6Fr6eosXgo0='
 
 # Yasak belirteçler (KK-1.15 + tasarım §3.5/7). Yorum satırları çıkarıldıktan sonra aranır.
 FORBIDDEN_TOKENS = {
-    'fetch': r'\bfetch\b',
+    # 'fetch': Aşama 2'de TEK çağrı serbest (BIN ucu); bkz. test_kk_2_fetch_tek_cagri_yalniz_bin_ucu
     'XMLHttpRequest': r'XMLHttpRequest',
     'sendBeacon': r'sendBeacon',
     'WebSocket': r'WebSocket',
@@ -198,9 +202,55 @@ class TestCardScriptStatic(SanalPosCase):
         self.assertTrue(os.path.isfile(JS_FILE), 'betik dosyası yok: static/src/js/mail_order_card.js')
         return _read_js().decode('utf-8')
 
-    def test_nfr_1_1_boyut_8_kb_ve_utf8(self):
+    def test_nfr_1_1_boyut_12_kb_ve_utf8(self):
         self.source()
-        self.assertLessEqual(len(_read_js()), SCRIPT_MAX_BYTES, 'betik 8 KB\'ı (sıkıştırmasız) aşmamalı')
+        self.assertEqual(SCRIPT_MAX_BYTES, 12288)
+        self.assertLessEqual(len(_read_js()), 12288, 'betik 12 KB\'ı (sıkıştırmasız) aşmamalı (NFR-1.1, K-16 eki)')
+        _read_js().decode('utf-8')
+
+    @staticmethod
+    def _fetch_call(code):
+        """``fetch(`` çağrısının parantez içi metni (dengeli parantez); yoksa None."""
+        start = re.search(r'\bfetch\s*\(', code)
+        if not start:
+            return None
+        depth, index = 1, start.end()
+        while depth and index < len(code):
+            depth += {'(': 1, ')': -1}.get(code[index], 0)
+            index += 1
+        return code[start.end():index - 1]
+
+    def test_kk_2_fetch_tek_cagri_yalniz_bin_ucu(self):
+        """A2-G3: KK-1.15 yasak listesinde ``fetch`` yalnız BIN çağrısı için serbest: tek çağrı, tek
+        sabit adres, kart alanı yok; kimlik bilgisi/yönlendirme/önbellek/referrer ayarları sabit."""
+        code = _strip_comments(self.source())
+        self.assertEqual(len(re.findall(r'\bfetch\b', code)), 1, 'fetch tam bir kez geçmeli')
+        call = self._fetch_call(code)
+        self.assertIsNotNone(call, 'fetch( çağrısı yok')
+        self.assertEqual(code.count(BIN_PATH), 1, 'BIN yolu betikte tek sabit olarak geçmeli')
+        for pattern, why in (
+                (r"method\s*:\s*['\"]POST['\"]", 'method POST'),
+                (r"credentials\s*:\s*['\"]same-origin['\"]", 'credentials same-origin'),
+                (r"redirect\s*:\s*['\"]error['\"]", 'redirect error'),
+                (r"cache\s*:\s*['\"]no-store['\"]", 'cache no-store'),
+                (r"referrerPolicy\s*:\s*['\"]no-referrer['\"]", 'referrerPolicy no-referrer'),
+                (r"Content-Type['\"]?\s*:\s*['\"]application/json['\"]", 'Content-Type json'),
+                (r"JSON\.stringify", 'gövde JSON.stringify'),
+                (r"\bsignal\b", 'AbortController signal')):
+            self.assertRegex(call, pattern, why)
+        self.assertNotRegex(call, r'(?i)\bmode\s*:', 'mode: no-cors/cors verilmez')
+        # BIN çağrısının gövdesi yalnız payment_id ve bin taşır; kart alanı adı geçmez
+        for token in ('pan', 'cvv', 'cardOwner', 'expiryMonth', 'expiryYear'):
+            self.assertNotRegex(call, r'(?i)\b%s\b' % token, 'fetch çağrısında kart alanı: %s' % token)
+        self.assertIn('AbortController', code, 'zaman aşımı için AbortController (6 sn) gerekir')
+        self.assertRegex(code, r'\b6000\b|\b6\s*\*\s*1000\b', '6 sn zaman aşımı sabiti')
+
+    def test_kk_2_diger_ag_yuzeyleri_yasak_kalir(self):
+        code = _strip_comments(self.source())
+        for token in ('XMLHttpRequest', 'sendBeacon', 'WebSocket', 'EventSource', 'importScripts',
+                      'localStorage', 'sessionStorage', 'indexedDB', 'document.cookie', 'postMessage'):
+            self.assertNotIn(token, code, token)
+        self.assertNotRegex(code, r'\bnew\s+Image\b')
 
     def test_kk_1_15_yasak_belirtec_yok(self):
         code = _strip_comments(self.source())

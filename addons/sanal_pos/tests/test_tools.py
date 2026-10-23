@@ -188,7 +188,8 @@ class TestInstallmentTable(TransactionCase):
         self.assertEqual(rows[2]['rate_text'], '%1,50')
         self.assertEqual(rows[2]['total_text'], '1.015,00 TL')
         self.assertEqual(rows[2]['monthly_text'], '338,33 TL')
-        self.assertEqual(rows[2]['select_text'], '3 taksit — toplam 1.015,00 TL')
+        self.assertNotIn('select_text', rows[2], 'A2-G3: select_text kaldırıldı')
+        self.assertEqual(rows[2]['label'], '3 taksit')
         self.assertEqual(rows[2]['networks'], [])
 
     def test_farkli_programlar_satir_basinda(self):
@@ -199,12 +200,14 @@ class TestInstallmentTable(TransactionCase):
         self.assertTrue(table['per_row'])
         self.assertEqual(table['rows'][1]['networks'], ['Axess', 'Bonus'])
         self.assertEqual(table['rows'][2]['networks'], ['Bonus'])
-        self.assertEqual(table['rows'][2]['select_text'], '9 taksit — toplam 1.045,00 TL (Bonus)')
+        self.assertNotIn('select_text', table['rows'][2], 'A2-G3: select_text kaldırıldı')
+        self.assertEqual(table['rows'][2]['total_text'], '1.045,00 TL')
 
     def test_taksit_yoksa_yalniz_tek_cekim(self):
         table = _tools().installment_table(1450, [])
         self.assertEqual([r['count'] for r in table['rows']], [1])
-        self.assertEqual(table['rows'][0]['select_text'], 'Tek çekim — 1.450,00 TL')
+        self.assertNotIn('select_text', table['rows'][0], 'A2-G3: select_text kaldırıldı')
+        self.assertEqual(table['rows'][0]['total_text'], '1.450,00 TL')
         self.assertEqual(table['common_networks'], [])
 
 
@@ -444,8 +447,91 @@ class TestInstallmentTableStage1(TransactionCase):
     def test_mevcut_anahtarlar_korunur(self):
         table = _tools().installment_table(1000, [{'count': 3, 'networks': ['PARAF'], 'rate': 1.5}])
         self.assertEqual(sorted(table), ['common_networks', 'per_row', 'rows'])
-        for key in ('count', 'networks', 'rate_text', 'total_text', 'monthly_text', 'select_text',
+        for key in ('count', 'networks', 'rate_text', 'total_text', 'monthly_text',
                     'label', 'surcharge_text'):
             self.assertIn(key, table['rows'][1], key)
-        # A1'de select_text KALDIRILMAZ: redeploy ile -u arasında eski şablon onu okur (02-tasarim §3.4)
-        self.assertEqual(table['rows'][1]['select_text'], '3 taksit — toplam 1.015,00 TL')
+        # A2-G3: select_text KALDIRILDI (A1'de redeploy güvenliği için kalmıştı; EKIP-BORC kapandı)
+        self.assertNotIn('select_text', table['rows'][1])
+
+
+@tagged('post_install', '-at_install', 'sanal_pos')
+class TestBankCardLabelStage2(TransactionCase):
+    """A2 (S2.5/KK-2.2): ``tools.bank_label`` ve ``tools.card_label`` saf yardımcıları."""
+
+    def test_bank_label_bilinen_kodlar(self):
+        t = _tools()
+        self.assertEqual(t.bank_label('AKBANK'), 'Akbank')
+        self.assertEqual(t.bank_label('  AKBANK '), 'Akbank')
+        self.assertEqual(t.bank_label('akbank'), 'Akbank', 'küçük harf kodu da eşlenir')
+
+    def test_bank_label_bilinmeyen_kod_baslik_bicimi_kaybolmaz(self):
+        t = _tools()
+        self.assertEqual(t.bank_label('YENI_BANKA'), 'Yeni Banka')
+        self.assertEqual(t.bank_label('XYZBANK'), 'Xyzbank')
+
+    def test_bank_label_bos_yazilmaz(self):
+        t = _tools()
+        for empty in ('', None, False, '   '):
+            self.assertEqual(t.bank_label(empty), '', repr(empty))
+
+    def test_bank_label_ham_issuer_metni_kullanilmaz(self):
+        """Banka adı kod eşlemesinden üretilir; serbest metin (``issuer``/``cardName``) ekrana gitmez."""
+        t = _tools()
+        self.assertNotIn('A.S.', t.bank_label('AKBANK'))
+        self.assertTrue(isinstance(t.bank_label('AKBANK'), str))
+
+    def test_bank_label_turkce_adlar_ve_kod_yazim_bicimleri(self):
+        """B-5: kod sözlükte yoksa başlık biçimi Türkçe harfi kaybederdi (``Yapikredi``)."""
+        t = _tools()
+        for code, expected in (('YAPIKREDI', 'Yapı Kredi'), ('YAPI_KREDI', 'Yapı Kredi'), ('yapı kredi', 'Yapı Kredi'),
+                               ('GARANTI', 'Garanti BBVA'), ('ISBANK', 'İş Bankası'), ('VAKIFBANK', 'VakıfBank'),
+                               ('ZIRAAT', 'Ziraat Bankası'), ('HALKBANK', 'Halkbank'), ('AKBANK', 'Akbank')):
+            with self.subTest(kod=code):
+                self.assertEqual(t.bank_label(code), expected)
+
+    def test_valid_bin_kisa_pan_aglari_reddedilir(self):
+        """G2-4: 14-15 haneli ağlarda (Amex 34/37, Diners 300-305/36/38/39) 8 hane PAN'ın yarısını aşar."""
+        t = _tools()
+        for value in ('34000000', '37999999', '36000000', '38000000', '39000000', '30000000', '30599999'):
+            with self.subTest(bin=value):
+                self.assertFalse(t.valid_bin(value))
+        for value in ('43550843', '30600000', '35000000', '33000000', '52828282', '97920000'):
+            with self.subTest(bin=value):
+                self.assertTrue(t.valid_bin(value))
+
+    def test_card_label_kredi_kartlari(self):
+        t = _tools()
+        self.assertEqual(t.card_label('Akbank', 'Axess', 'credit'), 'Akbank · Axess · Kredi kartı')
+        self.assertEqual(t.card_label('Garanti', 'Bonus', 'credit'), 'Garanti · Bonus · Kredi kartı')
+
+    def test_card_label_banka_karti_program_yazilmaz(self):
+        t = _tools()
+        self.assertEqual(t.card_label('Akbank', 'Axess', 'debit'), 'Akbank · Banka kartı')
+        self.assertEqual(t.card_label('Akbank', '', 'debit'), 'Akbank · Banka kartı')
+
+    def test_card_label_on_odemeli(self):
+        t = _tools()
+        self.assertEqual(t.card_label('Akbank', 'Axess', 'prepaid'), 'Akbank · Ön ödemeli kart')
+
+    def test_card_label_yurt_disi_sona_eklenir(self):
+        t = _tools()
+        self.assertEqual(t.card_label('Akbank', '', 'credit', foreign=True), 'Akbank · Kredi kartı · Yurt dışı')
+        self.assertEqual(t.card_label('Akbank', 'Axess', 'debit', foreign=True), 'Akbank · Banka kartı · Yurt dışı')
+
+    def test_card_label_olmayan_parca_yazilmaz(self):
+        t = _tools()
+        self.assertEqual(t.card_label('', 'Axess', 'credit'), 'Axess · Kredi kartı')
+        self.assertEqual(t.card_label('Akbank', '', 'credit'), 'Akbank · Kredi kartı')
+        self.assertEqual(t.card_label('', '', 'credit'), 'Kredi kartı')
+        self.assertEqual(t.card_label('', '', 'debit', foreign=True), 'Banka kartı · Yurt dışı')
+        for text in (t.card_label('', '', 'credit'), t.card_label(None, None, 'prepaid')):
+            self.assertNotIn('None', text)
+            self.assertFalse(text.startswith(' ·') or text.endswith('· '), text)
+            self.assertNotIn('·  ·', text)
+
+    def test_card_label_bilinmeyen_tur_sessiz_kalmaz(self):
+        """Tanınmayan tür ``unknown`` olarak sunucuda 502 olur; yardımcıya gelirse de uydurma tür yazmaz."""
+        t = _tools()
+        text = t.card_label('Akbank', 'Axess', 'unknown')
+        self.assertNotIn('Kredi kartı', text)
+        self.assertNotIn('Banka kartı', text)

@@ -44,7 +44,7 @@ _SCRIPT_FORBIDDEN_RE = re.compile(r'</script|<!--', re.IGNORECASE)
 # bu değer, tests/test_mail_order_pci.SCRIPT_SHA256 ve README envanteri AYNI commit'te güncellenir.
 # NEDEN: repoda CI yok; testsiz birleştirilen bir değişiklik CSP hash'i otomatik türediği için
 # tarayıcıda çalışırdı. Kasıtlı içeriden değişikliği durdurmaz (sabit aynı repoda).
-MAIL_ORDER_SCRIPT_SHA256 = 'A44tqgwD9BZp4Grx1S6Oy0HAcGkDJFHXz15naS7Jfj8='
+MAIL_ORDER_SCRIPT_SHA256 = 'shzuFBD/bBX6iqmULEIgTR1nKugJ2sWS6Fr6eosXgo0='
 
 
 class MailOrderScriptHashMismatch(ValueError):
@@ -138,6 +138,108 @@ def network_label(code):
     return code.replace('_', ' ').title()
 
 
+# ---------------------------------------------------------------- kart tanıma (A2, K-19)
+# QUERYBIN issuerType kodu -> ekrandaki banka adı. issuer/cardName serbest metni kullanılmaz (spike).
+# Anahtar normalize koddur (büyük harf, yalnız A-Z0-9): 'YAPI_KREDI' ve 'YAPIKREDI' aynı satıra düşer.
+# EKIP-BORC: spike'ta yalnız AKBANK ve GARANTI kodları görüldü; diğerleri banka adının olası kod
+# yazımlarıdır (Paratika belgesi kodları listelemiyor). Canlı duman testinde görülen kod burada yoksa
+# eklenir; eklenene kadar bilinmeyen kod başlık biçiminde gösterilir (kaybolmaz).
+_BANK_ALIASES = {
+    'Akbank': ('AKBANK',),
+    'Garanti BBVA': ('GARANTI', 'GARANTIBBVA', 'GARANTIBANKASI'),
+    'Yapı Kredi': ('YAPIKREDI', 'YKB', 'YAPIVEKREDI'),
+    'İş Bankası': ('ISBANK', 'ISBANKASI', 'TISBANKASI'),
+    'Ziraat Bankası': ('ZIRAAT', 'ZIRAATBANKASI', 'TCZIRAAT'),
+    'Halkbank': ('HALKBANK', 'HALK', 'HALKBANKASI'),
+    'VakıfBank': ('VAKIFBANK', 'VAKIF', 'VAKIFLAR', 'VAKIFLARBANKASI'),
+    'QNB': ('QNB', 'QNBFINANSBANK', 'FINANSBANK'),
+    'DenizBank': ('DENIZBANK', 'DENIZ'),
+    'TEB': ('TEB', 'TURKEKONOMI', 'TURKEKONOMIBANKASI'),
+    'ING': ('ING', 'INGBANK'),
+    'HSBC': ('HSBC',),
+    'Şekerbank': ('SEKERBANK', 'SEKER'),
+    'Fibabanka': ('FIBABANKA', 'FIBA'),
+    'Odeabank': ('ODEABANK', 'ODEA'),
+    'Kuveyt Türk': ('KUVEYTTURK', 'KUVEYT'),
+    'Albaraka Türk': ('ALBARAKA', 'ALBARAKATURK'),
+    'Enpara': ('ENPARA',),
+    'Türkiye Finans': ('TURKIYEFINANS',),
+    'Anadolubank': ('ANADOLUBANK',),
+    'Burgan Bank': ('BURGAN', 'BURGANBANK'),
+    'Vakıf Katılım': ('VAKIFKATILIM',),
+    'Ziraat Katılım': ('ZIRAATKATILIM',),
+    'Emlak Katılım': ('EMLAKKATILIM',),
+}
+BANK_NAMES = {code: name for name, codes in _BANK_ALIASES.items() for code in codes}
+_BANK_KEY_RE = re.compile(r'[^A-Z0-9]', re.ASCII)
+CARD_TYPE_LABELS = {'credit': 'Kredi kartı', 'debit': 'Banka kartı', 'prepaid': 'Ön ödemeli kart'}
+# QUERYBIN cardBrand kodu -> kart sayfası logo anahtarı (``img[data-brand]``)
+BRAND_KEYS = {'VISA': 'visa', 'MC': 'mastercard', 'MASTERCARD': 'mastercard', 'TROY': 'troy',
+              'AMEX': 'amex'}
+_BRAND_KEY_RE = re.compile(r'[a-z0-9_]{1,32}', re.ASCII)
+# NEDEN re.ASCII: \d / [0-9] Unicode modunda Arapça-Hint rakamlarını da kabul eder (KK-2.7)
+_BIN_RE = re.compile(r'[0-9]{8}', re.ASCII)
+# 16 haneden kısa PAN'lı ağlar: Amex 34/37 (15 hane), Diners 300-305/36/38/39 (14 hane). Betikteki
+# ``/^3(0[0-5]|[46-9])/`` ile aynı liste. NEDEN (01 §3, PCI SSC FAQ 1091): kısa PAN'da ilk 8 + son 4
+# kesme sınırını aşar; bu kartlarda BIN sorgulanmaz, sayfa uyarı gösterir, ödeme engellenmez (G2-4).
+SHORT_PAN_PREFIXES = ('34', '37', '36', '38', '39', '300', '301', '302', '303', '304', '305')
+
+
+def valid_bin(value):
+    """Tam 8 ASCII rakam, kısa PAN'lı ağ (``SHORT_PAN_PREFIXES``) değil. Uç ve model aynı kuralı kullanır."""
+    return (isinstance(value, str) and bool(_BIN_RE.fullmatch(value))
+            and not value.startswith(SHORT_PAN_PREFIXES))
+
+
+# NEDEN: ``sanal.pos.log``'da kaydı tanımlayan alan yok; ödemeye bağlanamayan (``payment_id=False``) QUERYBIN
+# satırı hız sınırı sayacına bu işaretle girer. Kapanış ``}`` id önek çakışmasını önler (12 / 123).
+BIN_PAYMENT_MARK = '"_payment_id": %d}'
+
+
+def mark_payment(request_body, payment_id):
+    """JSON istek gövdesinin sonuna ``_payment_id`` işareti ekler (bkz. ``BIN_PAYMENT_MARK``)."""
+    mark = BIN_PAYMENT_MARK % payment_id
+    if isinstance(request_body, str) and request_body.endswith('}'):
+        return '%s, %s' % (request_body[:-1], mark) if len(request_body) > 2 else '{%s' % mark
+    return '{%s' % mark
+
+
+def bank_label(code):
+    """Banka kodu -> ad; bilinmeyen kod ``YENI_BANKA`` -> ``Yeni Banka``; boş -> ``''``."""
+    code = code.strip().upper() if isinstance(code, str) else ''
+    name = BANK_NAMES.get(_BANK_KEY_RE.sub('', code))
+    return name or code.replace('_', ' ').title()
+
+
+def program_label(code):
+    """Kredi programı (cardNetwork) -> ad; ``UNKNOWN`` ve boş gizlenir."""
+    code = code.strip() if isinstance(code, str) else ''
+    if not code or code.upper() in HIDDEN_NETWORKS:
+        return ''
+    return network_label(code)
+
+
+def brand_key(code):
+    """Kart markası kodu -> logo anahtarı (küçük harf); tanınmayan biçim ``''``."""
+    code = code.strip().upper() if isinstance(code, str) else ''
+    key = BRAND_KEYS.get(code, code.lower())
+    return key if _BRAND_KEY_RE.fullmatch(key) else ''
+
+
+def card_label(bank, program, card_type, foreign=False):
+    """``Banka · Program · Tür[ · Yurt dışı]``; olmayan parça yazılmaz.
+
+    NEDEN program yalnız kredi kartında: hesap kartı da bir kredi programı kodu taşıyor (spike Q5).
+    """
+    parts = [(bank or '').strip()]
+    if card_type == 'credit':
+        parts.append((program or '').strip())
+    parts.append(CARD_TYPE_LABELS.get(card_type, ''))
+    if foreign:
+        parts.append('Yurt dışı')
+    return ' · '.join(part for part in parts if part)
+
+
 def _visible_networks(codes):
     labels = []
     for code in codes or []:
@@ -206,7 +308,7 @@ def installment_table(amount, options):
 
     ``options``: ``[{'count', 'networks', 'rate'}]`` (provider çıktısı). Dönüş:
     ``{'common_networks': [ad], 'per_row': bool, 'rows': [{'count', 'networks', 'rate_text', 'total_text',
-    'monthly_text', 'select_text', 'label', 'surcharge_text'}]}``. Tüm satırlarda program listesi aynıysa
+    'monthly_text', 'label', 'surcharge_text'}]}``. ``rows`` BIN ucunun yanıtına da aynen girer (A2). Tüm satırlarda program listesi aynıysa
     ``common_networks`` dolu, satırlarda ``networks`` boş olur; farklıysa tersi.
     İlk satır tek çekimdir (vade farkı yok, toplam = tutar).
     """
@@ -217,10 +319,7 @@ def installment_table(amount, options):
     rows = [{'count': 1, 'networks': [], 'rate_text': 'Vade farkı yok',
              'label': 'Tek çekim', 'surcharge_text': '',
              'total_text': format_try(base),
-             'monthly_text': format_try(base),
-             # EKIP-BORC: select_text eski şablon için kalır (redeploy ile -u arasında eski şablon onu
-             # okur; kaldırılırsa kart sayfası 500 verir); A2-G3'te kaldırılır.
-             'select_text': 'Tek çekim — %s' % format_try(base)}]
+             'monthly_text': format_try(base)}]
     for option, networks in zip(options or [], per_row):
         rate = Decimal(str(option.get('rate') or 0))
         total, monthly = installment_totals(amount, rate, option['count'])
@@ -236,8 +335,6 @@ def installment_table(amount, options):
             'rate_text': format_rate(rate) if rate else 'Vade farkı yok',
             'total_text': format_try(total),
             'monthly_text': format_try(monthly),
-            'select_text': '%s taksit — toplam %s%s' % (
-                option['count'], format_try(total), ' (%s)' % ', '.join(shown) if shown else ''),
         })
     return {'common_networks': first if same else [], 'per_row': not same, 'rows': rows}
 
