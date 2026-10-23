@@ -3,7 +3,8 @@
 
 Kart sayfası Odoo'nun sunduğu, arka uç varlığı İÇERMEYEN bir HTML sayfasıdır (tek script istisnası
 aşağıdaki DIKKAT'te); formun ``action``'ı Paratika Direct POST 3D (``sale3d``) adresidir. Kart alanları tarayıcıdan doğrudan
-Paratika'ya gider; bu modülün hiçbir rotası kart alanı kabul etmez (yalnız GET).
+Paratika'ya gider; bu modülün hiçbir rotası kart alanı kabul etmez. Tek POST rotası BIN ucudur (Aşama 2,
+K-19): yalnız kartın ilk 8 hanesini ve ödeme kimliğini JSON olarak alır, hiçbir yere yazmaz/loglamaz.
 
 DIKKAT: Sayfada yalnız ``tools.mail_order_script()``'in ürettiği tek hash'li script bulunur (bkz.
 KARARLAR K-16); ikinci script, harici script, satır içi olay işleyicisi, ``'self'``/``unsafe-*``/nonce
@@ -11,6 +12,7 @@ eklemek yasaktır. Bu dosyaya ve ``views/mail_order_templates.xml``'e arka uç v
 /web/assets), kart alanına ``value`` ya da Odoo'ya POST eden form eklemek kart verisini Odoo
 koduna/sunucusuna açar ve PCI kapsamını değiştirir (bkz. KARARLAR K-13).
 """
+import json
 import logging
 import re
 from datetime import datetime
@@ -23,19 +25,26 @@ from odoo.exceptions import AccessError, MissingError, UserError
 from odoo.http import request
 
 from ..models.provider_paratika import _ISTANBUL, DIRECT_POST_HOSTS
-from ..models.res_config_settings import get_bool_param
-from ..tools import installment_table, mail_order_css_url, mail_order_script
+from ..tools import installment_table, mail_order_css_url, mail_order_script, valid_bin
 from .main import MO_RESULT_PATH, MPID_RE, PAYMENT_LIST_PATH
 
 _logger = logging.getLogger(__name__)
 
 PAY_PATH = '/sanal_pos/mail_order/pay/<int:payment_id>'
+BIN_PATH = '/sanal_pos/mail_order/bin'
 RECORD_PATH = PAYMENT_LIST_PATH + '/%d'
 EXPIRY_YEAR_SPAN = 15
-# Dağıtımsız kapatma anahtarı (tasarım §3.9): get_bool_param ile okunur ('False', 'false', '0',
-# 'no', boş -> kapalı; yoksa açık). NEDEN: acil kapatmada elle yazılan 'false'/'0' de kapatmalı;
-# tam metin eşlemesi bu durumda script'i sessizce açık bırakıyordu (D-1, PROJE.md Boolean kuralı).
+# Dağıtımsız kapatma anahtarı (tasarım §3.9, D-4): İZİN LİSTESİ. Parametre yoksa ya da değeri
+# (strip().lower()) bu kümedeyse açık; başka her değer ('', boşluk, 'tru', 'kapalı'...) kapalı.
+# NEDEN: kapatma anahtarı yanlış yazımda da kapalı kalmalı (fail-closed); get_bool_param boş değeri
+# "yok" sayıp varsayılana (açık) düşürürdü.
 SCRIPT_SWITCH_PARAM = 'sanal_pos.mail_order_script'
+_SCRIPT_ON_VALUES = ('true', '1', 'yes', 'evet')
+# BIN ucu gövde sınırı: {"payment_id": <int>, "bin": "<8 hane>"} birkaç on bayttır
+BIN_MAX_BODY = 256
+BIN_MAX_PAYMENT_ID = 2 ** 31     # PostgreSQL integer sınırı; üstü zaten kayıt değildir
+BIN_ERRORS = {400: 'bad_request', 403: 'forbidden', 404: 'not_found', 409: 'closed', 429: 'rate_limited',
+              502: 'provider', 500: 'server'}
 
 # G0-Q2: sale3d yanıtı Paratika dışı bir kökene (banka ACS) 302 ile yönlendiriyorsa tarayıcılar
 # form-action'ı yönlendirmede de uygular; o durumda buraya ('https:',) yazılır (tek değişim yeri).
@@ -52,7 +61,11 @@ NAV_ITEMS = (
 )
 
 _SHA256_B64_RE = re.compile(r'[A-Za-z0-9+/]{43}=')
-_CSP_SOURCE_RE = re.compile(r'https?://[A-Za-z0-9.\-]+(?::[0-9]{1,5})?(?:/[A-Za-z0-9._~/\-]*)?')
+# NEDEN: http yalnız loopback (geliştirme); başka http kaynağı düz metin trafiğe izin verirdi (B-1)
+_CSP_SOURCE_RE = re.compile(
+    r'(?:https://[A-Za-z0-9.\-]+|http://(?:(?i:localhost)|127\.0\.0\.1))(?::[0-9]{1,5})?(?:/[A-Za-z0-9._~/\-]*)?')
+_HOST_RE = re.compile(r'[A-Za-z0-9.\-]+(?::[0-9]{1,5})?')
+_LOOPBACK_HOSTS = ('localhost', '127.0.0.1')
 
 PAGE_HEADERS = [
     # G-3: arka uç sekmesi (aynı köken) window.open ile açıp kart alanlarının DOM'una erişemesin
@@ -91,6 +104,15 @@ def card_page_csp(form_origin=None, script_hash=None, connect_src=None):
     directives += ["style-src 'self'", "img-src 'self'", 'form-action %s' % sources,
                    "frame-ancestors 'none'", "base-uri 'none'"]
     return '; '.join(directives)
+
+
+def mail_order_script_enabled(env):
+    """Kapatma anahtarı (D-4): kart sayfası betiği ve BIN ucu aynı yardımcıyı kullanır (tek karar).
+
+    NEDEN doğrudan arama: ``ICP.get_param`` boş değeri ``False`` yapar ("yok" ile karışır, açık sayılırdı).
+    """
+    param = env['ir.config_parameter'].sudo().search([('key', '=', SCRIPT_SWITCH_PARAM)], limit=1)
+    return not param or (param.value or '').strip().lower() in _SCRIPT_ON_VALUES
 
 
 class SanalPosMailOrderController(http.Controller):
@@ -138,8 +160,53 @@ class SanalPosMailOrderController(http.Controller):
         # NEDEN: Markup değilse QWeb '<' -> '&lt;' yapar; basılan metin hash'lenenden farklı olur
         # (script hiç çalışmaz). card_script ve CSP aynı çağrıdan türer (tek kaynak, K-16).
         values['card_script'] = Markup(card_script) if card_script else None
+        # NEDEN: connect-src ve data-bin yalnız betik gerçekten sunuluyorsa (anahtar açık, dosya sağlam)
+        # ve ana makine güvenliyse; biri yoksa betik BIN ucunu çağıramaz, taksit tablosu sabit kalır.
+        connect_src = self._bin_connect_src() if script_hash else None
+        values['bin_enabled'] = bool(connect_src)
         return self._render('sanal_pos.mail_order_card_page', values,
-                            card_page_csp(origin, script_hash=script_hash))
+                            card_page_csp(origin, script_hash=script_hash, connect_src=connect_src))
+
+    @http.route(BIN_PATH, type='http', auth='user', methods=['POST'], csrf=False)
+    def mail_order_bin(self, **_kwargs):
+        """BIN sorgusu (A2, tasarım §4): kartın ilk 8 hanesinden kart türü ve taksit satırları.
+
+        Yalnız JSON ``{"payment_id": int, "bin": "8 hane"}``. Denetim sırası: 400 doğrulama, 403 grup,
+        404/403 kayıt, 409 kapalı (anahtar/kayıt), 429 hız sınırı, Paratika. Yanıtlar girdiyi yankılamaz;
+        BIN hiçbir log/istisna/yanıt metnine girmez (istisnadan yalnız sınıf adı loglanır).
+        DIKKAT: csrf=False kasıtlı; uç yalnız ``application/json`` kabul eder (çapraz site formu bu türle
+        gönderilemez, fetch ise CORS ön kontrolüne takılır) ve ödeme/kayıt durumu değiştirmez.
+        """
+        parsed = self._bin_request_values()
+        if not parsed:
+            return self._bin_response(400)
+        payment_id, bin_digits = parsed
+        env = request.env
+        if not env.user.has_group('sanal_pos.group_sanal_pos_user'):
+            return self._bin_response(403)
+        payment = env['sanal.pos.payment'].browse(payment_id)
+        try:
+            if not payment.exists():
+                return self._bin_response(404)
+            payment.check_access('read')
+            if not mail_order_script_enabled(env):
+                return self._bin_response(409)
+            with env.cr.savepoint():
+                result = payment._mail_order_bin_lookup(bin_digits)
+        except ValueError:
+            return self._bin_response(400)
+        except AccessError:
+            return self._bin_response(403)
+        except MissingError:
+            return self._bin_response(404)
+        except UserError:
+            return self._bin_response(409)
+        except Exception as exc:  # noqa: BLE001 - uç her durumda JSON döner
+            # DIKKAT: istisna metni loglanmaz; sağlayıcı/BIN içeren bir metin sunucu loguna düşmesin
+            _logger.error('sanal_pos: BIN ucu hata verdi, istisna sınıfı %s', type(exc).__name__)
+            return self._bin_response(500)
+        status = result.pop('status', 500)
+        return self._bin_response(status, result if status == 200 else None)
 
     @http.route(MO_RESULT_PATH, type='http', auth='user', methods=['GET'])
     def mail_order_result(self, mpid=None, **_kwargs):
@@ -163,7 +230,7 @@ class SanalPosMailOrderController(http.Controller):
         DIKKAT: fail-closed: script okunamaz/geçersizse sayfa script'siz (CSP'de script-src yok)
         sunulur; ödeme yolu bozulmaz. İstisna metni loglanmaz (yalnız sınıf adı).
         """
-        if not get_bool_param(request.env, SCRIPT_SWITCH_PARAM, default=True):
+        if not mail_order_script_enabled(request.env):
             return None, None
         try:
             return mail_order_script()
@@ -171,6 +238,65 @@ class SanalPosMailOrderController(http.Controller):
             _logger.error("sanal_pos: kart sayfası betiği yüklenemedi, betiksiz sunuluyor (%s)",
                           type(exc).__name__)
             return None, None
+
+    @staticmethod
+    def _bin_connect_src():
+        """CSP ``connect-src`` değeri (B-1): isteğin kendi kökeni + sabit BIN yolu; güvenli değilse ``None``.
+
+        DIKKAT: ana makine istemci başlığından gelir (proxy modunda X-Forwarded-Host); CSP başlığına
+        girmeden önce kısıtlı bir biçime (harf/rakam/nokta/tire + isteğe bağlı port) zorlanır. Ham
+        değer geçersizse loglanmaz (log enjeksiyonu); http yalnız loopback'te (geliştirme) kabul edilir.
+        """
+        httprequest = request.httprequest
+        host = httprequest.host or ''
+        # NEDEN ham başlık da denetlenir: ProxyFix X-Forwarded-Host'u virgülle ayrılmış liste sayıp tek bir
+        # değer seçer; "evil.com," gibi bozuk başlıktan geçerli görünen bir host çıkmasın.
+        forwarded = httprequest.headers.get('X-Forwarded-Host')
+        if not _HOST_RE.fullmatch(host) or (forwarded is not None and not _HOST_RE.fullmatch(forwarded)):
+            return None
+        scheme = httprequest.scheme
+        if scheme == 'https' or (scheme == 'http' and host.partition(':')[0].lower() in _LOOPBACK_HOSTS):
+            return '%s://%s%s' % (scheme, host, BIN_PATH)
+        if scheme == 'http':
+            _logger.warning('sanal_pos: BIN taksit sorgusu kapalı, kart sayfası https değil (host=%s)', host)
+        return None
+
+    @staticmethod
+    def _bin_request_values():
+        """``(payment_id, bin)`` ya da geçersizse ``None``; gövde ≤ 256 bayt, tam iki anahtar, katı tipler."""
+        httprequest = request.httprequest
+        if httprequest.mimetype != 'application/json':
+            return None
+        # DIKKAT: gövde okunmadan ÖNCE boyut denetlenir (Odoo'nun HTTPRequest sarmalayıcısı ``stream`` vermez,
+        # ``get_data`` tamamını belleğe alır); Content-Length'i olmayan gövde WSGI'de boş okunur.
+        length = httprequest.content_length
+        if length is None or length > BIN_MAX_BODY:
+            return None
+        raw = httprequest.get_data()
+        if len(raw) > BIN_MAX_BODY:
+            return None
+        try:
+            data = json.loads(raw.decode('utf-8'))
+        except ValueError:      # UnicodeDecodeError dahil
+            return None
+        if not isinstance(data, dict) or set(data) != {'payment_id', 'bin'}:
+            return None
+        payment_id, bin_digits = data['payment_id'], data['bin']
+        # NEDEN type(...) is int: bool int alt sınıfıdır, True kayıt 1 sayılmasın
+        if type(payment_id) is not int or not 0 < payment_id < BIN_MAX_PAYMENT_ID or not valid_bin(bin_digits):
+            return None
+        return payment_id, bin_digits
+
+    @staticmethod
+    def _bin_response(status, body=None):
+        # NEDEN ensure_ascii (varsayılan): make_json_response Content-Length'i karakter sayısından alır,
+        # Türkçe karakterli gövdede bayt sayısıyla uyuşmazdı.
+        if status != 200 and status not in BIN_ERRORS:
+            status = 500
+        payload = body if status == 200 else {'ok': False, 'error': BIN_ERRORS[status]}
+        return request.make_response(
+            json.dumps(payload), status=status,
+            headers=[('Content-Type', 'application/json'), ('Cache-Control', 'no-store')])
 
     @staticmethod
     def _https_origin(url):

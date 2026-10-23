@@ -181,6 +181,9 @@ class SanalPosProvider(models.AbstractModel):
                 except (pg_errors.LockNotAvailable, pg_errors.SerializationFailure):
                     # NEDEN: satır cron/Kapat/dönüş FOR UPDATE'i altında; log yine yazılır (hız sınırı
                     # sayacı kullanıcı üzerinden çalışır), yalnız kayda bağlanmaz.
+                    # DIKKAT: işaret kaybolursa bu satır kayıt başına hız sınırı sayacından düşer (sayaç
+                    # ``_bin_counts`` işarete bakar)
+                    values['request_body'] = tools.mark_payment(values['request_body'], values['payment_id'])
                     values['payment_id'] = False
             with self.env.cr.savepoint():
                 self.env['sanal.pos.log'].sudo().create(values)

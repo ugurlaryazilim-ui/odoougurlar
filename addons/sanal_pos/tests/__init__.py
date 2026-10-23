@@ -26,3 +26,4 @@ from . import test_installment_surcharge
 from . import test_mail_order_card
 from . import test_mail_order_bin
 from . import test_mail_order_bin_http
+from . import test_mail_order_bin_lock

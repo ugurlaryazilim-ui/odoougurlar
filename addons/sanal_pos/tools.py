@@ -160,6 +160,19 @@ def valid_bin(value):
             and not value.startswith(('34', '37')))
 
 
+# NEDEN: ``sanal.pos.log``'da kaydı tanımlayan alan yok; ödemeye bağlanamayan (``payment_id=False``) QUERYBIN
+# satırı hız sınırı sayacına bu işaretle girer. Kapanış ``}`` id önek çakışmasını önler (12 / 123).
+BIN_PAYMENT_MARK = '"_payment_id": %d}'
+
+
+def mark_payment(request_body, payment_id):
+    """JSON istek gövdesinin sonuna ``_payment_id`` işareti ekler (bkz. ``BIN_PAYMENT_MARK``)."""
+    mark = BIN_PAYMENT_MARK % payment_id
+    if isinstance(request_body, str) and request_body.endswith('}'):
+        return '%s, %s' % (request_body[:-1], mark) if len(request_body) > 2 else '{%s' % mark
+    return '{%s' % mark
+
+
 def bank_label(code):
     """Banka kodu -> ad; bilinmeyen kod ``YENI_BANKA`` -> ``Yeni Banka``; boş -> ``''``."""
     code = code.strip().upper() if isinstance(code, str) else ''

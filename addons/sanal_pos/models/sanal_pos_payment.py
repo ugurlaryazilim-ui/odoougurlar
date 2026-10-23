@@ -18,13 +18,13 @@ from zoneinfo import ZoneInfo
 
 from psycopg2 import errors as pg_errors
 
-from odoo import api, fields, models
+from odoo import SUPERUSER_ID, api, fields, models
 from odoo.exceptions import AccessError, MissingError, UserError, ValidationError
 from odoo.tools import float_compare
 
 from ..tools import (
-    bank_label, brand_key, card_label, format_rate, format_try, installment_table, mask_email, mask_phone,
-    match_surcharge_rate, program_label, valid_bin,
+    BIN_PAYMENT_MARK, bank_label, brand_key, card_label, format_rate, format_try, installment_table, mask_email,
+    mask_phone, match_surcharge_rate, program_label, valid_bin,
 )
 from .res_config_settings import get_bool_param
 
@@ -115,6 +115,9 @@ MAIL_ORDER_RESULT_MIN_INTERVAL = timedelta(seconds=10)
 BIN_RATE_WINDOW = timedelta(hours=1)
 BIN_RATE_PER_RECORD = 20
 BIN_RATE_PER_USER = 60
+# Kullanıcı başına BIN sorgusu sıralama kilidi (``pg_advisory_xact_lock(ad alanı, uid)``); bekleme sınırlı
+BIN_LOCK_NAMESPACE = 0x42494E31     # 'BIN1'
+BIN_LOCK_TIMEOUT = '4s'
 # NEDEN: QUERYBIN bundan uzun sürdüyse ikinci çağrı NFR-2.1 bütçesini (≤ 5 sn) aşabilir; kredi kartı 502 alır
 BIN_SECOND_CALL_MAX = 1.0
 BIN_NOTE_DEBIT = 'Banka kartıyla taksit yapılamaz.'
@@ -869,7 +872,9 @@ class SanalPosPayment(models.Model):
         self.check_access('read')
         self._check_card_page_open()
         rec = self.sudo()
-        if rec._bin_rate_limited():
+        # DIKKAT: kilit sayaç kontrolünden ÖNCE alınır ve işlem sonuna (QUERYBIN satırının commit'i) kadar
+        # tutulur; sırayı bozmak (ör. kontrolü kilidin önüne almak) hız sınırı yarışını geri getirir.
+        if not rec._bin_user_lock() or rec._bin_rate_limited():
             return {'status': 429}
 
         started = time.monotonic()
@@ -913,19 +918,64 @@ class SanalPosPayment(models.Model):
             'rows': installment_table(rec.amount, options)['rows'],
         }
 
+    def _bin_user_lock(self):
+        """Kullanıcıya özel ``pg_advisory_xact_lock``; alınamazsa (``BIN_LOCK_TIMEOUT``) False.
+
+        NEDEN: hız sınırı sayacı ile QUERYBIN log satırı (sayacın kaynağı) ayrı adımlarda ve farklı
+        zamanlarda yazılır; kilitsiz eşzamanlı istekler aynı eski sayıyı okuyup sınırı aşardı (TOCTOU).
+        Kilit yalnız aynı kullanıcının BIN sorgularını sıralar (başka kullanıcıyı ve ödeme satırını
+        etkilemez, saatte ≤ 60 sorgu ile sınırlı); işlem sonunda log satırı ile birlikte düşer, bir
+        sonraki istek kilidi aldığında bu satırı görür. Sağlayıcı çağrısı da kilit altındadır
+        (çağrıdan sonra yazılan satır sayaçtır; çağrıdan önce yer tutucu yazmak çift sayım yapardı).
+        DIKKAT: bekleme sınırlıdır; ``SET LOCAL`` RELEASE SAVEPOINT ile geri dönmez, eski değer elle yazılır.
+        """
+        cr = self.env.cr
+        try:
+            with cr.savepoint():
+                cr.execute("SELECT current_setting('lock_timeout')")
+                previous = cr.fetchone()[0]
+                cr.execute("SET LOCAL lock_timeout = '%s'" % BIN_LOCK_TIMEOUT)
+                cr.execute('SELECT pg_advisory_xact_lock(%s, %s)', [BIN_LOCK_NAMESPACE, self.env.uid],
+                           log_exceptions=False)
+                cr.execute("SELECT set_config('lock_timeout', %s, true)", [previous])
+        except (pg_errors.LockNotAvailable, pg_errors.QueryCanceled):
+            return False
+        return True
+
+    def _bin_counts(self, Log, since):
+        """(kayıt sayacı, kullanıcı sayacı); ``Log`` hangi imleçte sayılacağını belirler.
+
+        ``payment_id=False`` düşen satırlar (FK kilidi, ``_log_call`` yedek dalı) ``request_body``
+        içindeki ``_payment_id`` işaretiyle kayda bağlanır: log modelinde kaydı tanımlayan başka alan yok.
+        """
+        recent = [('action', '=', 'QUERYBIN'), ('create_date', '>', since)]
+        record = ['|', ('payment_id', '=', self.id),
+                  '&', ('payment_id', '=', False), ('request_body', 'like', BIN_PAYMENT_MARK % self.id)]
+        return (Log.search_count(recent + record),
+                Log.search_count(recent + [('create_uid', '=', self.env.uid)]))
+
     def _bin_rate_limited(self):
         """Son 1 saatte kayıt başına 20, kullanıcı başına 60 QUERYBIN aşıldıysa True.
 
         Aşımda pencere başına kullanıcı için tek ``BIN_RATE_LIMIT`` satırı (``payment_id=False``) ve tek
         uyarı yazılır; reddedilen istek sayaca eklenmez. BIN bu yola hiç girmez.
+        Çağıran ``_bin_user_lock`` almış olmalıdır.
         """
         self.ensure_one()
         Log = self.env['sanal.pos.log'].sudo()
         # NEDEN Python saati: test/uzun işlemde create_date işlem başlangıcıdır; pencere duvar saatine göre
         since = fields.Datetime.now() - BIN_RATE_WINDOW
-        recent = [('action', '=', 'QUERYBIN'), ('create_date', '>', since)]
-        record_count = Log.search_count(recent + [('payment_id', '=', self.id)])
-        user_count = Log.search_count(recent + [('create_uid', '=', self.env.uid)])
+        record_count, user_count = self._bin_counts(Log, since)
+        # NEDEN yeni imleç: Odoo işlemi REPEATABLE READ'dir; anlık görüntü kilidi beklerken eskidi ve
+        # bekleyen isteğin bitirdiği QUERYBIN satırını göstermez. Yeni imleç commit'li satırları görür;
+        # bu işlemin kendi (commit'siz) satırları ana imleçte sayılır, ikisinin büyüğü alınır.
+        fresh_cr = self.pool.cursor()
+        try:
+            fresh_log = api.Environment(fresh_cr, SUPERUSER_ID, {})['sanal.pos.log']
+            fresh_record, fresh_user = self._bin_counts(fresh_log, since)
+        finally:
+            fresh_cr.close()
+        record_count, user_count = max(record_count, fresh_record), max(user_count, fresh_user)
         if record_count < BIN_RATE_PER_RECORD and user_count < BIN_RATE_PER_USER:
             return False
         if not Log.search_count([('action', '=', 'BIN_RATE_LIMIT'), ('create_uid', '=', self.env.uid),

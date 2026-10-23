@@ -139,6 +139,10 @@ html.mo-js .mo-nojs-only { display: none; }
 .mo-checklist li { margin: 0 0 .25rem; }
 .mo-checklist li:last-child { margin-bottom: 0; }
 #mo-amex { margin: .5rem 0 0; }
+/* BIN yuvaları (Aşama 2): betik doldurana kadar yer kaplamaz; mo-bin-status canlı bölge olduğundan gizlenmez. */
+.mo-detected { margin: .25rem 0 0; font-size: .875rem; font-weight: 500; }
+.mo-detected:empty, .mo-inst-note:empty { display: none; }
+.mo-bin-status:empty { margin: 0; }
 
 /* kart formu (o_form görünümü) */
 .mo-cards { display: inline-flex; align-items: center; gap: .375rem; }

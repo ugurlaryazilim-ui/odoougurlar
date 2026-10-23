@@ -164,7 +164,8 @@
                                 <!-- Form doğrudan Paratika'ya gider; Odoo bu alanları hiçbir yolla almaz (K-13). -->
                                 <!-- data-now-ym: SKT "bu ay" sınırı (İstanbul, sunucu saati); script istemci saatini kullanmaz. -->
                                 <form id="mo-form" class="mo-form" method="post" t-att-action="form_action" autocomplete="off"
-                                      t-att-data-now-ym="now_ym">
+                                      t-att-data-now-ym="now_ym" t-att-data-payment-id="payment_id"
+                                      t-att-data-bin="'1' if bin_enabled else None">
                                     <div class="mo-field">
                                         <label for="cardOwner">Kart sahibinin adı</label>
                                         <input id="cardOwner" name="cardOwner" class="mo-input" type="text" maxlength="32"
@@ -183,6 +184,8 @@
                                             <span class="mo-nojs-only">Yalnız rakam, boşluksuz (12-19 hane). Örnek: 1234567812345678</span>
                                             <span class="mo-js-only">Rakamlar otomatik gruplanır (örn. 0000 0000 0000 0000).</span>
                                         </p>
+                                        <!-- BIN yuvaları (Aşama 2): boş açılır, betik doldurur; form alanı (name) değildir. -->
+                                        <p id="mo-detected" class="mo-detected"/>
                                         <p id="mo-amex" class="mo-alert mo-alert-warning" role="status" hidden="hidden">American Express kabul edilmeyebilir; Visa, Mastercard veya Troy kart kullanın.</p>
                                         <p id="pan-error" class="mo-error" role="alert" hidden="hidden"/>
                                     </div>
@@ -231,6 +234,7 @@
                                     <!-- G0-Q7: tek çekim değeri '1' varsayımı (spike sonrası tek değişim yeri). -->
                                     <fieldset class="mo-field mo-inst">
                                         <legend>Taksit</legend>
+                                        <p id="mo-bin-status" class="mo-hint mo-bin-status" aria-live="polite"/>
                                         <div class="mo-inst-list">
                                             <label t-foreach="installment_table['rows']" t-as="row" class="mo-inst-card">
                                                 <input type="radio" name="installmentCount" t-att-value="row['count']"
@@ -253,6 +257,7 @@
                                                 </span>
                                             </label>
                                         </div>
+                                        <p id="mo-inst-note" class="mo-hint mo-inst-note"/>
                                         <p t-if="not installments" class="mo-hint">Taksit seçenekleri alınamadı; tek çekim yapılabilir.</p>
                                         <p t-elif="installment_table['common_networks']" class="mo-hint"
                                            t-out="'Taksit yapılabilen kartlar: %s' % ', '.join(installment_table['common_networks'])"/>
