@@ -106,6 +106,14 @@ def card_page_csp(form_origin=None, script_hash=None, connect_src=None):
     return '; '.join(directives)
 
 
+def _normalize_https_host(netloc):
+    """Küçük harf; https varsayılan portu (:443) atılır. ``user@`` içeren netloc eşleşmez (``''`` döner)."""
+    netloc = (netloc or '').lower()
+    if not _HOST_RE.fullmatch(netloc):
+        return ''
+    return netloc[:-4] if netloc.endswith(':443') else netloc
+
+
 def mail_order_script_enabled(env):
     """Kapatma anahtarı (D-4): kart sayfası betiği ve BIN ucu aynı yardımcıyı kullanır (tek karar).
 
@@ -258,7 +266,23 @@ class SanalPosMailOrderController(http.Controller):
         if scheme == 'https' or (scheme == 'http' and host.partition(':')[0].lower() in _LOOPBACK_HOSTS):
             return '%s://%s%s' % (scheme, host, BIN_PATH)
         if scheme == 'http':
-            _logger.warning('sanal_pos: BIN taksit sorgusu kapalı, kart sayfası https değil (host=%s)', host)
+            # NEDEN: Odoo 19 (http.py) proxy_mode açıkken ProxyFix'i yalnız X-Forwarded-Host varsa uygular;
+            # Cloudflare Tunnel bu başlığı göndermez, bu yüzden https sayfa bile scheme 'http' görünür.
+            # X-Forwarded-Proto'ya GÜVENİLMEZ (istemci taklit edebilir). Yönetici ayarı web.base.url https
+            # ise ve host'u isteğin Host'uyla birebir aynıysa sayfa bu siteden, https'ten sunuluyor sayılır.
+            base_url = request.env['ir.config_parameter'].sudo().get_param('web.base.url') or ''
+            base = urlsplit(base_url)
+            if base.scheme.lower() != 'https':
+                # NEDEN freeze önerisi: Odoo 19 (res_users.py) yönetici girişinde web.base.url.freeze yoksa
+                # web.base.url'i istek adresine (tünel arkasında http://) yazar; ayar sessizce http'ye döner.
+                reason = ('web.base.url https değil (https olmalı ve web.base.url.freeze=True ayarlanmalı, '
+                          'yoksa yönetici girişi onu http olarak yeniden yazar)')
+            elif _normalize_https_host(base.netloc) != _normalize_https_host(host):
+                reason = 'web.base.url ana makinesi istek ana makinesiyle eşleşmiyor'
+            else:
+                return 'https://%s%s' % (host, BIN_PATH)
+            _logger.warning('sanal_pos: BIN taksit sorgusu kapalı, kart sayfası https değil, %s (host=%s)',
+                            reason, host)
         return None
 
     @staticmethod

@@ -1103,6 +1103,61 @@ class TestConnectSrc(CardPageCase):
         self.assertNotIn(LEAK_BIN, text)
         self.assertNotIn(LEAK_PAN, text)
 
+    # --- web.base.url yedeği: Cloudflare Tunnel X-Forwarded-Host göndermez, ProxyFix atlanır, scheme 'http' kalır
+    def tunnel(self, host, base_url, extra=None):
+        """Şema http (X-Forwarded-* yok), yalnız Host başlığı; web.base.url yönetici ayarı."""
+        self.env['ir.config_parameter'].sudo().set_param('web.base.url', base_url)
+        headers = {'Host': host}
+        headers.update(extra or {})
+        self.login_as(self.user_sp)
+        # NEDEN: requests çerez eşleşmesinde Host başlığını URL'nin yerine kullanır; oturum çerezi 127.0.0.1 için
+        # kayıtlı olduğundan özel Host ile gönderilmez (303 /web/login). Çerez açıkça verilir.
+        return self.url_open(MAIL_ORDER_PAY_PATH % self.payment.id, allow_redirects=False, headers=headers,
+                             cookies={'session_id': self.session.sid})
+
+    def test_tunel_http_gorunur_web_base_url_https_ayni_host_acik(self):
+        self.assertConnect(self.tunnel('odoo.ugurlar.test', 'https://odoo.ugurlar.test'),
+                           'https://odoo.ugurlar.test/sanal_pos/mail_order/bin')
+
+    def test_tunel_buyuk_harf_ve_varsayilan_port_normalize_edilir(self):
+        self.assertConnect(self.tunnel('Odoo.Ugurlar.Test:443', 'https://odoo.ugurlar.test'),
+                           'https://Odoo.Ugurlar.Test:443/sanal_pos/mail_order/bin')
+        self.assertConnect(self.tunnel('odoo.ugurlar.test', 'https://ODOO.ugurlar.test:443/'),
+                           'https://odoo.ugurlar.test/sanal_pos/mail_order/bin')
+
+    def test_tunel_web_base_url_farkli_host_kapali(self):
+        with self.assertLogs('odoo.addons.sanal_pos', level='WARNING') as captured:
+            response = self.tunnel('odoo.ugurlar.test', 'https://baska.ugurlar.test')
+        self.assertNoConnect(response)
+        self.assertIn('eşleşmiyor', '\n'.join(r.getMessage() for r in captured.records))
+
+    def test_tunel_web_base_url_farkli_port_kapali(self):
+        self.assertNoConnect(self.tunnel('odoo.ugurlar.test:8443', 'https://odoo.ugurlar.test'))
+
+    def test_tunel_web_base_url_http_kapali(self):
+        with self.assertLogs('odoo.addons.sanal_pos', level='WARNING') as captured:
+            response = self.tunnel('odoo.ugurlar.test', 'http://odoo.ugurlar.test')
+        self.assertNoConnect(response)
+        self.assertIn('web.base.url https değil', '\n'.join(r.getMessage() for r in captured.records))
+
+    def test_tunel_x_forwarded_proto_taklidi_web_base_url_http_ise_kapali(self):
+        """proxy_mode kapalıyken ProxyFix yok; istemci X-Forwarded-Proto: https göndererek BIN ucunu açamaz."""
+        old = config['proxy_mode']
+        config['proxy_mode'] = False
+        self.addCleanup(config.__setitem__, 'proxy_mode', old)
+        response = self.tunnel('odoo.ugurlar.test', 'http://odoo.ugurlar.test', {'X-Forwarded-Proto': 'https'})
+        self.assertNoConnect(response)
+
+    def test_tunel_host_enjeksiyonu_web_base_url_https_ise_kapali(self):
+        """web.base.url https; istek Host'u başka (enjeksiyon): connect-src'ye girmez."""
+        response = self.tunnel('evil.test', 'https://odoo.ugurlar.test')
+        self.assertNoConnect(response)
+        self.assertNotIn('evil', response.headers.get('Content-Security-Policy', ''))
+
+    def test_tunel_bozuk_forwarded_host_basligi_yine_reddedilir(self):
+        response = self.tunnel('odoo.ugurlar.test', 'https://odoo.ugurlar.test', {'X-Forwarded-Host': 'evil.com,'})
+        self.assertNoConnect(response)
+
     def test_connect_src_yalniz_tek_kaynak_ve_yol_sabit(self):
         response = self.proxied('odoo.ugurlar.test')
         sources = self.csp(response)['connect-src']
