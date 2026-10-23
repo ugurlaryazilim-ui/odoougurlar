@@ -94,10 +94,47 @@ ERROR_MESSAGES = {
     'ERR10136': 'Bu işyeri için kart bilgisi ile ödeme (Direct POST) açık değil; '
                 'yöneticinize başvurun.',
     'ERR10154': '3D Secure ayarı bu ödeme yöntemine izin vermiyor; yöneticinize başvurun.',
+    # Kart reddi (Aşama 3, KK-3.3). ERR200xx = 'ERR200' + ISO 8583 yanıt kodu; ISO eşlemesi
+    # _normalize_transaction'da. CA: kodsuz iptal (banka doğrulaması yarıda), _record_attempts verir.
+    'ERR20005': 'Banka işlemi onaylamadı.',
+    'ERR20012': 'Geçersiz işlem.',
+    'ERR20051': 'Yetersiz bakiye/limit.',
+    'ERR20054': 'Kartın süresi dolmuş.',
+    'ERR20057': 'Kart bu işleme kapalı.',
+    'ERR20082': 'Güvenlik kodu (CVV) hatalı.',
+    'ERR20084': 'Güvenlik kodu (CVV) hatalı.',
+    'ERR20093': 'Kart internet işlemine kapalı.',
+    'ERR20099': 'Banka geçici hata verdi.',
+    'ERR200YK': 'Kart bankaca engelli.',
+    'ERR200GK': 'Yabancı kartlar kapalı.',
+    'ERR30002': '3D doğrulama tamamlanmadı.',
+    'ERR30004': 'Dolandırıcılık kuralı reddi.',
+    'ERR30005': 'Bankadan 3D yanıtı gelmedi.',
+    'CA': 'Banka doğrulaması iptal edildi.',
+}
+# Red kodu -> personele öneri (sonuç sayfası). NEDEN: neden metni ERROR_MESSAGES'ta tek kaynak;
+# burada yalnız "ne yapmalı" durur, kod/neden yinelenmez (tasarım §5.2).
+DECLINE_ADVICE = {
+    'ERR20005': 'Müşteri bankasını arasın ya da başka kart deneyin.',
+    'ERR20012': 'Başka kart deneyin.',
+    'ERR20051': 'Başka kart ya da daha az taksit deneyin.',
+    'ERR20054': "SKT'yi kontrol edin.",
+    'ERR20057': 'Müşteri bankasından açtırsın.',
+    'ERR20082': "CVV'yi yeniden alın.",
+    'ERR20084': "CVV'yi yeniden alın.",
+    'ERR20093': 'Müşteri bankasından açtırsın.',
+    'ERR20099': 'Birkaç dakika sonra tekrar deneyin.',
+    'ERR200YK': 'Başka kart deneyin.',
+    'ERR200GK': 'Yurt içi kart deneyin.',
+    'ERR30002': 'SMS kodunu yeniden girin.',
+    'ERR30004': 'Link gönderin.',
+    'ERR30005': 'Tekrar deneyin.',
+    'CA': 'Tekrar deneyin.',
 }
 # NEDEN: iade/iptal işleminde bu kodlar Paratika'nın açık red kanıtıdır; transactionStatus
 # AP görünse bile işlem 'failed' sayılır. Sağlayıcıya özgü red kodları yalnız burada (K-5, K-12).
 REFUND_REJECT_CODES = ('ERR10153',)
+ISO_RETURN_RE = re.compile(r'[0-9A-Z]{2}')
 # Bağlantı testi: kimlik reddi ve yetki eksikliği kodları
 AUTH_ERROR_CODES = ('ERR10020',)
 PERMISSION_ERROR_CODES = ('ERR10047', 'ERR10053', 'ERR10266')
@@ -794,6 +831,12 @@ class SanalPosProviderParatika(models.AbstractModel):
                             code, ttype, item.get('pgTranId'))
         return_code = str(item.get('pgTranReturnCode') or '').strip() or None
         error_code = str(item.get('errorCode') or item.get('pgTranErrorCode') or '').strip() or None
+        # G0: satış reddinde errorCode boş, yalnız ISO 8583 yanıt kodu (pgTranReturnCode) gelebilir;
+        # tek tabloya (ERROR_MESSAGES) bağlamak için 'ERR200' + kod. Biçim belgeden, canlıda doğrulanmadı.
+        # DIKKAT: yalnız satış; iade/iptal reddi ham return_code'u kod olarak taşır (test_refund_approval KK-6).
+        if (kind == 'sale' and not error_code and return_code and return_code != '00'
+                and ISO_RETURN_RE.fullmatch(return_code)):
+            error_code = 'ERR200' + return_code
         raw_message = (item.get('errorMsg') or item.get('pgTranErrorText')
                        or item.get('responseMsg') or None)
         if raw_message:
@@ -820,7 +863,11 @@ class SanalPosProviderParatika(models.AbstractModel):
             # G0: biçimi doğrulanmadı (belge örneği sistem adı: 'ISBANK TEST'); vade farkı oranını
             # ağa göre seçmek için kullanılır, eşleşmezse tüm oranlara bakılır.
             'payment_system': str(item.get('paymentSystem') or '').strip() or None,
-            'card_last4': item.get('panLast4') or None,
+            # DIKKAT (G3-2, KK-2.9): alan adı "son 4" olsa da maskeli PAN (BIN dahil) gelebilir; yalnız
+            # son 4 rakam tutulur, BIN deneme satırına/chatter'a/ödeme kaydına yazılmaz
+            'card_last4': re.sub(r'\D', '', str(item.get('panLast4') or ''))[-4:] or None,
+            # NEDEN: yalnız onay kodu; yanıttaki 'bin' alanı bilerek okunmaz (kart verisi, K-13)
+            'approval_code': str(item.get('pgTranApprCode') or '').strip() or None,
             'raw_type': ttype,
             'raw_status': code,
             'return_code': return_code,

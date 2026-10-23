@@ -26,6 +26,9 @@
     --mo-danger-text: #842029;
     --mo-danger-bg: #f8d7da;
     --mo-danger-border: #f1aeb5;
+    --mo-ok-text: #0f5132;
+    --mo-ok-bg: #d1e7dd;
+    --mo-ok-border: #a3cfbb;
     --mo-radius: .375rem;
 }
 
@@ -134,6 +137,7 @@ html.mo-js .mo-nojs-only { display: none; }
 .mo-alert p { margin: 0; }
 .mo-alert-warning { color: var(--mo-warn-text); background: var(--mo-warn-bg); border-color: var(--mo-warn-border); }
 .mo-alert-danger { color: var(--mo-danger-text); background: var(--mo-danger-bg); border-color: var(--mo-danger-border); }
+.mo-alert-success { color: var(--mo-ok-text); background: var(--mo-ok-bg); border-color: var(--mo-ok-border); }
 .mo-alert p.mo-alert-title { margin-bottom: .375rem; }
 .mo-checklist { margin: 0; padding-left: 1.25rem; }
 .mo-checklist li { margin: 0 0 .25rem; }
@@ -227,6 +231,26 @@ html.mo-js .mo-field .mo-error[hidden] { display: block !important; visibility: 
 .mo-btn-secondary { color: var(--mo-text); background: var(--mo-btn2-bg); border-color: var(--mo-btn2-bg); }
 .mo-btn-secondary:hover { background: var(--mo-btn2-hover); border-color: var(--mo-btn2-hover); }
 
+/* sonuç sayfası (Aşama 3): Tekrar dene / Link formları satır içi, geçmiş tablosu */
+.mo-form-inline { margin: 0; }
+.mo-advice { margin-top: .25rem; font-weight: 500; }
+.mo-remaining { margin: 0; font-weight: 500; }
+/* NEDEN (M-1): dar ekranda hücreler kelime ortasından kırılıyordu ("Yetersi z", "23.10.2 026"). Tablo
+ * kendi kutusunda yatay kayar (sayfa kaymaz: grid öğesi min-width 0); kısa sütunlar tek satır, "Neden"
+ * yalnız kelime aralarından sarılır. */
+.mo-stack > * { min-width: 0; }
+.mo-table-wrap { overflow-x: auto; padding: 0; }
+.mo-table { width: 100%; border-collapse: collapse; font-size: .875rem; }
+.mo-table th, .mo-table td { padding: .5rem .75rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--mo-border); overflow-wrap: normal; word-break: normal; }
+.mo-table td { white-space: nowrap; }
+.mo-table td:nth-child(3) { min-width: 10rem; white-space: normal; }
+.mo-table th { font-weight: 700; color: var(--mo-muted); white-space: nowrap; }
+.mo-table tbody tr:last-child td { border-bottom: 0; }
+.mo-badge { display: inline-block; padding: .125rem .5rem; font-weight: 700; white-space: nowrap; border-radius: 1rem; background: var(--mo-btn2-bg); }
+.mo-row-approved .mo-badge { color: var(--mo-ok-text); background: var(--mo-ok-bg); }
+.mo-row-failed .mo-badge, .mo-row-cancelled .mo-badge { color: var(--mo-danger-text); background: var(--mo-danger-bg); }
+.mo-row-pending .mo-badge, .mo-row-review .mo-badge { color: var(--mo-warn-text); background: var(--mo-warn-bg); }
+
 /* hata / dönüş sayfaları */
 .mo-narrow { max-width: 36rem; margin: 1.5rem auto 0; }
 .mo-center { text-align: center; }
@@ -263,6 +287,8 @@ html.mo-js .mo-field .mo-error[hidden] { display: block !important; visibility: 
     .mo-btn-primary { width: 100%; }
     .mo-actions { flex-direction: column-reverse; align-items: stretch; }
     .mo-actions .mo-btn { width: 100%; }
+    .mo-table { font-size: .8125rem; }
+    .mo-table th, .mo-table td { padding: .5rem; }
 }
 
 /* ---------------------------------------------------------------- koyu mod */
@@ -288,6 +314,9 @@ html.mo-js .mo-field .mo-error[hidden] { display: block !important; visibility: 
         --mo-danger-text: #ea868f;
         --mo-danger-bg: #3a1a1e;
         --mo-danger-border: #6b2a31;
+        --mo-ok-text: #75b798;
+        --mo-ok-bg: #0f2a1e;
+        --mo-ok-border: #1d5a3d;
     }
     .mo-input::placeholder { color: #8d949f; }
     .mo-nav-avatar { background: #e6e8eb; }

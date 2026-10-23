@@ -26,6 +26,7 @@ from .common import (
     PASSWORD, TEST_URL_PREFIX, LIVE_URL_PREFIX, RawResponse, SanalPosCase, connection_exc, err_body,
     installment_body, invoice_rows, ok_body, timeout_exc, tran,
 )
+from ..models.provider_paratika import ERROR_MESSAGES
 from ..models.sanal_pos_payment import BUSY_MSG
 
 PROVIDER = 'sanal.pos.provider.paratika'
@@ -1260,9 +1261,9 @@ class TestSyncAndErrors(MailOrderCase):
                  timeCreated='2026-10-22 10:00:00'))
         self.sync(payment)
         self.assertEqual(payment.failed_attempt_count, 2)
-        # mesaj biçimi KK-10 normalizasyonu ('<mesaj> (<kod>)'); kod ve metin en yeni işleminki
+        # kod ve metin en yeni işleminki; Aşama 3'ten beri bilinen red kodu tablo metnini alır
         self.assertEqual((payment.last_error_code, payment.last_error_message),
-                         ('ERR20051', 'Yetersiz limit (ERR20051)'))
+                         ('ERR20051', ERROR_MESSAGES['ERR20051']))
 
     def test_kk10_link_davranisi_degismedi(self):
         payment = self.make_payment()

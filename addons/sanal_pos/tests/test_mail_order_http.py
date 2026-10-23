@@ -562,33 +562,37 @@ class TestMoResult(MoHttpCase):
     def target(self, payment):
         return '/odoo/action-sanal_pos.action_sanal_pos_payment/%d' % payment.id
 
-    def test_sorgular_ve_kayda_yonlendirir(self):
+    def assertResultPage(self, response, payment):
+        """A3-G2 (KK-3.1): sonuç artık kayda 303 değil, "Kayda git" bağlantılı standalone sayfadır."""
+        self.assertEqual(response.status_code, 200)
+        self.assertIn(self.target(payment), response.text)
+        self.assertIn('Kayda git', response.text)
+
+    def test_sorgular_ve_sonuc_sayfasini_gosterir(self):
         payment = self.make_mail_order()
         self.set_query_transactions(tran('AP', 'SALE', '9000.00', 'PG-R1', last4='4242'))
         response = self.result(payment.merchant_payment_id)
-        self.assertEqual(response.status_code, 303)
-        self.assertTrue(response.headers['Location'].endswith(self.target(payment)))
+        self.assertResultPage(response, payment)
+        self.assertIn('Ödeme alındı', response.text)
         self.assertEqual(self.mock.count('QUERYTRANSACTION'), 1)
         self.assertEqual(self.reload(payment).state, 'paid')
         self.assertEqual(self.link_calls(), 0)
 
-    def test_son_10_saniyede_sorgusuz_yonlendirir(self):
+    def test_son_10_saniyede_sorgusuz_sayfayi_gosterir(self):
         payment = self.make_mail_order(last_checked_at=datetime.utcnow() - timedelta(seconds=3))
         response = self.result(payment.merchant_payment_id)
-        self.assertEqual(response.status_code, 303)
-        self.assertTrue(response.headers['Location'].endswith(self.target(payment)))
+        self.assertResultPage(response, payment)
         self.assertEqual(self.mock.count('QUERYTRANSACTION'), 0)
         # olumlu çapa: eski kontrol zamanında sorgu yapılır
         old = self.make_mail_order(invoice_no='R-OLD', last_checked_at=datetime.utcnow() - timedelta(seconds=60))
         self.result(old.merchant_payment_id)
         self.assertEqual(self.mock.count('QUERYTRANSACTION'), 1)
 
-    def test_kilitliyse_sorgusuz_yonlendirir(self):
+    def test_kilitliyse_sorgusuz_sayfayi_gosterir(self):
         payment = self.make_mail_order()
         with patch.object(type(self.env['sanal.pos.payment']), '_try_lock_nowait', return_value=False):
             response = self.result(payment.merchant_payment_id)
-        self.assertEqual(response.status_code, 303)
-        self.assertTrue(response.headers['Location'].endswith(self.target(payment)))
+        self.assertResultPage(response, payment)
         self.assertEqual(self.mock.count('QUERYTRANSACTION'), 0)
 
     def test_bilinmeyen_link_ve_eksik_mpid_listeye_gider_paratika_yok(self):
@@ -600,12 +604,11 @@ class TestMoResult(MoHttpCase):
                 self.assertTrue(response.headers['Location'].endswith(PAYMENT_LIST))
         self.assertNoParatikaCalls()
 
-    def test_sent_olmayan_kayit_sorgusuz_yonlendirir(self):
+    def test_sent_olmayan_kayit_sorgusuz_sayfayi_gosterir(self):
         # Kardeş yol (G4): ödenmiş/kapanmış kayıtta sonuç sayfası yenilense de Paratika sorgusu yok
         paid = self.make_mail_order(state='paid', invoice_no='R-PAID')
         response = self.result(paid.merchant_payment_id)
-        self.assertEqual(response.status_code, 303)
-        self.assertTrue(response.headers['Location'].endswith(self.target(paid)))
+        self.assertResultPage(response, paid)
         self.assertNoParatikaCalls()
         self.assertEqual(self.reload(paid).state, 'paid')
 
@@ -618,4 +621,4 @@ class TestMoResult(MoHttpCase):
         self.assertNotEqual(plain.status_code, 303 if self.target(payment) in plain.headers.get('Location', '') else 0)
         self.assertNotIn(self.target(payment), plain.headers.get('Location', ''))
         self.assertNoParatikaCalls()
-        self.assertEqual(self.result(payment.merchant_payment_id, user=self.user_sp).status_code, 303)
+        self.assertEqual(self.result(payment.merchant_payment_id, user=self.user_sp).status_code, 200)

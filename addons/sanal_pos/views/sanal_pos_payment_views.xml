@@ -72,6 +72,17 @@
                             class="btn-secondary" groups="sanal_pos.group_sanal_pos_user"
                             invisible="payment_method != 'mail_order' or state != 'sent'"
                             confirm="Paratika'daki işlem sorgulanacak; satış yoksa mail order kapatılır. Devam edilsin mi?"/>
+                    <!-- NEDEN: A3-G3 (tasarım §5.5): kurallar ve yetki denetimi modelde (_check_mail_order_action);
+                         form zaten yalnız Sanal POS gruplarına açık. Sınır K-17, link beklemesi K-15 -->
+                    <button name="action_mail_order_retry" type="object" string="Tekrar dene"
+                            class="btn-secondary"
+                            invisible="payment_method != 'mail_order' or state != 'sent'"/>
+                    <button name="action_mail_order_retry" type="object" string="Yeni deneme aç"
+                            class="btn-secondary"
+                            invisible="payment_method != 'mail_order' or state not in ('expired', 'error')"/>
+                    <button name="action_mail_order_to_link" type="object" string="Bunun yerine link gönder"
+                            class="btn-secondary"
+                            invisible="payment_method != 'mail_order' or state not in ('sent', 'expired', 'error')"/>
                     <!-- G11: iptal/iade yalnız yönetici; onay sihirbazı açılır (KK-40, KK-41, KK-50) -->
                     <button name="action_open_void_wizard" type="object" string="Ödemeyi İptal Et"
                             class="btn-danger" groups="sanal_pos.group_sanal_pos_manager"
@@ -184,6 +195,22 @@
                                     <field name="provider_status_detail" optional="hide"/>
                                     <field name="pending_alert_sent" optional="hide"/>
                                     <field name="done_at" optional="hide"/>
+                                </list>
+                            </field>
+                        </page>
+                        <page string="Deneme Geçmişi" name="attempts" invisible="payment_method != 'mail_order'">
+                            <field name="attempt_ids" readonly="1">
+                                <list create="0" edit="0" delete="0">
+                                    <field name="tran_time"/>
+                                    <field name="status" widget="badge"
+                                           decoration-success="status == 'approved'"
+                                           decoration-warning="status in ('pending', 'review')"
+                                           decoration-danger="status in ('failed', 'cancelled')"/>
+                                    <field name="reason"/>
+                                    <field name="error_code"/>
+                                    <field name="installment_count"/>
+                                    <field name="card_last4"/>
+                                    <field name="user_id"/>
                                 </list>
                             </field>
                         </page>

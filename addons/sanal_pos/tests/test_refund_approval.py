@@ -1408,7 +1408,8 @@ class TestDeliveryArtifacts(ApprovalCase):
         import ast
         with file_open('sanal_pos/__manifest__.py') as handle:
             manifest = ast.literal_eval(handle.read())
-        self.assertEqual(manifest['version'], '19.0.1.3.0')
+        # sonraki aşamalar sürümü yükseltir; iade onayının sürümü bu alt sınırdır
+        self.assertGreaterEqual(tuple(int(x) for x in manifest['version'].split('.')), (19, 0, 1, 3, 0))
 
     def test_kk18_yeni_kolonlar_olusur(self):
         self.env.cr.execute(

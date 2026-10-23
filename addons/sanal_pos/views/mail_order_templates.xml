@@ -6,7 +6,7 @@
         K-16) dışında <script>; satır içi olay işleyicisi (on...=), iframe/object/embed,
       * web.layout / t-call ile arka uç şablonu ya da /web/assets varlığı,
       * kart alanlarına value / t-att-value,
-      * Odoo'ya POST eden form ya da csrf_token,
+      * Odoo'ya POST eden form ya da csrf_token (YALNIZ mail_order_result_page'te, KK-3.9: kart alanı yok),
       * style="" (CSP style-src 'self' satır içi stili zaten engeller)
     EKLEMEYİN: kart verisi Odoo koduna/sunucusuna açılır, CSP (default-src 'none') sayfayı bozar.
     Formun action'ı yalnız provider.direct_post_url (Paratika sale3d); alan adları yalnız
@@ -312,6 +312,141 @@
                             </div>
                         </div>
                     </section>
+                </main>
+                <t t-call="sanal_pos.mail_order_footer"><t t-set="company_name" t-value="nav['company_name']"/></t>
+            </body>
+        </html>
+    </template>
+
+    <!-- Sonuç sayfası (Aşama 3, KK-3.1-3.6): script YOK (CSP script-src yok), kart verisi YOK (yalnız son 4).
+         Tek form ailesi: CSRF'li Tekrar dene / Link gönder POST'ları (CSP form-action 'self'); kart alanı yok.
+         Beklemede script'siz <meta refresh> (5 sn, en çok 24 kez ~ 2 dk). -->
+    <template id="mail_order_result_page" name="Sanal POS: Mail Order sonuç sayfası">
+        <html lang="tr">
+            <head>
+                <meta charset="utf-8"/>
+                <meta t-if="refresh_url" http-equiv="refresh" t-attf-content="5;url={{ refresh_url }}"/>
+                <meta name="viewport" content="width=device-width, initial-scale=1"/>
+                <meta name="robots" content="noindex, nofollow"/>
+                <title>Mail Order: ödeme sonucu</title>
+                <link rel="stylesheet" t-att-href="css_url"/>
+            </head>
+            <body>
+                <t t-call="sanal_pos.mail_order_navbar"/>
+                <t t-set="crumb_list_url" t-value="nav['list_url']"/>
+                <t t-set="crumb_record_url" t-value="record_url"/>
+                <t t-set="crumb_record_label" t-value="payment_name"/>
+                <t t-set="crumb_current" t-value="'Sonuç'"/>
+                <t t-call="sanal_pos.mail_order_breadcrumb"/>
+                <div t-if="is_test" class="mo-test-band">TEST ORTAMI: gerçek tahsilat yapılmaz</div>
+                <main class="mo-main">
+                    <ol class="mo-steps" aria-label="Ödeme adımları">
+                        <li><span class="mo-step-no">1</span> Kart bilgisi</li>
+                        <li><span class="mo-step-no">2</span> Banka SMS doğrulaması</li>
+                        <li aria-current="step"><span class="mo-step-no">3</span> Sonuç</li>
+                    </ol>
+                    <div class="mo-title">
+                        <h1>Ödeme sonucu</h1>
+                        <p>Fatura <t t-out="invoice_no"/> · <t t-out="customer_name"/></p>
+                    </div>
+                    <div class="mo-stack mo-result">
+                        <div t-if="notice" t-attf-class="mo-alert #{notice_class}" role="alert"><p t-out="notice"/></div>
+                        <section class="mo-card" aria-labelledby="mo-result-title">
+                            <div class="mo-card-head"><h2 id="mo-result-title">Sonuç</h2></div>
+                            <div class="mo-card-body">
+                                <t t-if="view == 'paid'">
+                                    <div class="mo-alert mo-alert-success" role="status">
+                                        <p class="mo-alert-title">Ödeme alındı</p>
+                                        <p>Tahsilat banka tarafından onaylandı.</p>
+                                    </div>
+                                    <dl class="mo-summary">
+                                        <dt>Tutar</dt><dd t-out="amount_text"/>
+                                        <dt>Taksit</dt>
+                                        <dd><t t-if="installments &gt; 1"><t t-out="installments"/> taksit</t><t t-else="">Tek çekim</t></dd>
+                                        <dt t-if="card_masked">Kart</dt><dd t-if="card_masked" t-out="card_masked"/>
+                                        <dt t-if="tran_ref">İşlem no</dt><dd t-if="tran_ref" t-out="tran_ref"/>
+                                        <dt t-if="paid_local">Zaman</dt><dd t-if="paid_local" t-out="paid_local"/>
+                                    </dl>
+                                </t>
+                                <t t-elif="view == 'review'">
+                                    <div class="mo-alert mo-alert-warning" role="alert">
+                                        <p class="mo-alert-title">Ödeme incelemeye alındı</p>
+                                        <p>Banka işlemi bulundu ancak tutar ya da işlem sayısı beklenenle uyuşmuyor. Ayrıntıyı kayıt notunda görün; kayıt incelenene kadar yeni deneme yapmayın.</p>
+                                    </div>
+                                    <dl class="mo-summary"><dt>Talep tutarı</dt><dd t-out="amount_text"/></dl>
+                                </t>
+                                <t t-elif="view == 'declined'">
+                                    <div class="mo-alert mo-alert-danger" role="alert">
+                                        <p class="mo-alert-title">Ödeme reddedildi</p>
+                                        <p><t t-out="reason"/><t t-if="code"> (<t t-out="code"/>)</t></p>
+                                        <p t-if="advice" class="mo-advice"><t t-out="advice"/></p>
+                                    </div>
+                                    <p t-if="remaining and not block_message" class="mo-remaining">Kalan deneme: <t t-out="remaining"/></p>
+                                </t>
+                                <t t-elif="view == 'pending'">
+                                    <div class="mo-alert mo-alert-warning" role="status">
+                                        <t t-if="not refresh_stopped">
+                                            <p class="mo-alert-title">Banka sonucu bekleniyor</p>
+                                            <p>Müşteri banka doğrulamasını tamamlıyor olabilir. Sayfa kendiliğinden yenilenir; yeni deneme açmayın.</p>
+                                        </t>
+                                        <t t-else="">
+                                            <p class="mo-alert-title">Sonuç henüz gelmedi</p>
+                                            <p>Sonuç henüz gelmedi; kayıttan izleyin (otomatik senkron ≤10 dk). Bu sırada yeni deneme açmayın.</p>
+                                        </t>
+                                    </div>
+                                </t>
+                                <t t-elif="view == 'closed'">
+                                    <div class="mo-alert mo-alert-warning" role="status">
+                                        <p class="mo-alert-title">Mail order oturumu kapalı</p>
+                                        <p>Bu kayıt için kart oturumu sona erdi ya da hata verdi; ödeme alınmadı.</p>
+                                    </div>
+                                </t>
+                                <t t-else="">
+                                    <div class="mo-alert mo-alert-warning" role="status">
+                                        <p class="mo-alert-title">Kayıt durumu: <t t-out="state_label"/></p>
+                                        <p>Ayrıntı için kayda gidin.</p>
+                                    </div>
+                                </t>
+                                <div t-if="block_message" class="mo-alert mo-alert-warning" role="alert"><p t-out="block_message"/></div>
+                                <div class="mo-actions">
+                                    <form t-if="retry_label" method="post" t-att-action="retry_action" class="mo-form-inline">
+                                        <input type="hidden" name="csrf_token" t-att-value="csrf_token"/>
+                                        <button type="submit" class="mo-btn mo-btn-primary" t-out="retry_label"/>
+                                    </form>
+                                    <form t-if="show_link" method="post" t-att-action="link_action" class="mo-form-inline">
+                                        <input type="hidden" name="csrf_token" t-att-value="csrf_token"/>
+                                        <button type="submit" class="mo-btn mo-btn-secondary">Bunun yerine link gönder</button>
+                                    </form>
+                                    <p t-if="link_wait" class="mo-note" t-out="link_wait"/>
+                                    <a t-if="view == 'pending' and refresh_stopped" class="mo-btn mo-btn-secondary" t-att-href="result_url">Yeniden denetle</a>
+                                    <a class="mo-btn mo-btn-secondary" t-att-href="record_url">Kayda git</a>
+                                </div>
+                            </div>
+                        </section>
+                        <section t-if="history" class="mo-card" aria-labelledby="mo-history-title">
+                            <div class="mo-card-head"><h2 id="mo-history-title">Deneme geçmişi</h2></div>
+                            <div class="mo-card-body mo-table-wrap">
+                                <table class="mo-table">
+                                    <thead>
+                                        <tr>
+                                            <th scope="col">Zaman</th><th scope="col">Sonuç</th><th scope="col">Neden</th>
+                                            <th scope="col">Taksit</th><th scope="col">Kart</th><th scope="col">Başlatan</th>
+                                        </tr>
+                                    </thead>
+                                    <tbody>
+                                        <tr t-foreach="history" t-as="row" t-att-class="'mo-row-' + row['status']">
+                                            <td t-out="row['time']"/>
+                                            <td><span class="mo-badge" t-out="row['label']"/></td>
+                                            <td t-out="row['detail'] or '-'"/>
+                                            <td><t t-if="row['installments'] &gt; 1"><t t-out="row['installments']"/> taksit</t><t t-else="">Tek çekim</t></td>
+                                            <td><t t-if="row['last4']">**** <t t-out="row['last4']"/></t><t t-else="">-</t></td>
+                                            <td t-out="row['user'] or '-'"/>
+                                        </tr>
+                                    </tbody>
+                                </table>
+                            </div>
+                        </section>
+                    </div>
                 </main>
                 <t t-call="sanal_pos.mail_order_footer"><t t-set="company_name" t-value="nav['company_name']"/></t>
             </body>

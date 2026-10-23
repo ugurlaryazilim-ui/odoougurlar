@@ -36,6 +36,8 @@ EXPECTED_PUBLIC = {
         'action_open_refund_wizard', 'action_open_void_wizard',
         # Mail Order (G3): ikisi de metot içi grup denetimi ile korunur (_check_sanal_pos_user)
         'action_open_card_page', 'action_mail_order_close',
+        # A3-G3: Tekrar dene / link; aynı metot içi grup denetimi (_check_mail_order_action)
+        'action_mail_order_retry', 'action_mail_order_to_link',
     },
     'sanal.pos.refund': {'write', 'unlink'},
     'sanal.pos.payment.create.wizard': {'create', 'write', 'action_fetch_invoice', 'action_create_link'},
