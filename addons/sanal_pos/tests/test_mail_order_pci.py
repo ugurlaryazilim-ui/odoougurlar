@@ -137,7 +137,8 @@ class TestPciStatic(SanalPosCase):
 MODULE_DIR = os.path.dirname(os.path.dirname(__file__))
 JS_FILE = os.path.join(MODULE_DIR, 'static', 'src', 'js', 'mail_order_card.js')
 CSS_FILE = os.path.join(MODULE_DIR, 'static', 'src', 'css', 'mail_order.css')
-# NFR-1.1: Aşama 1 en çok 8 KB; Aşama 2'de BIN sorgusuyla en çok 12 KB (K-16 eki, 12288 bayt).
+# NEDEN: NFR-1.1 betik bütçesi; Aşama 2'de BIN sorgusuyla 8 KB'tan 12 KB'a çıktı, aşılırsa sınır
+# yükseltilmez, tasarım mimara döner (bkz. KARARLAR K-16 eki).
 SCRIPT_MAX_BYTES = 12288
 BIN_PATH = '/sanal_pos/mail_order/bin'
 
@@ -146,7 +147,7 @@ BIN_PATH = '/sanal_pos/mail_order/bin'
 # değeri yazar; eşitlik test edilir).
 # DIKKAT: betik diff'i ile bu sabitin diff'i AYNI commit'te ve aynı incelemede görünür (A1-G3 sözleşmesi);
 # sabiti incelemesiz ayrı bir commit'le değiştirmek PCI 6.4.3/11.6.1 kontrolünü boşa çıkarır.
-SCRIPT_SHA256 = 'A44tqgwD9BZp4Grx1S6Oy0HAcGkDJFHXz15naS7Jfj8='
+SCRIPT_SHA256 = 'ac92Na799IAc62rP+Mqew7KvniDjhvb11SFRR1TGbCk='
 
 # Yasak belirteçler (KK-1.15 + tasarım §3.5/7). Yorum satırları çıkarıldıktan sonra aranır.
 FORBIDDEN_TOKENS = {

@@ -1,7 +1,8 @@
 /* Mail Order kart sayfası betiği (K-16, tasarım §3.5).
  * DIKKAT: assets'e eklenmez; tools.mail_order_script() satır içi basar, sha256'sı CSP'dedir. Her
- * değişiklik kod incelemesi + SCRIPT_SHA256 (test_mail_order_pci) ister. Ağ/depolama/console/HTML
- * yazımı yok; CVV değeri okunmaz. Desen gevşetme ve mo-js EN SONDA (yarım kurulum = script'siz). */
+ * değişiklik kod incelemesi + SCRIPT_SHA256 (test_mail_order_pci) ister. Tek ağ isteği BIN ucuna (ilk
+ * 8 hane, §4.7); depolama/console/HTML yazımı yok; CVV değeri okunmaz. Desen gevşetme ve mo-js EN
+ * SONDA (yarım kurulum = script'siz). */
 (function () {
   'use strict';
   var D = document;
@@ -43,6 +44,85 @@
     /* NEDEN: süre = sunucu saniyesi - monotonik fark (istemci saati kayabilir). */
     var t0 = performance.now();
     var ready = false, busy = false, isExpired = false, lastPan = '', timer = null;
+
+    /* BIN (§4.7): koşullardan biri yoksa kapalı (A1 davranışı). snap: kartların açılış metni/data-*. */
+    var binSt = $('mo-bin-status'), det = $('mo-detected'), note = $('mo-inst-note');
+    var pid = +form.dataset.paymentId, want = '', cache = new Map(), snap = [], K = ['total', 'monthly', 'surcharge'];
+    var binOn = form.dataset.bin === '1' && binSt && det && note && pid > 0;
+    for (var i = 0; binOn && i < radios.length; i++) {
+      var r = radios[i], c = r.closest('.mo-inst-card'), s = {r: r, c: c, d: {}, t: []};
+      if (!c) { binOn = false; break; }
+      K.forEach(function (k) { s.d[k] = r.dataset[k]; });
+      ['amount', 'total', 'fee', 'networks'].forEach(function (k) {
+        var el = c.querySelector('.mo-inst-' + k);
+        if (el) { s.t.push([el, el.textContent, el.hidden, k]); }
+      });
+      snap.push(s);
+    }
+    function setD(d, k, v) { if (v) { d[k] = v; } else { delete d[k]; } }
+    function reset() {
+      snap.forEach(function (s) {
+        s.c.hidden = false;
+        for (var k in s.d) { setD(s.r.dataset, k, s.d[k]); }
+        s.t.forEach(function (x) { x[0].textContent = x[1]; x[0].hidden = x[2]; });
+      });
+      det.textContent = binSt.textContent = note.textContent = '';
+      onInst();
+    }
+    function apply(res) {
+      var by = {}, sel = null, one = null;
+      res.rows.forEach(function (w) { by[w.count] = w; });
+      snap.forEach(function (s) {
+        var n = +s.r.value, w = by[n];
+        if (n === 1) { one = s.r; }
+        if (s.r.checked) { sel = s; }
+        /* NEDEN: Tek çekim hiç gizlenmez (seçilecek kart kalır); yeni kart üretilmez (R17). */
+        s.c.hidden = !w && n !== 1;
+        if (!w) { return; }
+        K.forEach(function (k) { setD(s.r.dataset, k, w[k + '_text']); });
+        s.t.forEach(function (x) {
+          var k = x[3];
+          if (k === 'networks') { x[0].hidden = true; return; }
+          x[0].textContent = k === 'fee' ? (w.surcharge_text ? w.rate_text + ' · ' + w.surcharge_text : w.rate_text)
+            : k === 'total' ? 'Toplam ' + w.total_text : (n > 1 ? w.monthly_text + ' / ay' : w.total_text);
+        });
+      });
+      if (sel && sel.c.hidden && one) {
+        sel.r.checked = false; one.checked = true;
+        note.textContent = 'Bu kart ' + sel.r.value + ' taksiti desteklemiyor; tek çekim seçildi';
+      }
+      det.textContent = res.detected || '';
+      binSt.textContent = res.note || '';
+      onInst();
+    }
+    /* cache: 0 = istek sürüyor, nesne = başarılı yanıt. NEDEN: hata girmez, aynı BIN yeniden sorulur (S1). */
+    function onBin(n) {
+      var b = !isExpired && n.length >= 8 && !/^3[47]/.test(n) ? n.slice(0, 8) : '';
+      if (!binOn || b === want) { return; }
+      want = b;
+      reset();
+      if (!b) { return; }
+      var v = cache.get(b);
+      if (v) { apply(v); return; }
+      binSt.textContent = 'Taksitler yükleniyor…';
+      if (v === 0) { return; }
+      cache.set(b, 0);
+      var ac = new AbortController(), to = setTimeout(function () { ac.abort(); }, 6000);
+      function end(j) {
+        clearTimeout(to);
+        j = j && j.ok === true && j.rows ? j : null;
+        if (j) { cache.set(b, j); } else { cache.delete(b); }
+        if (want !== b) { return; }   /* eski/geç yanıt uygulanmaz */
+        if (j) { apply(j); } else {
+          binSt.textContent = 'Kartın taksitleri doğrulanamadı; tüm seçenekler gösteriliyor, desteklenmeyen taksiti banka reddeder.';
+        }
+      }
+      /* DIKKAT: tek ağ çağrısı; hedef sabit, gövde yalnız payment_id + 8 hane (KK-1.15/2.1). */
+      fetch('/sanal_pos/mail_order/bin', {method: 'POST', credentials: 'same-origin', redirect: 'error',
+        cache: 'no-store', referrerPolicy: 'no-referrer', headers: {'Content-Type': 'application/json'},
+        body: JSON.stringify({payment_id: pid, bin: b}), signal: ac.signal})
+        .then(function (q) { return q.ok ? q.json() : null; }).then(end, function () { end(null); });
+    }
 
     function mark(key, fields, msg) {
       errs[key].textContent = msg;
@@ -95,6 +175,7 @@
       cards.dataset.brand = brand(n);
       amex.hidden = !/^3[47]/.test(n);   /* yalnız uyarı (S1.1); gönderimi engellemez */
       if (pan.getAttribute('aria-invalid')) { chkPan(); }
+      onBin(n);
     }
 
     function onInst() {
@@ -140,7 +221,10 @@
 
     pan.addEventListener('input', onPan);
     form.addEventListener('change', function (e) {
-      if (e.target && e.target.name === 'installmentCount') { onInst(); }
+      if (e.target && e.target.name === 'installmentCount') {
+        if (binOn) { note.textContent = ''; }   /* KK-2.3 notu kullanıcı seçince bayatlar (S3) */
+        onInst();
+      }
     });
     inputs.forEach(function (el, k) {
       el.addEventListener('blur', function () { if (ready) { checks[k](); } });

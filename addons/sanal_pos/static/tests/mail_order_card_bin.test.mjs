@@ -64,7 +64,7 @@ function card(doc, count, withTitle = true) {
 
 const shown = (r) => !(r.card.hidden || r.hidden);
 
-function page({ bin = true, counts = [1, 2, 3, 6], omit = [], hang = false } = {}) {
+function page({ bin = true, counts = [1, 2, 3, 6], omit = [], hang = false, pid = '4711' } = {}) {
   const doc = { readyState: 'complete', activeElement: null, listeners: {},
     addEventListener(t, fn) { (this.listeners[t] ||= []).push(fn); } };
   const html = { classes: new Set() };
@@ -83,7 +83,7 @@ function page({ bin = true, counts = [1, 2, 3, 6], omit = [], hang = false } = {
   els['mo-sum-total'].textContent = '1.000,00 TL';
   els['mo-remaining'].dataset.seconds = '2700';
   els['mo-form'].dataset.nowYm = '2026-10';
-  els['mo-form'].dataset.paymentId = '4711';
+  els['mo-form'].dataset.paymentId = pid;
   if (bin) els['mo-form'].dataset.bin = '1';
   const cards = new El(doc, null);
   cards.dataset.brand = '';
@@ -383,6 +383,103 @@ test('betik_boyutu_12_kb_ve_tek_fetch_ve_yerel_veri_yok', () => {
   assert.equal((SOURCE.match(/\bfetch\b/g) || []).length, 1, 'tek fetch');
   assert.equal((SOURCE.match(/localStorage|sessionStorage|indexedDB|sendBeacon|XMLHttpRequest|WebSocket/g) || []).length, 0);
   assert.ok(SOURCE.includes(BIN_PATH));
+});
+
+// A2-G3 kardeş yollar (sözleşme S1-S4)
+test('ayni_bin_hata_sonrasi_yeniden_sorulur', async () => {
+  const p = page();
+  type(p, BIN);
+  reply(p.fetches[0], { ok: false, error: 'provider' }, 502);
+  await flush();
+  type(p, '4355');
+  type(p, BIN);                                     // S1: hata önbelleğe girmez
+  assert.equal(p.fetches.length, 2, 'hata sonrası aynı BIN bir kez daha sorulur');
+  reply(p.fetches[1], CREDIT);
+  await flush();
+  assert.equal(p.els['mo-detected'].textContent, CREDIT.detected);
+  type(p, '4355');
+  type(p, BIN);                                     // başarılı yanıt önbellekte
+  await flush();
+  assert.equal(p.fetches.length, 2);
+});
+
+test('zaman_asimi_sonrasi_ayni_bin_yeniden_sorulur', async () => {
+  const p = page();
+  type(p, BIN);
+  p.timeouts.find((t) => t.ms === 6000).fn();
+  p.fetches[0].reject(Object.assign(new Error('abort'), { name: 'AbortError' }));
+  await flush();
+  type(p, '4355');
+  type(p, BIN);
+  assert.equal(p.fetches.length, 2);
+});
+
+test('bekleyen_bin_yeniden_yazilinca_cift_istek_yok', async () => {
+  const p = page();
+  type(p, BIN);
+  type(p, '4355');
+  type(p, BIN);                                     // ilk istek hâlâ sürüyor
+  assert.equal(p.fetches.length, 1, 'aynı anda tek istek');
+  assert.equal(p.els['mo-bin-status'].textContent, 'Taksitler yükleniyor…');
+  reply(p.fetches[0], DEBIT);
+  await flush();
+  assert.equal(p.els['mo-detected'].textContent, DEBIT.detected, 'bekleyen yanıt güncel BIN için uygulanır');
+});
+
+test('sure_dolmussa_bin_istegi_yok', async () => {
+  const p = page();
+  p.clock.t += 2701 * 1000;
+  for (const fn of p.doc.listeners.visibilitychange) fn();
+  assert.equal(p.els['mo-pay'].disabled, true, 'süre doldu');
+  type(p, PAN);
+  await flush();
+  assert.equal(p.fetches.length, 0);
+});
+
+test('tek_radyo_bin_yeni_kart_eklemez', async () => {
+  const p = page({ counts: [1] });
+  type(p, PAN);
+  reply(p.fetches[0], CREDIT);
+  await flush();
+  assert.equal(p.radios.length, 1);
+  assert.deepEqual(p.radios.map((r) => shown(r)), [true]);
+  assert.equal(p.els['mo-detected'].textContent, CREDIT.detected);
+});
+
+for (const id of ['mo-bin-status', 'mo-detected', 'mo-inst-note']) {
+  test(`yuva_eksikse_bin_kapali_a1_calisir_${id}`, async () => {
+    const p = page({ omit: [id] });
+    assert.ok(p.html.classes.has('mo-js'), 'betik kuruldu');
+    type(p, PAN);
+    await flush();
+    assert.equal(p.fetches.length, 0);
+    assert.equal(p.els.pan.value, '4355 0843 5508 4358');
+  });
+}
+
+for (const pid of ['', '0', 'abc']) {
+  test(`payment_id_gecersizse_bin_kapali_${pid || 'bos'}`, async () => {
+    const p = page({ pid });
+    assert.ok(p.html.classes.has('mo-js'));
+    type(p, PAN);
+    await flush();
+    assert.equal(p.fetches.length, 0);
+  });
+}
+
+test('secim_degisince_tek_cekim_notu_temizlenir', async () => {
+  const p = page();
+  p.radios[3].checked = true;
+  p.radios[0].checked = false;
+  type(p, PAN);
+  reply(p.fetches[0], CREDIT);
+  await flush();
+  assert.match(p.els['mo-inst-note'].textContent, /6 taksiti desteklemiyor/);
+  p.radios[0].checked = false;
+  p.radios[2].checked = true;
+  p.els['mo-form'].fire('change', { target: p.radios[2] });
+  assert.equal(p.els['mo-inst-note'].textContent, '', 'S3: not temizlendi');
+  assert.equal(p.els['mo-sum-total'].textContent, '1.020,00 TL');
 });
 
 test('kart_numarasinin_tamami_ve_cvv_aga_gitmez', async () => {

@@ -44,7 +44,7 @@ _SCRIPT_FORBIDDEN_RE = re.compile(r'</script|<!--', re.IGNORECASE)
 # bu değer, tests/test_mail_order_pci.SCRIPT_SHA256 ve README envanteri AYNI commit'te güncellenir.
 # NEDEN: repoda CI yok; testsiz birleştirilen bir değişiklik CSP hash'i otomatik türediği için
 # tarayıcıda çalışırdı. Kasıtlı içeriden değişikliği durdurmaz (sabit aynı repoda).
-MAIL_ORDER_SCRIPT_SHA256 = 'A44tqgwD9BZp4Grx1S6Oy0HAcGkDJFHXz15naS7Jfj8='
+MAIL_ORDER_SCRIPT_SHA256 = 'ac92Na799IAc62rP+Mqew7KvniDjhvb11SFRR1TGbCk='
 
 
 class MailOrderScriptHashMismatch(ValueError):
