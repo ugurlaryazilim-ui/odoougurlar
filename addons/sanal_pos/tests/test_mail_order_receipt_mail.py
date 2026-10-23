@@ -6,7 +6,7 @@ yollar (Kapat, K-15 yeniden açma, senkron cron'u), girmemesi gerekenler (iade r
 sorguda iptal, Aşama 4 öncesi paid) ve yan iş/yarış hataları (DERSLER-14, REPEATABLE READ) sınanır.
 
 DIKKAT: gerçek iki bağlantılı SKIP LOCKED/serileştirme yarışı TransactionCase'te üretilemez
-(veri commit edilmez); hata yolları yamalarla taklit edilir (BORC: iki bağlantılı PoC).
+(veri commit edilmez); hata yolları yamalarla taklit edilir (EKIP-BORC: iki bağlantılı PoC).
 """
 import smtplib
 from datetime import datetime, timedelta
@@ -15,9 +15,11 @@ from unittest.mock import patch
 from lxml import etree
 from psycopg2 import errors as pg_errors
 
+from odoo.exceptions import UserError
 from odoo.tests import tagged
 from odoo.tools.safe_eval import safe_eval
 
+from ..tools import valid_receipt_email
 from .common import CRON_DAILY, EMAIL, tran
 from .test_mail_order import MailOrderCase
 from .test_mail_order_receipt import CRON_RECEIPT, PAYMENT, WIZARD, ReceiptMixin
@@ -327,3 +329,129 @@ class TestReceiptSiblings(ReceiptMixin, MailOrderCase):
             with self.subTest(method=method, state=state, receipt=receipt):
                 ctx = {'payment_method': method, 'state': state, 'receipt_state': receipt}
                 self.assertEqual(bool(safe_eval(expr, ctx)), hidden)
+
+    # -- düzeltme turu #2 ------------------------------------------------------------------
+    def composer_mail(self, payment):
+        """G4-7 PoC: Sanal POS kullanıcısı aynı model/res_id ile toplu (mass_mail) e-posta yollar."""
+        partner = self.env['res.partner'].sudo().create({'name': 'Toplu Alici', 'email': 'toplu@example.com'})
+        composer = self.env['mail.compose.message'].with_user(self.user_sp).create({
+            'composition_mode': 'mass_mail', 'model': PAYMENT, 'res_ids': [payment.id],
+            'subject': 'sahte', 'body': '<p>sahte</p>', 'email_from': 'x@example.com',
+            'auto_delete': True, 'auto_delete_keep_log': False, 'partner_ids': [(6, 0, partner.ids)]})
+        composer._action_send_mail()
+        mails = self.env['mail.mail'].sudo().search(
+            [('model', '=', PAYMENT), ('res_id', '=', payment.id), ('subject', '=', 'sahte')])
+        mails.filtered(lambda m: m.state == 'outgoing').send()
+        return mails
+
+    def age_mails(self, mails):
+        self.env.flush_all()
+        self.env.cr.execute('UPDATE mail_mail SET create_date = %s WHERE id IN %s',
+                            [datetime.utcnow() - timedelta(days=31), tuple(mails.ids)])
+        self.env.invalidate_all()
+
+    def test_r1_toplu_composer_epostasi_dekont_durumunu_ve_notu_degistirmez_temizlik_silmez(self):
+        sent_payment = self.paid_order()
+        sent_payment.sudo().write({'receipt_state': 'sent'})
+        self.smtp_error = smtplib.SMTPException('SMTP kapalı')
+        rejected = self.composer_mail(sent_payment)
+        self.assertEqual(rejected.exists().mapped('state'), ['exception'], 'PoC ön koşulu: posta reddedildi')
+        self.assertEqual(self.reload(sent_payment).receipt_state, 'sent', 'G4-7 (a): sent -> failed olmaz')
+        self.assertEqual(self.count_notes(sent_payment, FAILED_NOTE), 0)
+
+        failed_payment = self.paid_order()
+        failed_payment.sudo().write({'receipt_state': 'failed'})
+        self.smtp_error = None
+        self.composer_mail(failed_payment)
+        self.assertEqual(len(self.sent), 1, 'PoC ön koşulu: toplu posta gitti')
+        self.assertEqual(self.reload(failed_payment).receipt_state, 'failed', 'G4-7 (b): failed -> sent olmaz')
+        self.assertEqual(self.count_notes(failed_payment, 'adresine gönderildi'), 0, 'sahte "gönderildi" notu yok')
+
+        self.age_mails(rejected)
+        self.run_cron(CRON_DAILY)
+        self.assertEqual(rejected.exists(), rejected, 'dekont olmayan toplu posta temizlikte silinmez')
+
+    def test_r1_en_son_dekont_epostasi_kazanir_eski_epostanin_sonucu_durumu_ezmez(self):
+        payment = self.paid_via_sync()
+        self.smtp_error = smtplib.SMTPException('SMTP kapalı')
+        self.run_receipt_cron()
+        cron_mail = self.queued_mails(payment)
+        self.assertEqual(self.reload(payment).receipt_state, 'failed')
+        self.assertEqual(payment.receipt_mail_id, cron_mail, 'cron e-postası kayda bağlanır')
+        self.smtp_error = None
+        self.send_by_wizard(payment)                             # personel elle yeniden gönderdi
+        manual_mail = self.queued_mails(payment) - cron_mail
+        self.assertEqual(payment.receipt_mail_id, manual_mail, 'en son e-posta bağlıdır')
+        manual_mail.send()
+        self.assertEqual(self.reload(payment).receipt_state, 'sent')
+        # Y-2: yönetici eski (cron) e-postayı "Yeniden dene" ile yolladı, SMTP yine reddetti
+        self.smtp_error = smtplib.SMTPException('SMTP kapalı')
+        cron_mail.mark_outgoing()
+        cron_mail.send()
+        self.assertEqual(cron_mail.state, 'exception')
+        self.assertEqual(self.reload(payment).receipt_state, 'sent', 'eski e-postanın sonucu yeniyi ezmez')
+        self.assertEqual(self.count_notes(payment, FAILED_NOTE), 1, 'yalnız ilk cron hatasının notu')
+        # yerine yenisi gönderilmiş başarısız dekont kopyası da 30 gün sonra silinir (KVKK)
+        attachments = cron_mail.attachment_ids
+        self.assertTrue(attachments)
+        self.age_mails(cron_mail)
+        self.run_cron(CRON_DAILY)
+        self.assertFalse(cron_mail.exists())
+        self.assertFalse(attachments.exists())
+
+    def test_r2_cron_basarisinda_kopya_ve_pdf_tutulmaz(self):
+        payment = self.paid_via_sync()
+        self.run_receipt_cron()
+        self.assertEqual(self.reload(payment).receipt_state, 'sent')
+        self.assertFalse(self.queued_mails(payment), 'KVKK: başarılı gönderimde kopya tutulmaz')
+        self.assertFalse(payment.receipt_mail_id)
+        self.assertFalse(self.env['ir.attachment'].sudo().search(
+            [('id', '>', self.before['ir_attachment']), ('name', 'like', 'Dekont -')]), 'PDF eki tutulmaz')
+
+    def test_r2_cron_hatasi_yeniden_denemede_gonderilirse_kopya_silinir(self):
+        payment = self.paid_via_sync()
+        self.smtp_error = smtplib.SMTPException('SMTP kapalı')
+        self.run_receipt_cron()
+        mails = self.queued_mails(payment)
+        self.assertEqual((self.reload(payment).receipt_state, mails.state), ('failed', 'exception'))
+        attachments = mails.attachment_ids
+        self.smtp_error = None
+        mails.mark_outgoing()                                    # Ayarlar > Teknik > E-postalar "Yeniden dene"
+        mails.send()
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(self.reload(payment).receipt_state, 'sent')
+        self.assertEqual(self.count_notes(payment, SENT_NOTE), 1)
+        self.assertFalse(self.queued_mails(payment), 'Y-1/B-F: başarılı yeniden denemede kopya silinir')
+        self.assertFalse(attachments.exists(), 'PDF eki de silinir')
+
+    def test_r3_dogrulayici_satir_sonu_kontrol_bidi_ve_sifir_genislik_karakterlerini_reddeder(self):
+        for bad in ('a@example.com\n', 'a@example.com\r', 'a\x00@example.com', 'a\x01@example.com',
+                    'a\x1f@example.com', 'a\x7f@example.com', 'a\u200b@example.com', 'a\u200d@example.com',
+                    '\ufeffa@example.com', 'a\u202e@example.com', 'a@exam\u202aple.com',
+                    'a\u2066@example.com', 'a@example.com\u2069'):
+            with self.subTest(email=repr(bad)):
+                self.assertFalse(valid_receipt_email(bad))
+        for good in (EMAIL, 'a@example.com', 'ä@example.com', 'a@bücher.de'):
+            with self.subTest(email=good):
+                self.assertTrue(valid_receipt_email(good))
+        payment = self.paid_order()
+        with self.assertRaises(UserError):
+            self.env[WIZARD].with_user(self.user_sp).create(
+                {'payment_id': payment.id, 'email': 'musteri\u202e@example.com'}).action_send()
+        self.assertFalse(self.queued_mails(payment))
+
+    def test_r7_kanca_okuma_hatasi_eposta_gonderimini_bozmaz(self):
+        payment = self.paid_order()
+        self.send_by_wizard(payment)
+        Model = self.model_class()
+        test = self
+
+        def broken(this, mail):
+            raise test.serialization_failure()
+
+        with patch.object(Model, '_receipt_mail_result', broken), self.capture_logs() as records:
+            self.queued_mails(payment).send()
+        self.assertEqual(len(self.sent), 1, 'e-posta bir kez gider')
+        self.assertFalse(self.queued_mails(payment), 'gönderildi sayılır ve silinir; exception/yeniden gönderim yok')
+        self.assertEqual(self.reload(payment).receipt_state, 'sent')
+        self.assertTrue(any('SerializationFailure' in r for r in records), 'hata loglanır')
