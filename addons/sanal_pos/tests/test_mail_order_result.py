@@ -26,7 +26,7 @@ from odoo.tests import tagged
 
 from .common import (
     CUSTOMER_NAME, EMAIL, INV_NO, LEAK_PAN, MAIL_ORDER_BIN_PATH, MAIL_ORDER_PAY_PATH,
-    MAIL_ORDER_RESULT_PATH, SanalPosCase, querybin_body, timeout_exc, tran,
+    MAIL_ORDER_RESULT_PATH, SanalPosCase, invoice_rows, querybin_body, timeout_exc, tran,
 )
 from .test_mail_order_http import CSS_HREF_RE, LINK_ACTIONS, PAYMENT_LIST, MoHttpCase
 
@@ -781,7 +781,9 @@ class TestAttemptLimit(ResultCase):
         for name, sent_at in (('pencere_disi', utc_ago(hours=2)), ('k15_pencere_icinde', utc_ago(minutes=10))):
             with self.subTest(case=name):
                 inv = 'LIM-%s' % name
-                self.invoices[inv] = self.invoices[INV_NO]
+                # A3-G1: satırlar kendi fatura numarasını taşımalı (UGRFaturaNo); kopya satır
+                # sihirbazın kanonik numarasını INV_NO yapıyordu, sınır yanlış faturada sayılıyordu
+                self.invoices[inv] = invoice_rows(inv)
                 prior = self.make_mail_order(invoice_no=inv, state='expired', sent_at=sent_at,
                                              expires_at=utc_ago(minutes=1))
                 self.fail_n(prior, 3)

@@ -47,6 +47,7 @@ class TestPciStatic(SanalPosCase):
         names = sorted(m._name for m in self.sanal_models())
         self.assertIn('sanal.pos.mail.order.wizard', names)        # olumlu çapa: yeni model var
         self.assertIn('sanal.pos.payment', names)
+        self.assertIn('sanal.pos.payment.attempt', names)   # Aşama 3 (K-17)
         offenders = []
         for model in self.sanal_models():
             offenders += ['%s.%s' % (model._name, f) for f in model._fields if is_card_field(f)]
@@ -128,7 +129,7 @@ class TestPciStatic(SanalPosCase):
         path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '__manifest__.py')
         with open(path, encoding='utf-8') as fh:
             manifest = ast.literal_eval(fh.read())
-        self.assertEqual(manifest['version'], '19.0.1.3.0')
+        self.assertEqual(manifest['version'], '19.0.1.4.0')
 
 
 # ======================================================================================

@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 {
     'name': 'Sanal POS (Ödeme Linki)',
-    'version': '19.0.1.3.0',
+    'version': '19.0.1.4.0',
     'category': 'Accounting/Payment',
     'summary': 'Nebim faturasına bağlı Paratika ödeme linki oluşturma, takip, iptal ve iade',
     'description': """

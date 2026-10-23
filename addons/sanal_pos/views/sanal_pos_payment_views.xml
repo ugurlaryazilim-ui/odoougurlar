@@ -187,6 +187,22 @@
                                 </list>
                             </field>
                         </page>
+                        <page string="Deneme Geçmişi" name="attempts" invisible="payment_method != 'mail_order'">
+                            <field name="attempt_ids" readonly="1">
+                                <list create="0" edit="0" delete="0">
+                                    <field name="tran_time"/>
+                                    <field name="status" widget="badge"
+                                           decoration-success="status == 'approved'"
+                                           decoration-warning="status in ('pending', 'review')"
+                                           decoration-danger="status in ('failed', 'cancelled')"/>
+                                    <field name="reason"/>
+                                    <field name="error_code"/>
+                                    <field name="installment_count"/>
+                                    <field name="card_last4"/>
+                                    <field name="user_id"/>
+                                </list>
+                            </field>
+                        </page>
                         <page string="Teknik" name="technical">
                             <group>
                                 <group>

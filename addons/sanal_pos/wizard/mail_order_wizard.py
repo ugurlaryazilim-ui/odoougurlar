@@ -78,6 +78,11 @@ class SanalPosMailOrderWizard(models.TransientModel):
         DIKKAT: yeni MPID'li kayıt açmak açık bir kart/banka sekmesiyle çift tahsilata yol açar
         ("Kapat" Paratika oturumunu sonlandıramaz). Bu dal kaldırılmamalı (bkz. KARARLAR K-15).
         """
+        # NEDEN: fatura başına 24 saatte 3 başarısız denemede yeni oturum da K-15 yeniden açma
+        # (QUERYTRANSACTION) da yapılmaz; link yolu açık kalır (S3.1, KARARLAR K-17).
+        blocked = self.env['sanal.pos.payment']._mail_order_attempt_block(values['invoice_no'])
+        if blocked:
+            raise UserError(blocked)
         prior = self.env['sanal.pos.payment']._live_mail_order_prior(values['invoice_no'])
         if prior:
             return prior._reopen_mail_order(values)

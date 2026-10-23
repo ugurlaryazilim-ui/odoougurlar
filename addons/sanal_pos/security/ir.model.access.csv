@@ -1,6 +1,8 @@
 id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
 access_sanal_pos_payment_user,sanal.pos.payment user,model_sanal_pos_payment,group_sanal_pos_user,1,0,0,0
 access_sanal_pos_payment_manager,sanal.pos.payment manager,model_sanal_pos_payment,group_sanal_pos_manager,1,0,0,0
+access_sanal_pos_payment_attempt_user,sanal.pos.payment.attempt user,model_sanal_pos_payment_attempt,group_sanal_pos_user,1,0,0,0
+access_sanal_pos_payment_attempt_manager,sanal.pos.payment.attempt manager,model_sanal_pos_payment_attempt,group_sanal_pos_manager,1,0,0,0
 access_sanal_pos_refund_user,sanal.pos.refund user,model_sanal_pos_refund,group_sanal_pos_user,1,0,0,0
 access_sanal_pos_refund_manager,sanal.pos.refund manager,model_sanal_pos_refund,group_sanal_pos_manager,1,0,0,0
 access_sanal_pos_log_manager,sanal.pos.log manager,model_sanal_pos_log,group_sanal_pos_manager,1,0,0,0

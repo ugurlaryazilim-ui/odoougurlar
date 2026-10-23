@@ -151,6 +151,12 @@ MO_REUSE_CUSTOMER_FIELDS = ('customer_name', 'customer_phone', 'customer_email',
 MO_REUSE_NOTICE = ('Bu faturanın Paratika oturumu hâlâ açık olabilecek önceki mail order denemesi '
                    'var (%s). Yeni deneme aynı ödeme numarasıyla açılır; müşteri bilgileri önceki '
                    'denemeden alınır, burada yaptığınız değişiklikler kullanılmaz.')
+# Aşama 3 deneme sınırı (S3.1, KARARLAR K-17): fatura başına, kayan 24 saatte, son onaydan sonra
+MO_FAIL_LIMIT = 3
+MO_FAIL_WINDOW = timedelta(hours=24)
+MO_LIMIT_MSG = ('Bu fatura için 3 başarısız kart denemesi yapıldı; güvenlik nedeniyle mail order '
+                '24 saat kapalı. Müşteriye ödeme linki gönderin.')
+ATTEMPT_FAIL_STATES = ('failed', 'cancelled')
 # G10: yeniden gönder / link iptali (KK-31, KK-32)
 CHANNEL_MSG = 'En az bir gönderim kanalı seçin.'                                         # KK-9
 RESEND_CHANNELS = ('sms', 'email')
@@ -318,6 +324,9 @@ class SanalPosPayment(models.Model):
 
     # ---------------------------------------------------------------- iade
     refund_ids = fields.One2many('sanal.pos.refund', 'payment_id', string='İade Geçmişi')
+    # Mail order kart denemeleri (K-17); yalnız _record_attempts yazar
+    attempt_ids = fields.One2many('sanal.pos.payment.attempt', 'payment_id',
+                                  string='Deneme Geçmişi', readonly=True)
     refunded_amount = fields.Monetary(
         string='İade Edilen', currency_field='currency_id', compute='_compute_refunded_amount',
         store=True)
@@ -810,6 +819,11 @@ class SanalPosPayment(models.Model):
         if not rec.expires_at or rec.expires_at <= fields.Datetime.now():
             raise UserError('Mail order oturumunun süresi dolmuş; "Mail Order" menüsünden yeni '
                             'deneme açın.')
+        # NEDEN: sınır kart sayfası GET'i, "Kart Bilgisi Gir", taksit sorgusu ve BIN ucunda bu tek
+        # denetimden geçer (hepsi buradan çağırır; Paratika çağrısından önce) (S3.1, K-17)
+        blocked = self._mail_order_attempt_block(rec.invoice_no)
+        if blocked:
+            raise UserError(blocked)
 
     def action_open_card_page(self):
         """'Kart Bilgisi Gir': aynı token ile kart sayfasını yeniden açar (Paratika çağrısı yok)."""
@@ -1144,6 +1158,9 @@ class SanalPosPayment(models.Model):
         if not result.get('ok'):
             raise UserError(MO_REUSE_QUERY_FAILED_MSG)
         transactions = result.get('transactions') or []
+        # NEDEN: kapalı kaydın son oturumundaki red/iptaller sınır sayımına girmeli; başlatan önceki
+        # kullanıcıdır, bu yüzden user_id yazımından önce (K-15 + K-17)
+        rec._record_attempts(transactions)
         approved, in_review, pending, failed, others = self._classify(transactions)
         now = fields.Datetime.now()
         if approved or in_review or others:
@@ -1159,6 +1176,12 @@ class SanalPosPayment(models.Model):
             self._trigger_sync_cron(flagged=True)
             self._sp_commit()
             raise UserError(MO_REUSE_PENDING_MSG)
+        blocked = self._mail_order_attempt_block(rec.invoice_no)
+        if blocked:
+            # NEDEN: sorguyla yeni öğrenilen başarısızlar sınırı doldurduysa SESSIONTOKEN alınmaz;
+            # UserError işlemi geri alacağı için deneme satırları önce kalıcılaştırılır
+            self._sp_commit()
+            raise UserError(blocked)
         new_uid = values.get('user_id') or self.env.uid
         prev_user = rec.user_id or rec.create_uid
         ignored = [rec._fields[key].string for key in MO_REUSE_CUSTOMER_FIELDS
@@ -1628,6 +1651,9 @@ class SanalPosPayment(models.Model):
             return False
         transactions = result.get('transactions') or []
         rec.write({'last_checked_at': now})
+        if rec.payment_method == 'mail_order':
+            # DIKKAT: durum dallarından önce; geç onay (paid) da sayacı sıfırlayan satırı yazmalı
+            rec._record_attempts(transactions)
         if rec.state in IRREVERSIBLE_STATES:
             rec._sync_refunds(transactions)
             return True
@@ -1637,6 +1663,94 @@ class SanalPosPayment(models.Model):
             rec._apply_late_status(transactions)
         # review: yalnız yönetici eylemiyle çıkar; sending: G7/cron'un işidir
         return True
+
+    def _record_attempts(self, transactions):
+        """Sorgudaki mail order satış işlemlerini deneme satırına yazar (tasarım §5.1, K-17).
+
+        pgTranId başına tek satır; tekrar gelen işlemde yalnız değişen alanlar güncellenir. Satır
+        red/iptale GEÇTİĞİ anda bir chatter notu düşer; fatura sayacı eşiği bu çağrıda geçerse tek
+        "Deneme sınırı doldu" bildirimi gider. Kilit almaz, commit etmez, Paratika'yı çağırmaz.
+        """
+        self.ensure_one()
+        rec = self.sudo()
+        Attempt = self.env['sanal.pos.payment.attempt'].sudo()
+        labels = dict(Attempt._fields['status'].selection)
+        sales = [t for t in transactions if t.get('kind') == 'sale' and t.get('status') in labels]
+        if not sales:
+            return
+        before = self._mail_order_failed_count(rec.invoice_no)
+        rows = {row.tran_ref: row for row in rec.attempt_ids}
+        user = rec.user_id or rec.create_uid
+        for tran in sales:
+            status = tran['status']
+            ref = tran.get('ref') or '#%s-%s' % (
+                tran['time'].isoformat() if tran.get('time') else '-', status)
+            failed = status in ATTEMPT_FAIL_STATES
+            code = (tran.get('error_code') or ('CA' if status == 'cancelled' else False)) if failed else False
+            reason = False
+            if failed:
+                # DIKKAT: _error_message sağlayıcı metnini maskeler; ham errorMsg doğrudan yazılmaz
+                reason = rec._provider()._error_message(code, tran.get('raw_message'))[:250]
+            values = {
+                'status': status, 'error_code': code, 'reason': reason,
+                'approval_code': (tran.get('approval_code') or False) if status == 'approved' else False,
+            }
+            row = rows.get(ref)
+            if row:
+                was_failed = row.status in ATTEMPT_FAIL_STATES
+                changed = {k: v for k, v in values.items() if (row[k] or False) != v}
+                if changed:
+                    row.write(changed)
+                if not failed or was_failed:
+                    continue
+            else:
+                values.update({
+                    'payment_id': rec.id, 'tran_ref': ref,
+                    'tran_time': tran.get('time') or fields.Datetime.now(),
+                    'installment_count': tran.get('installment_count') or 1,
+                    'card_last4': tran.get('card_last4') or False,
+                    'user_id': user.id,
+                })
+                row = rows[ref] = Attempt.create(values)
+                if not failed:
+                    continue
+            detail = row.reason or ''
+            if row.error_code and row.error_code not in detail:
+                detail = '%s (%s)' % (detail, row.error_code)
+            rec._post_note('Mail order denemesi %s: %s Taksit: %s. Kart: **** %s. Başlatan: %s.' % (
+                'iptal edildi' if status == 'cancelled' else 'reddedildi', detail,
+                row.installment_count or 1, row.card_last4 or '-', row.user_id.name or '-'))
+        after = self._mail_order_failed_count(rec.invoice_no)
+        if before < MO_FAIL_LIMIT <= after:
+            rec._notify_creator(
+                '%s – Deneme sınırı doldu: son 24 saatte %d başarısız kart denemesi; mail order 24 '
+                'saat kapalı. Müşteriye ödeme linki gönderin.' % (rec.invoice_no, after))
+
+    @api.model
+    def _mail_order_failed_count(self, invoice_no):
+        """Faturanın son 24 saatteki, en yeni onaydan sonraki başarısız mail order deneme sayısı."""
+        if not invoice_no:
+            return 0
+        Attempt = self.env['sanal.pos.payment.attempt'].sudo()
+        domain = [('payment_id.invoice_no', '=', invoice_no),
+                  ('payment_id.payment_method', '=', 'mail_order')]
+        last_ok = Attempt.search(domain + [('status', '=', 'approved')], order='tran_time desc', limit=1)
+        domain += [('status', 'in', ATTEMPT_FAIL_STATES),
+                   ('tran_time', '>=', fields.Datetime.now() - MO_FAIL_WINDOW)]
+        if last_ok:
+            domain.append(('tran_time', '>', last_ok.tran_time))
+        return Attempt.search_count(domain)
+
+    @api.model
+    def _mail_order_attempt_block(self, invoice_no):
+        """Sınır doluysa engel metni, değilse False.
+
+        NEDEN: kart denemesi sınırı (fatura başına 24 saatte 3) kart test etme/dolandırıcılık
+        denemesini keser; zaman alanı olmayan failed_attempt_count yetmez (bkz. KARARLAR K-17).
+        """
+        if self._mail_order_failed_count(invoice_no) >= MO_FAIL_LIMIT:
+            return MO_LIMIT_MSG
+        return False
 
     @api.model
     def _classify(self, transactions):
