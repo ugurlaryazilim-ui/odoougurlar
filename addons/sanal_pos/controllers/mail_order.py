@@ -255,6 +255,10 @@ class SanalPosMailOrderController(http.Controller):
 
     def _mail_order_post(self, payment_id, method):
         """Model eylemini çalıştırır: kart sayfası/sihirbaz -> 303, bildirim ya da UserError -> sonuç sayfası."""
+        # NEDEN (Ö-13): grup denetimi exists()'ten önce; aksi halde grupsuz kullanıcı 403/404 farkından
+        # kayıt kimliklerinin varlığını öğrenirdi (sonuç rotasıyla aynı sıra)
+        if not request.env.user.has_group('sanal_pos.group_sanal_pos_user'):
+            return self._error_page('Bu sayfa için Sanal POS kullanıcı yetkisi gerekir.', status=403)
         payment = request.env['sanal.pos.payment'].browse(payment_id)
         try:
             if not payment.exists():
@@ -277,12 +281,14 @@ class SanalPosMailOrderController(http.Controller):
         if action.get('type') == 'ir.actions.act_window' and action.get('res_id'):
             # NEDEN: geçici sihirbaz kaydı web istemcisinde kendi adresiyle ön dolu açılır (tasarım §5.5)
             return request.redirect(LINK_WIZARD_PATH % action['res_id'], code=303, local=True)
-        return self._result_page(payment, notice=(action.get('params') or {}).get('message'))
+        params = action.get('params') or {}
+        return self._result_page(payment, notice=params.get('message'), notice_type=params.get('type'))
 
     # ------------------------------------------------------------------ yardımcılar
     @classmethod
-    def _result_page(cls, payment, refresh_count=0, notice=None, status=200):
-        """Sonuç sayfası (script'siz). ``notice``: üstte kırmızı uyarı (POST rotalarının UserError'u, A3-G3).
+    def _result_page(cls, payment, refresh_count=0, notice=None, status=200, notice_type='danger'):
+        """Sonuç sayfası (script'siz). ``notice``: üstte uyarı (POST rotalarının UserError'u ya da bildirimi,
+        A3-G3); ``notice_type`` bildirimin türü (success/warning/danger; Ö-9: "Ödeme alınmış" kırmızı değil).
 
         DIKKAT: CSP'de ``form-action 'self'`` yalnız burada açıktır (Tekrar dene / Link POST'ları, CSRF'li);
         formlarda kart alanı yoktur ve script-src hiç yoktur.
@@ -302,6 +308,8 @@ class SanalPosMailOrderController(http.Controller):
             'result_url': result_url,
             'refresh_url': '%s&n=%d' % (result_url, values['refresh_next']) if values['refresh_next'] else None,
             'notice': notice,
+            # NEDEN: sınıf adı istemci değerinden değil sabit kümeden (bilinmeyen tür kırmızı kalır)
+            'notice_class': 'mo-alert-%s' % (notice_type if notice_type in ('success', 'warning') else 'danger'),
         })
         return cls._render('sanal_pos.mail_order_result_page', values,
                            card_page_csp("'self'"), status=status)

@@ -350,7 +350,7 @@
                         <p>Fatura <t t-out="invoice_no"/> · <t t-out="customer_name"/></p>
                     </div>
                     <div class="mo-stack mo-result">
-                        <div t-if="notice" class="mo-alert mo-alert-danger" role="alert"><p t-out="notice"/></div>
+                        <div t-if="notice" t-attf-class="mo-alert #{notice_class}" role="alert"><p t-out="notice"/></div>
                         <section class="mo-card" aria-labelledby="mo-result-title">
                             <div class="mo-card-head"><h2 id="mo-result-title">Sonuç</h2></div>
                             <div class="mo-card-body">

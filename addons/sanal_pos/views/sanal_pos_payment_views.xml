@@ -72,7 +72,7 @@
                             class="btn-secondary" groups="sanal_pos.group_sanal_pos_user"
                             invisible="payment_method != 'mail_order' or state != 'sent'"
                             confirm="Paratika'daki işlem sorgulanacak; satış yoksa mail order kapatılır. Devam edilsin mi?"/>
-                    <!-- A3-G3 (tasarım §5.5): kurallar ve yetki denetimi modelde (_check_mail_order_action);
+                    <!-- NEDEN: A3-G3 (tasarım §5.5): kurallar ve yetki denetimi modelde (_check_mail_order_action);
                          form zaten yalnız Sanal POS gruplarına açık. Sınır K-17, link beklemesi K-15 -->
                     <button name="action_mail_order_retry" type="object" string="Tekrar dene"
                             class="btn-secondary"

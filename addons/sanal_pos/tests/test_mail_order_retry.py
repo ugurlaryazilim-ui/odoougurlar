@@ -12,9 +12,9 @@ from odoo.exceptions import UserError
 from odoo.tests import tagged
 
 from ..models import sanal_pos_payment as payment_module
-from ..models.sanal_pos_payment import BUSY_MSG, MO_ACTION_STATE_MSG
+from ..models.sanal_pos_payment import BUSY_MSG, MO_ACTION_STATE_MSG, MO_LIMIT_MSG
 from .common import CUSTOMER_NAME, INV_NO, SanalPosCase, tran
-from .test_mail_order_result import LINK_PATH, ResultCase, ResultMixin, fail_tran, utc_ago
+from .test_mail_order_result import LIMIT_MSG, LINK_PATH, ResultCase, ResultMixin, fail_tran, utc_ago
 
 PAYMENT = 'sanal.pos.payment'
 WIZARD = 'sanal.pos.payment.create.wizard'
@@ -49,13 +49,26 @@ class TestLimitClose(ResultMixin, SanalPosCase):
         self.assertLessEqual(payment.expires_at, fields.Datetime.now())
         self.assertEqual(payment.state, 'sent', 'durum kararı normal senkronda verilir')
         self.assertTrue(payment.sent_at, 'K-15 / link bekleme penceresi korunur')
-        self.assertTrue(user_error(payment.with_user(self.user_sp)._check_card_page_open),
-                        'kart sayfası açılamaz')
+        self.assertEqual(user_error(payment.with_user(self.user_sp)._check_card_page_open), MO_LIMIT_MSG,
+                         'kart sayfası açılamaz; token silinmiş olsa da sınır metni (Ö-2)')
         self.assertEqual(self.count_messages(payment, CLOSED_NOTE), 1)
         self.sync(payment, *fails('LC'))
         self.assertEqual(payment.state, 'expired', 'sonraki senkron: süresi dolmuş, ödeme yok')
         self.assertEqual(self.count_messages(payment, CLOSED_NOTE), 1, 'not bir kez')
         self.assertEqual(set(self.mock.actions), {'QUERYTRANSACTION'}, 'kapatma Paratika çağırmaz')
+
+    def test_o8_esik_gecisi_ve_kapatma_tek_notta(self):
+        payment = self.make_mail_order()
+        self.sync(payment, *fails('L8', 2))
+        before = self.message_count(payment)
+        self.sync(payment, *fails('L8'))
+        self.assertEqual(self.message_count(payment) - before, 2, '1 deneme notu (KK-3.6) + 1 eşik/kapatma notu')
+        messages = self.env['mail.message'].sudo().search([('model', '=', PAYMENT), ('res_id', '=', payment.id)])
+        from odoo.tools import html2plaintext
+        both = [m for m in messages if 'Deneme sınırı doldu' in html2plaintext(m.body or '')
+                and CLOSED_NOTE in html2plaintext(m.body or '')]
+        self.assertEqual(len(both), 1)
+        self.assertEqual(both[0].partner_ids, self.user_sp.partner_id, 'birleşik not bildirimle gider')
 
     def test_esik_bekleyen_islem_varken_kayit_acik_kalir(self):
         payment = self.make_mail_order()
@@ -104,14 +117,28 @@ class TestLimitClose(ResultMixin, SanalPosCase):
         self.sync(current)
         self.assertFalse(current.provider_token, 'kendi senkronunda aynı kuralla kapanır')
 
-    def test_kardes_kilitliyse_atlanir_tutan_kendini_kapatir(self):
+    def test_kardes_kilitliyse_periyodik_senkron_tetiklenir_sonraki_senkronda_kapanir(self):
+        """Ö-3/G3-1: REPEATABLE READ'de kilidi tutan işlem yeni sayıyı görmeyebilir; kapanma bir sonraki
+        senkrona bırakılır ve periyodik cron öne çekilir (kardeşe yazım/log yok: NOWAIT dışında bekleme)."""
         older, current = self.siblings()
-        with patch.object(self.payment_class(), '_lock_for_provider_call', lambda this: False):
+        triggers = []
+
+        def record_trigger(this, at=None, flagged=False):
+            triggers.append((at, flagged))
+
+        start = fields.Datetime.now()
+        with patch.object(self.payment_class(), '_lock_for_provider_call', lambda this: False), \
+                patch.object(self.payment_class(), '_trigger_sync_cron', record_trigger):
             self.sync(older, *fails('KL'))
         self.reload(current)
-        self.assertFalse(current.sync_requested, 'kilitli kardeş atlanır (NOWAIT, bekleme yok)')
+        self.assertFalse(current.sync_requested, 'kilitli kardeşe yazılmaz (NOWAIT, bekleme yok)')
+        self.assertTrue(current.provider_token)
+        periodic = [at for at, flagged in triggers if not flagged and at]
+        self.assertEqual(len(periodic), 1, triggers)
+        self.assertGreaterEqual(periodic[0], start + payment_module.SYNC_REQUEST_MIN_INTERVAL)
+        self.assertLessEqual(periodic[0], fields.Datetime.now() + payment_module.SYNC_REQUEST_MIN_INTERVAL)
         self.sync(current)
-        self.assertFalse(current.provider_token, 'kilidi tutan senkron kendini kapatır')
+        self.assertFalse(current.provider_token, 'sonraki senkronda aynı kuralla kapanır')
 
     def test_baska_fatura_etkilenmez(self):
         other = self.make_mail_order(invoice_no='LX-OTHER')
@@ -149,10 +176,35 @@ class TestRetryActionPaths(ResultMixin, SanalPosCase):
         self.assertEqual(action['url'], '/sanal_pos/mail_order/pay/%d' % payment.id)
         self.assertNoParatikaCalls()
 
+    def test_o12_fatura_okunamazsa_kapat_yapilmaz_kayit_acik_kalir(self):
+        payment = self.make_mail_order()
+        token = payment.provider_token
+        self.mssql_error = Exception('nebim down')
+        error = user_error(payment.with_user(self.user_sp).action_mail_order_retry)
+        self.assertIn('Fatura sistemine ulaşılamadı', error or '')
+        self.assertNoParatikaCalls()
+        self.assertEqual((self.reload(payment).state, payment.provider_token), ('sent', token),
+                         'fatura okunmadan oturum kapatılmaz (Ö-12)')
+
     def test_retry_baska_kullanicinin_kaydinda_calisir(self):
         payment = self.make_mail_order(state='expired', sent_at=utc_ago(hours=2), expires_at=utc_ago(hours=1))
         action = payment.with_user(self.user_sp2).action_mail_order_retry()
         self.assertEqual(action.get('type'), 'ir.actions.act_url', 'sahiplik denetimi yok; grup yeterli')
+
+
+@tagged('post_install', '-at_install', 'sanal_pos')
+class TestLimitMessageAfterClose(ResultCase):
+    """Ö-2/B-1: eşikte token silinse de kart sayfası ve 'Kart Bilgisi Gir' KK-3.7(a) metnini verir."""
+
+    def test_esik_sonrasi_kart_sayfasi_ve_dugme_sinir_metni(self):
+        payment = self.make_mail_order()
+        self.sync(payment, *fails('MT'))
+        self.assertFalse(payment.provider_token, 'gerçek yol: eşik token\'ı sildi')
+        response = self.pay_get(payment)
+        self.assertEqual(response.status_code, 409)
+        self.assertIn(LIMIT_MSG, self.text(response))
+        self.assertEqual(user_error(payment.with_user(self.user_sp).action_open_card_page), MO_LIMIT_MSG)
+        self.assertEqual(MO_LIMIT_MSG, LIMIT_MSG)
 
 
 @tagged('post_install', '-at_install', 'sanal_pos')

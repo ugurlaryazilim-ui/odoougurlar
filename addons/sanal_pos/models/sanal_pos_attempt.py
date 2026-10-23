@@ -36,3 +36,7 @@ class SanalPosPaymentAttempt(models.Model):
     card_last4 = fields.Char(string='Kart Son 4')
     approval_code = fields.Char(string='Onay Kodu')
     user_id = fields.Many2one('res.users', string='Başlatan')
+    # NEDEN (Ö-1): K-15 aynı kaydı yeniden açar; satırın hangi oturumda (o anki ``sent_at``) görüldüğü
+    # sonuç sayfasında eski oturumun reddini yeni oturumdan ayırır. create_date kullanılamaz: işlem
+    # başlangıcıdır (cr.now) ve tran_time bankanın zamanıdır, oturumla ilişkisi yoktur. Boş = damgasız.
+    session_sent_at = fields.Datetime(string='Oturum Başlangıcı', readonly=True)

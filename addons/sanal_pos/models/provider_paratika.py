@@ -863,7 +863,9 @@ class SanalPosProviderParatika(models.AbstractModel):
             # G0: biçimi doğrulanmadı (belge örneği sistem adı: 'ISBANK TEST'); vade farkı oranını
             # ağa göre seçmek için kullanılır, eşleşmezse tüm oranlara bakılır.
             'payment_system': str(item.get('paymentSystem') or '').strip() or None,
-            'card_last4': item.get('panLast4') or None,
+            # DIKKAT (G3-2, KK-2.9): alan adı "son 4" olsa da maskeli PAN (BIN dahil) gelebilir; yalnız
+            # son 4 rakam tutulur, BIN deneme satırına/chatter'a/ödeme kaydına yazılmaz
+            'card_last4': re.sub(r'\D', '', str(item.get('panLast4') or ''))[-4:] or None,
             # NEDEN: yalnız onay kodu; yanıttaki 'bin' alanı bilerek okunmaz (kart verisi, K-13)
             'approval_code': str(item.get('pgTranApprCode') or '').strip() or None,
             'raw_type': ttype,

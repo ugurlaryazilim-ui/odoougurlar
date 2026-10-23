@@ -235,9 +235,15 @@ html.mo-js .mo-field .mo-error[hidden] { display: block !important; visibility: 
 .mo-form-inline { margin: 0; }
 .mo-advice { margin-top: .25rem; font-weight: 500; }
 .mo-remaining { margin: 0; font-weight: 500; }
+/* NEDEN (M-1): dar ekranda hücreler kelime ortasından kırılıyordu ("Yetersi z", "23.10.2 026"). Tablo
+ * kendi kutusunda yatay kayar (sayfa kaymaz: grid öğesi min-width 0); kısa sütunlar tek satır, "Neden"
+ * yalnız kelime aralarından sarılır. */
+.mo-stack > * { min-width: 0; }
 .mo-table-wrap { overflow-x: auto; padding: 0; }
 .mo-table { width: 100%; border-collapse: collapse; font-size: .875rem; }
-.mo-table th, .mo-table td { padding: .5rem .75rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--mo-border); overflow-wrap: anywhere; }
+.mo-table th, .mo-table td { padding: .5rem .75rem; text-align: left; vertical-align: top; border-bottom: 1px solid var(--mo-border); overflow-wrap: normal; word-break: normal; }
+.mo-table td { white-space: nowrap; }
+.mo-table td:nth-child(3) { min-width: 10rem; white-space: normal; }
 .mo-table th { font-weight: 700; color: var(--mo-muted); white-space: nowrap; }
 .mo-table tbody tr:last-child td { border-bottom: 0; }
 .mo-badge { display: inline-block; padding: .125rem .5rem; font-weight: 700; white-space: nowrap; border-radius: 1rem; background: var(--mo-btn2-bg); }
@@ -281,6 +287,8 @@ html.mo-js .mo-field .mo-error[hidden] { display: block !important; visibility: 
     .mo-btn-primary { width: 100%; }
     .mo-actions { flex-direction: column-reverse; align-items: stretch; }
     .mo-actions .mo-btn { width: 100%; }
+    .mo-table { font-size: .8125rem; }
+    .mo-table th, .mo-table td { padding: .5rem; }
 }
 
 /* ---------------------------------------------------------------- koyu mod */
