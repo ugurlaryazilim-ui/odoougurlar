@@ -51,4 +51,9 @@
         <field name="model_id" ref="model_sanal_pos_connection_test_wizard"/>
         <field name="domain_force">[('create_uid', '=', user.id)]</field>
     </record>
+    <record id="rule_receipt_send_wizard_own" model="ir.rule">
+        <field name="name">Sanal POS dekont gönderme sihirbazı: yalnız oluşturan</field>
+        <field name="model_id" ref="model_sanal_pos_receipt_send_wizard"/>
+        <field name="domain_force">[('create_uid', '=', user.id)]</field>
+    </record>
 </odoo>

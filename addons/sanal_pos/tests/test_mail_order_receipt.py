@@ -160,8 +160,12 @@ class ReceiptMixin:
     def is_notification_mail(self, message_id):
         with self.env.cr.savepoint(flush=False):
             self.env.cr.execute(
-                'SELECT bool_or(mm.is_notification) FROM mail_mail mm'
-                ' JOIN mail_message m ON m.id = mm.mail_message_id WHERE m.message_id = %s', [message_id])
+                # FİKSTÜR DÜZELTMESİ (A4-G3): oturum açan HTTP testlerinde çekirdeğin "Password Changed"
+                # güvenlik e-postası da SMTP'ye gider (model res.users); dekont sayımına yalnız ödeme kaydına
+                # bağlı, bildirim olmayan e-postalar girer.
+                'SELECT bool_or(mm.is_notification OR m.model IS DISTINCT FROM %s) FROM mail_mail mm'
+                ' JOIN mail_message m ON m.id = mm.mail_message_id WHERE m.message_id = %s',
+                [PAYMENT, message_id])
             return bool(self.env.cr.fetchone()[0])
 
     def count_notes(self, payment, needle):

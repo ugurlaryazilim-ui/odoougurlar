@@ -6,3 +6,4 @@ from . import payment_refund_wizard
 from . import connection_test_wizard
 from . import refund_approval_wizard
 from . import mail_order_wizard
+from . import receipt_send_wizard
