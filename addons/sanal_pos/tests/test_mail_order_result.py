@@ -65,6 +65,11 @@ def norm(text):
     return ' '.join((text or '').split())
 
 
+def masked(last4):
+    """Geçmiş tablosunda kartın basıldığı biçim (şablon: ``**** <son4>``)."""
+    return '**** %s' % last4
+
+
 def iso_ago(minutes):
     """Paratika ``timeCreated`` (saat dilimli ISO; _parse_time naive UTC'ye çevirir)."""
     return (datetime.now(timezone.utc) - timedelta(minutes=minutes)).replace(microsecond=0).isoformat()
@@ -464,7 +469,9 @@ class TestResultPage(ResultCase):
 class TestAttemptHistory(ResultCase):
 
     def history_order(self, text, last4s):
-        positions = [text.find(x) for x in last4s]
+        # NEDEN: ham 4 hane sayfa başındaki ödeme adıyla (SP/2026/61009) çakışabilir; geçmiş tablosu
+        # satırı her zaman maskeli ('**** 1009') basıldığı için maskeli biçimle ara.
+        positions = [text.find(masked(x)) for x in last4s]
         self.assertNotIn(-1, positions, 'beklenen satır(lar) geçmişte yok: %s' % dict(zip(last4s, positions)))
         return positions
 
@@ -478,7 +485,7 @@ class TestAttemptHistory(ResultCase):
         positions = self.history_order(text, shown)
         self.assertEqual(positions, sorted(positions), 'yeniden eskiye')
         for old in ('1001', '1002'):
-            self.assertNotIn(old, text, 'en çok 10 satır: en eski 2 gösterilmez')
+            self.assertNotIn(masked(old), text, 'en çok 10 satır: en eski 2 gösterilmez')
 
     def test_kk_3_6_diger_kayitlar_yalniz_ayni_fatura_ve_son_24_saat(self):
         main = self.fresh(self.make_mail_order(invoice_no=INV_NO, attempt_no=2))
