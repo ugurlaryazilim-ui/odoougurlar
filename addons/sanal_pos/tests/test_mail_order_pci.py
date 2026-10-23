@@ -139,10 +139,11 @@ CSS_FILE = os.path.join(MODULE_DIR, 'static', 'src', 'css', 'mail_order.css')
 SCRIPT_MAX_BYTES = 8192
 
 # PCI 11.6.1 değişiklik tespiti: betik her değiştiğinde bu sabit KOD İNCELEMESİNDE ayrıca güncellenir
-# (README "Ödeme sayfası script envanteri" aynı değeri yazar).
+# (README "Ödeme sayfası script envanteri" ve çalışma anı onayı tools.MAIL_ORDER_SCRIPT_SHA256 aynı
+# değeri yazar; eşitlik test edilir).
 # DIKKAT: betik diff'i ile bu sabitin diff'i AYNI commit'te ve aynı incelemede görünür (A1-G3 sözleşmesi);
 # sabiti incelemesiz ayrı bir commit'le değiştirmek PCI 6.4.3/11.6.1 kontrolünü boşa çıkarır.
-SCRIPT_SHA256 = 'w4pBeLZyXDv07NI4GOPSF0ZVdG1OOx7ktKhJIwjmHGk='
+SCRIPT_SHA256 = 'A44tqgwD9BZp4Grx1S6Oy0HAcGkDJFHXz15naS7Jfj8='
 
 # Yasak belirteçler (KK-1.15 + tasarım §3.5/7). Yorum satırları çıkarıldıktan sonra aranır.
 FORBIDDEN_TOKENS = {
@@ -256,6 +257,13 @@ class TestCardScriptStatic(SanalPosCase):
             'Betik değişti. PCI 11.6.1: bu sabit YALNIZ kod incelemesinden sonra güncellenir '
             '(README script envanteri de). Yeni değer: %s' % actual)
 
+    def test_pci_11_6_1_onay_hashi_tek_deger_test_tools_readme_d2(self):
+        """D-2: çalışma anı onayı (tools), test sabiti ve README envanteri aynı değeri taşır."""
+        from odoo.addons.sanal_pos import tools
+        self.assertEqual(tools.MAIL_ORDER_SCRIPT_SHA256, SCRIPT_SHA256)
+        with open(os.path.join(MODULE_DIR, 'README.md'), encoding='utf-8') as handle:
+            self.assertIn('SCRIPT_SHA256 = %s' % SCRIPT_SHA256, handle.read())
+
     def test_nfr_1_4_readme_script_envanteri_ve_eski_cumle_kalkti(self):
         with open(os.path.join(MODULE_DIR, 'README.md'), encoding='utf-8') as handle:
             readme = handle.read()
@@ -343,3 +351,36 @@ class TestCardCssContract(SanalPosCase):
         self.assertRegex(css, r'@media\s*\(\s*max-width\s*:\s*(30rem|480px)\s*\)')
         self.assertIn('prefers-reduced-motion', css)            # mevcut davranış korunur (gerileme)
         self.assertNotRegex(css, r'url\(\s*["\']?https?:')      # dış kaynak yok (CSP img/style 'self')
+
+    def rule(self, css, selector, prop):
+        """``selector { ... prop: değer }`` içindeki değer (ilk eşleşen kural); yoksa test düşer."""
+        match = re.search(r'(?:^|[}\s])' + re.escape(selector) + r'\s*\{([^}]*)\}', css, re.M)
+        self.assertIsNotNone(match, 'kural yok: %s' % selector)
+        value = re.search(r'(?:^|[;\s])' + re.escape(prop) + r'\s*:\s*([^;]+)', match.group(1))
+        self.assertIsNotNone(value, '%s içinde %s yok' % (selector, prop))
+        return value.group(1).strip()
+
+    def test_kk_1_13b_hover_ve_placeholder_kontrasti_g1_g4(self):
+        css = self.css()
+        dark = self.dark_block(css)
+        light_vars = dict(re.findall(r'(--mo-[a-z-]+)\s*:\s*([^;]+);', css[:css.index('@media')]))
+        dark_vars = dict(re.findall(r'(--mo-[a-z-]+)\s*:\s*([^;]+);', dark))
+        pairs = {
+            'açık placeholder': (self.rule(css, '.mo-input::placeholder', 'color'), light_vars['--mo-surface']),
+            'koyu placeholder': (self.rule(dark, '.mo-input::placeholder', 'color'), dark_vars['--mo-surface']),
+            'koyu Öde': ('#ffffff', self.rule(dark, '.mo-btn-primary', 'background')),
+            'koyu Öde hover': ('#ffffff', self.rule(dark, '.mo-btn-primary:hover', 'background')),
+        }
+        for name, (fore, back) in pairs.items():
+            with self.subTest(durum=name):
+                self.assertGreaterEqual(_contrast(fore, back), 4.5, (fore, back))
+
+    def test_kk_1_13a_dokunma_hedefleri_44px_g2_g3(self):
+        css = self.css()
+        narrow = re.search(r'@media\s*\(\s*max-width\s*:\s*52rem\s*\)\s*\{(.*?)\n\}', css, re.S).group(1)
+        self.assertGreaterEqual(int(self.rule(narrow, '.mo-nav-link', 'height').split('px')[0]), 44)
+        self.assertGreaterEqual(int(self.rule(css, '.mo-breadcrumb a', 'min-height').split('px')[0]), 44)
+
+    def test_taksit_tutarlari_satirda_bolunmez_r8(self):
+        self.assertEqual(self.rule(self.css(), '.mo-inst-amount, .mo-inst-total, .mo-inst-fee', 'white-space'),
+                         'nowrap')

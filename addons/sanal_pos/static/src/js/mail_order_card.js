@@ -67,6 +67,11 @@
     function chkCvv() { return mark('c', [cvv], cvv.validity.valid ? '' : 'CVV 3 hane olmalı'); }
     var checks = [chkOwner, chkPan, chkExp, chkExp, chkCvv];
     function checkAll() { return [chkOwner(), chkPan(), chkExp(), chkCvv()].indexOf(false) < 0; }
+    function focusBad() {
+      for (var j = 0; j < inputs.length; j++) {
+        if (inputs[j].getAttribute('aria-invalid')) { inputs[j].focus(); return; }
+      }
+    }
 
     function onPan(e) {
       if (!ready) { return; }
@@ -123,12 +128,7 @@
         if (busy) { return; }
         tick();
         if (isExpired) { return; }
-        if (!checkAll()) {
-          for (var j = 0; j < inputs.length; j++) {
-            if (inputs[j].getAttribute('aria-invalid')) { inputs[j].focus(); break; }
-          }
-          return;
-        }
+        if (!checkAll()) { focusBad(); return; }
         pan.value = digits(pan.value);
         busy = pay.disabled = true;
         HTMLFormElement.prototype.submit.call(form);
@@ -148,8 +148,11 @@
         if (ready && el.getAttribute('aria-invalid')) { checks[k](); }
       });
     });
-    /* Yerel doğrulama submit'ten önce engeller; hata satırları yine görünsün (KK-1.9). */
-    form.addEventListener('invalid', function () { if (ready) { checkAll(); } }, true);
+    /* Yerel doğrulama submit'ten önce engeller; hata satırları görünsün (KK-1.9). NEDEN: satır
+     * gösterildiyse yerel balon bastırılır (çift mesaj, G-6); engel kalkmaz, satır yoksa balon kalır. */
+    form.addEventListener('invalid', function (e) {
+      if (ready && !checkAll()) { e.preventDefault(); focusBad(); }
+    }, true);
     window.addEventListener('pageshow', function (e) {
       if (e.persisted) { busy = false; tick(); pay.disabled = isExpired; }
     });

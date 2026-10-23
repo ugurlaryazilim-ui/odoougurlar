@@ -79,8 +79,10 @@ html.mo-js .mo-nojs-only { display: none; }
 
 /* ---------------------------------------------------------------- kontrol paneli (breadcrumb) */
 .mo-controlpanel { background: var(--mo-surface); border-bottom: 1px solid var(--mo-border); }
-.mo-breadcrumb { max-width: 72rem; margin: 0 auto; padding: .625rem 1rem; }
-.mo-breadcrumb ol { display: flex; flex-wrap: wrap; gap: .25rem; margin: 0; padding: 0; list-style: none; font-size: 1rem; }
+/* Bağlantılar 44 px yüksek (dokunma hedefi, KK-1.13a); dikey dolgu bu yüzden bağlantıda, panelde değil. */
+.mo-breadcrumb { max-width: 72rem; margin: 0 auto; padding: 0 1rem; }
+.mo-breadcrumb ol { display: flex; flex-wrap: wrap; align-items: center; gap: 0 .25rem; min-height: 44px; margin: 0; padding: 0; list-style: none; font-size: 1rem; }
+.mo-breadcrumb a { display: inline-flex; align-items: center; min-height: 44px; }
 .mo-breadcrumb li + li::before { content: "/"; margin-right: .25rem; color: var(--mo-muted); }
 .mo-breadcrumb li[aria-current="page"] { font-weight: 700; color: var(--mo-text); }
 
@@ -153,7 +155,7 @@ html.mo-js .mo-nojs-only { display: none; }
     display: block; width: 100%; min-height: 2.75rem; padding: .375rem .75rem; font: inherit; font-size: 1rem;
     color: var(--mo-text); background: var(--mo-surface); border: 1px solid var(--mo-input-border); border-radius: var(--mo-radius);
 }
-.mo-input::placeholder { color: #767b82; opacity: 1; }
+.mo-input::placeholder { color: #6e737a; opacity: 1; }   /* beyaz üzerinde 4,78:1 (G-4) */
 .mo-input:hover { border-color: var(--mo-muted); }
 .mo-input:focus { outline: 0; border-color: var(--mo-accent); box-shadow: 0 0 0 .2rem rgba(1, 126, 132, .25); }
 /* Script'siz hata görünümü (:user-invalid) ve script'li (aria-invalid) aynı biçimi paylaşır. */
@@ -192,8 +194,10 @@ html.mo-js .mo-nojs-only { display: none; }
 .mo-inst-title { grid-column: 1; font-weight: 700; }
 .mo-inst-amount { grid-column: 2; text-align: right; font-weight: 700; font-variant-numeric: tabular-nums; }
 .mo-inst-total, .mo-inst-fee, .mo-inst-networks { font-size: .8125rem; color: var(--mo-muted); font-variant-numeric: tabular-nums; }
-.mo-inst-total { grid-column: 1; }
-.mo-inst-fee { grid-column: 2; text-align: right; }
+/* NEDEN: tutar "TL" ile satır sonunda bölünüyordu; tutarlar bölünmez, toplam ve oran tam genişlik
+ * alt satırlarda durur (dar kartta yan yana iki nowrap sütun taşardı). */
+.mo-inst-amount, .mo-inst-total, .mo-inst-fee { white-space: nowrap; }
+.mo-inst-total, .mo-inst-fee { grid-column: 1 / -1; }
 .mo-inst-networks { grid-column: 1 / -1; }
 
 .mo-actions { display: flex; flex-wrap: wrap; align-items: center; gap: .75rem; margin-top: 1.25rem; padding-top: 1rem; border-top: 1px solid var(--mo-border); }
@@ -233,7 +237,7 @@ html.mo-js .mo-nojs-only { display: none; }
 @media (max-width: 52rem) {
     .mo-grid { grid-template-columns: minmax(0, 1fr); }
     .mo-nav-menu { order: 3; flex-basis: 100%; }
-    .mo-nav-link { height: 40px; }
+    .mo-nav-link { height: 44px; }   /* dokunma hedefi >= 44 px (KK-1.13a) */
 }
 /* 360px genişlikte yatay kaydırma olmamalı: tek sütun, özet (DOM'da önce) formun üstünde. */
 @media (max-width: 30rem) {
@@ -277,7 +281,8 @@ html.mo-js .mo-nojs-only { display: none; }
     .mo-steps li[aria-current="step"] .mo-step-no { background: #8f5f83; border-color: #8f5f83; }
     .mo-inst-card input:checked + .mo-inst-body { border-color: #c78bb8; box-shadow: inset 0 0 0 1px #c78bb8; }
     .mo-btn-primary { background: #8f5f83; border-color: #8f5f83; }
-    .mo-btn-primary:hover { background: #a06f93; border-color: #a06f93; }
+    /* NEDEN: hover koyulaşır; açılan #a06f93 beyaz metinle 4,05:1 kalıyordu (G-1). #7d5173 = 6,37:1. */
+    .mo-btn-primary:hover { background: #7d5173; border-color: #7d5173; }
 }
 
 /* ---------------------------------------------------------------- yazdırma */

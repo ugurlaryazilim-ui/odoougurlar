@@ -125,10 +125,11 @@
                                     <t t-if="phone_masked"><dt>Telefon</dt><dd t-out="phone_masked"/></t>
                                     <t t-if="email_masked"><dt>E-posta</dt><dd t-out="email_masked"/></t>
                                     <dt>Açıklama</dt><dd t-out="description"/>
-                                    <dt>Talebi oluşturan</dt><dd t-out="creator_name"/>
+                                    <t t-if="creator_name"><dt>Talebi oluşturan</dt><dd t-out="creator_name"/></t>
+                                    <!-- NEDEN: QWeb t-att-* 0/False/None değerini hiç basmaz; str() "0" basar (öznitelik yoksa betik kurulmaz). -->
                                     <dt>Son geçerlilik</dt>
                                     <dd>
-                                        <span t-out="expires_hm"/> · <span id="mo-remaining" t-att-data-seconds="remaining_seconds" t-out="remaining_text"/>
+                                        <span t-out="expires_hm"/> · <span id="mo-remaining" t-att-data-seconds="str(remaining_seconds)" t-out="remaining_text"/>
                                     </dd>
                                 </dl>
                                 <p class="mo-alert mo-alert-danger" id="mo-expired" role="alert" hidden="hidden">Oturum süresi doldu; kayda dönüp yeni deneme açın.</p>

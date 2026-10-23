@@ -57,10 +57,12 @@ def _tools():
 
 
 @contextmanager
-def script_file(content):
+def script_file(content, approve=True):
     """``tools.MAIL_ORDER_JS_FILE`` geçici bir dosyaya yönlendirilir (``content``: bayt ya da None).
 
     ``None`` -> var olmayan dosya. mtime her seferinde benzersiz (süreç içi önbellek anahtarı).
+    ``approve``: içerik okunabiliyorsa onaylı hash (``MAIL_ORDER_SCRIPT_SHA256``) de ona yamalanır
+    (kod incelemesinden geçmiş betiği taklit eder); ``False`` -> onaysız değişiklik (D-2).
     """
     tools = _tools()
     with tempfile.TemporaryDirectory() as tmp:
@@ -71,7 +73,14 @@ def script_file(content):
             stamp = time.time_ns() + next(_NS) * 10 ** 9
             os.utime(path, ns=(stamp, stamp))
         with patch.object(tools, 'MAIL_ORDER_JS_FILE', path):
-            yield path
+            pin = tools.MAIL_ORDER_SCRIPT_SHA256
+            if approve:
+                try:
+                    pin = tools._read_mail_order_script()[1]
+                except (OSError, ValueError):
+                    pass                        # bozuk/yok: denetim zaten okumada düşer
+            with patch.object(tools, 'MAIL_ORDER_SCRIPT_SHA256', pin):
+                yield path
 
 
 class CardPageCase(MoHttpCase):
@@ -272,6 +281,17 @@ class TestCardPageScriptCsp(CardPageCase):
         self.assertEqual(len(form.xpath('.//input[@name="pan"]')), 1)
         self.assertEqual(len(form.xpath('.//input[@name="installmentCount"]')), 1)
 
+    def test_kapatma_anahtari_bool_bicimleri_kapatir_d1(self):
+        """D-1/Ö-2: anahtar get_bool_param ile okunur; elle yazılan 'false'/'0' de kapatır."""
+        params = self.env['ir.config_parameter'].sudo()
+        for value in ('false', '0', 'FALSE', ' False', 'no'):
+            with self.subTest(deger=value):
+                params.set_param(SCRIPT_ICP, value)
+                response = self.page(self.make_mail_order(invoice_no='OFF-%s' % value.strip()))
+                self.assertEqual(response.status_code, 200)
+                self.assertNotIn('<script', self.body(response).lower())
+                self.assertNotIn('script-src', self.csp(response))
+
     def test_kapatma_anahtari_acikken_script_var_false_disi_deger_kapatmaz(self):
         params = self.env['ir.config_parameter'].sudo()
         for value in ('True', '1', 'evet'):
@@ -288,6 +308,17 @@ class TestCardPageScriptCsp(CardPageCase):
         self.assertNotIn('<script', self.body(response).lower())
         self.assertNotIn('script-src', self.csp(response))
         self.assertEqual(self.doc(response).xpath('//form/@action'), [TEST_URL_PREFIX + '/post/sale3d/TOK-NOFILE'])
+
+    def test_onaysiz_betik_sunulmaz_scriptsiz_acilir_ve_loglanir_d2(self):
+        """D-2 (PCI 11.6.1): geçerli ama onaylı hash'i tutmayan betik çalışma anında reddedilir."""
+        with script_file(b'var onaysiz = 1;\n', approve=False), \
+                self.assertLogs('odoo.addons.sanal_pos.controllers.mail_order', 'ERROR') as logs:
+            response = self.page(self.make_mail_order(provider_token='TOK-UNPINNED'))
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('<script', self.body(response).lower())
+        self.assertNotIn('script-src', self.csp(response))
+        self.assertIn('MailOrderScriptHashMismatch', '\n'.join(logs.output))
+        self.assertNotIn('onaysiz', '\n'.join(logs.output))       # içerik loglanmaz
 
     def test_script_dosyasi_bozuksa_sayfa_scriptsiz_acilir(self):
         for name, content in (('script_kapatan', b'var x = "</script><b>";'),
@@ -575,6 +606,43 @@ class TestCardPageMarkup(CardPageCase):
         expired = doc.xpath('//*[@id="mo-expired"]')[0]
         self.assertIn('kayda dönüp yeni deneme açın', norm(expired.text_content()))     # KK-1.12
 
+    def test_kalan_sure_sifirken_data_seconds_0_basilir_o1(self):
+        """Ö-1: QWeb t-att-* 0'ı basmaz; öznitelik düşerse betik kurulmaz ve kilit (KK-1.12) çalışmaz."""
+        model = type(self.env['sanal.pos.payment'])
+        with patch.object(model, '_mail_order_remaining',
+                          lambda rec: {'remaining_seconds': 0, 'remaining_text': 'Süre doldu'}):
+            doc = self.doc(self.page(self.make_mail_order()))
+        remaining = doc.xpath('//*[@id="mo-remaining"]')[0]
+        self.assertEqual(remaining.get('data-seconds'), '0')
+        self.assertEqual(norm(remaining.text_content()), 'Süre doldu')
+
+    def test_mjs_fikstur_kimlik_ve_data_oznitelikleri_sunucuda_basilir_o1(self):
+        """Ö-1 GÖZLEM: mjs DOM taklidinin varsaydığı her kimlik/data-* sunucu HTML'inde gerçekten var.
+
+        Kimlikler mjs'teki ``const ids = [...]`` listesinden okunur (fikstür değişirse bu test izler);
+        data-* listesi mjs ``page()``/``radio()`` yardımcılarının yazdıklarıdır.
+        """
+        mjs = os.path.join(os.path.dirname(os.path.dirname(__file__)), 'static', 'tests',
+                           'mail_order_card.test.mjs')
+        with open(mjs, encoding='utf-8') as handle:
+            block = re.search(r'const ids = \[(.*?)\];', handle.read(), re.S).group(1)
+        ids = re.findall(r"'([\w-]+)'", block)
+        self.assertIn('mo-remaining', ids)
+        self.mock.queue('QUERYINSTALLMENT', installment_body(('AXESS', 'AXESS', [(3, 13.57)])))
+        doc = self.doc(self.page(self.make_mail_order(amount=1450.0)))
+        for element_id in ids:
+            self.assertEqual(len(doc.xpath('//*[@id="%s"]' % element_id)), 1, element_id)
+        self.assertRegex(doc.xpath('//form[@id="mo-form"]/@data-now-ym')[0], r'^\d{4}-\d{2}$')
+        self.assertRegex(doc.xpath('//*[@id="mo-remaining"]/@data-seconds')[0], r'^\d+$')
+        self.assertEqual(doc.xpath('//*[contains(@class, "mo-cards")]/@data-brand'), [''])
+        radios = doc.xpath('//form[@id="mo-form"]//input[@name="installmentCount"]')
+        self.assertEqual([r.get('value') for r in radios], ['1', '3'])
+        for radio in radios:
+            for attr in ('data-label', 'data-total', 'data-monthly'):
+                self.assertTrue(radio.get(attr), (radio.get('value'), attr))
+        self.assertIsNone(radios[0].get('data-surcharge'))           # tek çekim: betik "Vade farkı yok"
+        self.assertTrue(radios[1].get('data-surcharge'))
+
     # ---- KK-1.11 özet kartı + maskeleme
     def test_kk_1_11_ozet_kartinda_maskeli_telefon_eposta_aciklama_olusturan(self):
         payment = self.make_mail_order(customer_phone='5321112233', customer_email=EMAIL)
@@ -600,6 +668,15 @@ class TestCardPageMarkup(CardPageCase):
         self.assertNotIn('E-posta', text)
         self.assertNotIn('False', text)
         self.assertNotIn('None', text)
+
+    def test_kk_1_11_olusturan_adi_yoksa_satir_gizlenir_o6(self):
+        model = type(self.env['sanal.pos.payment'])
+        original = model._mail_order_card_values
+        with patch.object(model, '_mail_order_card_values',
+                          lambda rec: {**original(rec), 'creator_name': ''}):
+            response = self.page(self.make_mail_order())
+        self.assertEqual(response.status_code, 200)
+        self.assertNotIn('Talebi oluşturan', self.text_of(response))
 
     def test_kk_1_11_telefon_eposta_kullanici_degeri_kacislanir(self):
         payment = self.make_mail_order(customer_name='Ali <i>Veli</i> & "Y"')
@@ -671,13 +748,12 @@ class TestCardValuesStage1(SanalPosCase):
         self.assertRegex(values['remaining_text'], r'^4[23] dk kaldı$')
 
     def test_kalan_sure_negatif_olmaz_ve_saat_birimi(self):
-        expires = datetime.utcnow() + timedelta(hours=3, minutes=10)
-        payment = self.make_mail_order(expires_at=expires)
-        values = self.values(payment)
-        self.assertGreaterEqual(values['remaining_seconds'], 0)
-        self.assertIn('kaldı', values['remaining_text'])
-        self.assertTrue(values['remaining_seconds'] > 3 * 3600)
-
+        """Ö-11: geçmiş son geçerlilik -> (0, 'Süre doldu'); saat birimi tam metinle."""
+        payment = self.make_mail_order(expires_at=datetime.utcnow() + timedelta(hours=3, minutes=10))
+        self.assertEqual(payment._mail_order_remaining()['remaining_text'], '3 sa 10 dk kaldı')
+        payment.sudo().write({'expires_at': datetime.utcnow() - timedelta(minutes=5)})
+        self.assertEqual(payment._mail_order_remaining(),
+                         {'remaining_seconds': 0, 'remaining_text': 'Süre doldu'})
     def test_kart_verisi_alani_yok_degerlerde(self):
         values = self.values(self.make_mail_order())
         for key in values:

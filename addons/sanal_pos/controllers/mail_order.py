@@ -23,6 +23,7 @@ from odoo.exceptions import AccessError, MissingError, UserError
 from odoo.http import request
 
 from ..models.provider_paratika import _ISTANBUL, DIRECT_POST_HOSTS
+from ..models.res_config_settings import get_bool_param
 from ..tools import installment_table, mail_order_css_url, mail_order_script
 from .main import MO_RESULT_PATH, MPID_RE, PAYMENT_LIST_PATH
 
@@ -31,7 +32,9 @@ _logger = logging.getLogger(__name__)
 PAY_PATH = '/sanal_pos/mail_order/pay/<int:payment_id>'
 RECORD_PATH = PAYMENT_LIST_PATH + '/%d'
 EXPIRY_YEAR_SPAN = 15
-# Dağıtımsız kapatma anahtarı (tasarım §3.9): yalnız TAM 'False' değeri script'i kapatır.
+# Dağıtımsız kapatma anahtarı (tasarım §3.9): get_bool_param ile okunur ('False', 'false', '0',
+# 'no', boş -> kapalı; yoksa açık). NEDEN: acil kapatmada elle yazılan 'false'/'0' de kapatmalı;
+# tam metin eşlemesi bu durumda script'i sessizce açık bırakıyordu (D-1, PROJE.md Boolean kuralı).
 SCRIPT_SWITCH_PARAM = 'sanal_pos.mail_order_script'
 
 # G0-Q2: sale3d yanıtı Paratika dışı bir kökene (banka ACS) 302 ile yönlendiriyorsa tarayıcılar
@@ -155,13 +158,12 @@ class SanalPosMailOrderController(http.Controller):
     # ------------------------------------------------------------------ yardımcılar
     @staticmethod
     def _card_script():
-        """``(metin, sha256_b64)``; kapatma anahtarı 'False' ya da dosya sorunluysa ``(None, None)``.
+        """``(metin, sha256_b64)``; anahtar kapalı, dosya sorunlu ya da hash onaysızsa ``(None, None)``.
 
         DIKKAT: fail-closed: script okunamaz/geçersizse sayfa script'siz (CSP'de script-src yok)
         sunulur; ödeme yolu bozulmaz. İstisna metni loglanmaz (yalnız sınıf adı).
         """
-        switch = request.env['ir.config_parameter'].sudo().get_param(SCRIPT_SWITCH_PARAM)
-        if switch == 'False':
+        if not get_bool_param(request.env, SCRIPT_SWITCH_PARAM, default=True):
             return None, None
         try:
             return mail_order_script()

@@ -39,6 +39,16 @@ _SCRIPT_CACHE = {}
 # NEDEN: bu iki dizi satır içi script bloğunu erken kapatır ya da HTML ayrıştırıcısını "script
 # data double escaped" durumuna sokar; hash ile korunan bloğun içinde bulunamaz.
 _SCRIPT_FORBIDDEN_RE = re.compile(r'</script|<!--', re.IGNORECASE)
+# DIKKAT (PCI 6.4.3/11.6.1, D-2): kod incelemesinden geçmiş betiğin onaylı sha256'sı. Dosyanın
+# hash'i bununla tutmazsa betik SUNULMAZ (sayfa script'siz açılır, hata loglanır). Betik değişirse
+# bu değer, tests/test_mail_order_pci.SCRIPT_SHA256 ve README envanteri AYNI commit'te güncellenir.
+# NEDEN: repoda CI yok; testsiz birleştirilen bir değişiklik CSP hash'i otomatik türediği için
+# tarayıcıda çalışırdı. Kasıtlı içeriden değişikliği durdurmaz (sabit aynı repoda).
+MAIL_ORDER_SCRIPT_SHA256 = 'A44tqgwD9BZp4Grx1S6Oy0HAcGkDJFHXz15naS7Jfj8='
+
+
+class MailOrderScriptHashMismatch(ValueError):
+    """Betik içeriği onaylı hash'le eşleşmiyor (sınıf adı loglanır; içerik loglanmaz)."""
 
 
 # ---------------------------------------------------------------- telefon
@@ -367,9 +377,21 @@ def mail_order_css_url():
 def mail_order_script():
     """Kart sayfasının tek satır içi script'i: ``(metin, sha256_base64)`` (02-tasarim §3.1).
 
-    Hem sayfaya basılan metin hem CSP ``script-src`` değeri BU çıktıdan türer; elle yazılmış hash
-    yoktur (NFR-1.2). Dosya okunamazsa ``OSError``, içerik script bloğunu bozacaksa ``ValueError``
-    (UTF-8 çözülemezse de ``ValueError`` alt sınıfı); çağıran script'siz sunar (fail-closed).
+    Hem sayfaya basılan metin hem CSP ``script-src`` değeri BU çıktıdan türer (NFR-1.2). Hash ayrıca
+    ``MAIL_ORDER_SCRIPT_SHA256`` onayıyla karşılaştırılır; tutmazsa ``MailOrderScriptHashMismatch``
+    (``ValueError``). Diğer hatalar: ``_read_mail_order_script``. Çağıran script'siz sunar.
+    """
+    text, digest = _read_mail_order_script()
+    if digest != MAIL_ORDER_SCRIPT_SHA256:
+        raise MailOrderScriptHashMismatch('mail_order_card.js onaylı hash ile eşleşmiyor')
+    return text, digest
+
+
+def _read_mail_order_script():
+    """Dosyayı okur, normalleştirir ve hash'ler: ``(metin, sha256_base64)``; onay denetimi YOK.
+
+    Dosya okunamazsa ``OSError``, içerik script bloğunu bozacaksa ``ValueError`` (UTF-8 çözülemezse
+    de ``ValueError`` alt sınıfı).
 
     NEDEN (bkz. KARARLAR K-16): HTML ayrıştırıcısı ``<script>`` metnindeki CRLF/CR'yi LF'ye çevirir ve
     tarayıcı hash'i ayrıştırılmış metin üzerinden hesaplar. Dosya Windows'ta CRLF ile çekilirse ham

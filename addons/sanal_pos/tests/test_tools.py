@@ -314,7 +314,7 @@ class TestMailOrderScript(TransactionCase):
                 stamp = time.time_ns() + next(_STAMPS) * 10 ** 9       # önbellek anahtarı benzersiz
                 os.utime(path, ns=(stamp, stamp))
             with patch.object(t, 'MAIL_ORDER_JS_FILE', path):
-                return t.mail_order_script()
+                return t._read_mail_order_script()
 
     @staticmethod
     def _digest(text):
@@ -334,6 +334,25 @@ class TestMailOrderScript(TransactionCase):
         self.assertEqual(digest, self._digest(text))
         self.assertNotIn('\r', text)
         self.assertFalse(text.startswith('﻿'))
+
+    def test_onay_hashi_tutmayan_icerik_sunulmaz_d2(self):
+        """D-2 (PCI 11.6.1): içerik geçerli ama onaylı hash'ten farklı -> MailOrderScriptHashMismatch."""
+        import os
+        import tempfile
+        from unittest.mock import patch
+        t = _tools()
+        self.assertTrue(issubclass(t.MailOrderScriptHashMismatch, ValueError))   # controller yakalar
+        with tempfile.TemporaryDirectory() as tmp:
+            path = os.path.join(tmp, 'mail_order_card.js')
+            with open(path, 'wb') as handle:
+                handle.write(b'var onaysiz = 1;\n')
+            os.utime(path, ns=(7 * 10 ** 18, 7 * 10 ** 18))
+            with patch.object(t, 'MAIL_ORDER_JS_FILE', path):
+                with self.assertRaises(t.MailOrderScriptHashMismatch):
+                    t.mail_order_script()
+                text, digest = t._read_mail_order_script()
+                with patch.object(t, 'MAIL_ORDER_SCRIPT_SHA256', digest):
+                    self.assertEqual(t.mail_order_script(), (text, digest))
 
     def test_lf_crlf_cr_ve_bom_ayni_metin_ayni_hash(self):
         source = 'var a = 1;\n// ç ğ ş ı İ\nvar b = 2;\n'
@@ -381,12 +400,12 @@ class TestMailOrderScript(TransactionCase):
                 handle.write('var one = 1;\n')
             os.utime(path, ns=(5 * 10 ** 18, 5 * 10 ** 18))
             with patch.object(t, 'MAIL_ORDER_JS_FILE', path):
-                first = t.mail_order_script()
-                self.assertEqual(t.mail_order_script(), first)         # aynı dosya, aynı sonuç
+                first = t._read_mail_order_script()
+                self.assertEqual(t._read_mail_order_script(), first)   # aynı dosya, aynı sonuç
                 with open(path, 'w') as handle:
                     handle.write('var two = 2;\n')
                 os.utime(path, ns=(6 * 10 ** 18, 6 * 10 ** 18))
-                second = t.mail_order_script()
+                second = t._read_mail_order_script()
         self.assertEqual(second[0], 'var two = 2;\n')
         self.assertNotEqual(first[1], second[1])
 

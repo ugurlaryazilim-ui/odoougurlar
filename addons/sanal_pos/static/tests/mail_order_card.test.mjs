@@ -318,7 +318,18 @@ test('blur_ve_invalid_olayi_hata_satiri_gosterir', () => {
   p.els.cardOwner.value = 'AHMET';
   p.els.cardOwner.fire('input');
   assert.equal(p.els['cardOwner-error'].hidden, true);
-  p.els['mo-form'].fire('invalid', { target: p.els.cvv });
+  const ev = p.els['mo-form'].fire('invalid', { target: p.els.cvv });
   assert.equal(p.els['expiry-error'].textContent, 'Son kullanma ayını ve yılını seçin');
   assert.equal(p.els['pan-error'].textContent, 'Kart numarası 12-19 hane olmalı');
+  // G-6: satır gösterildi -> yerel balon bastırılır (çift mesaj yok), odak ilk hatalı alana.
+  assert.equal(ev.defaultPrevented, true);
+  assert.equal(p.doc.activeElement, p.els.pan);
+});
+
+test('invalid_olayi_betik_hata_bulmazsa_yerel_balon_kalir', () => {
+  const p = page();
+  fillValid(p);
+  const ev = p.els['mo-form'].fire('invalid', { target: p.els.cvv });
+  assert.equal(ev.defaultPrevented, false, 'betik satır göstermediyse kullanıcı yerel mesajı görmeli');
+  assert.equal(p.submits.length, 0);
 });
