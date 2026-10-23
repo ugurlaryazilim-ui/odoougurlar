@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="utf-8"?>
+<odoo>
+    <!--
+    Mail Order dekontu (Aşama 4, tasarım §6.1). DIKKAT:
+      * binding_model_id YOK: Yazdır menüsünde görünmez; yalnız form/sonuç sayfası düğmeleri (A4-G3).
+      * group_ids çekirdekte yalnız menü/eylem bağlamasını sınırlar; asıl yetki ve "yalnız paid" denetimi
+        report/mail_order_receipt.py::_get_report_values içindedir (KK-4.5).
+      * Şablona yalnız o dosyanın hazırladığı metinler gider: kart yalnız "**** **** **** NNNN"; PAN, BIN,
+        SKT, CVV ve kart sahibi adı bu şablonda ve modelde hiçbir zaman yoktur (KK-4.1/4.6).
+    -->
+    <record id="action_report_mail_order_receipt" model="ir.actions.report">
+        <field name="name">Mail Order Dekontu</field>
+        <field name="model">sanal.pos.payment</field>
+        <field name="report_type">qweb-pdf</field>
+        <field name="report_name">sanal_pos.report_mail_order_receipt</field>
+        <field name="report_file">sanal_pos.report_mail_order_receipt</field>
+        <field name="print_report_name">'Dekont - %s' % object.invoice_no</field>
+        <field name="group_ids" eval="[(6, 0, [ref('sanal_pos.group_sanal_pos_user')])]"/>
+    </record>
+
+    <template id="report_mail_order_receipt">
+        <t t-call="web.html_container">
+            <t t-foreach="docs" t-as="o">
+                <t t-set="r" t-value="receipts[o.id]"/>
+                <t t-call="web.external_layout">
+                    <div class="page">
+                        <h2 class="mb-3">Ödeme Dekontu</h2>
+                        <table class="table table-sm">
+                            <tbody>
+                                <tr><th class="w-50">Talep No</th><td><span t-out="o.name"/></td></tr>
+                                <tr><th>Fatura No</th><td><span t-out="o.invoice_no"/></td></tr>
+                                <tr><th>Müşteri</th><td><span t-out="o.customer_name"/></td></tr>
+                                <tr><th>Fatura Tutarı</th><td><span t-out="r['amount_text']"/></td></tr>
+                                <tr t-if="r['surcharge_text']">
+                                    <th>Vade Farkı</th><td><span t-out="r['surcharge_text']"/></td>
+                                </tr>
+                                <tr><th>Ödenen Tutar</th><td><strong t-out="r['paid_text']"/></td></tr>
+                                <tr><th>Taksit</th><td><span t-out="r['installments']"/> taksit</td></tr>
+                                <tr><th>Ödeme Zamanı</th><td><span t-out="r['paid_local']"/></td></tr>
+                                <tr t-if="r['tran_ref']">
+                                    <th>İşlem No</th><td><span t-out="r['tran_ref']"/></td>
+                                </tr>
+                                <tr t-if="r['approval_code']">
+                                    <th>Onay Kodu</th><td><span t-out="r['approval_code']"/></td>
+                                </tr>
+                                <tr><th>Yöntem</th><td>Mail Order · 3D Secure</td></tr>
+                                <tr t-if="r['card_mask']">
+                                    <th>Kart</th><td><span t-out="r['card_mask']"/></td>
+                                </tr>
+                            </tbody>
+                        </table>
+                        <p class="text-muted small mt-4">Bu belge fatura yerine geçmez.</p>
+                    </div>
+                </t>
+            </t>
+        </t>
+    </template>
+</odoo>

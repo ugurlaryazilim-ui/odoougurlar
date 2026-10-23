@@ -24,6 +24,7 @@ Sanal POS / Ödeme Linki
         'security/ir.model.access.csv',
         'data/ir_sequence.xml',
         'data/ir_cron.xml',
+        'report/mail_order_receipt.xml',
         'wizard/payment_create_wizard_views.xml',
         'wizard/mail_order_wizard_views.xml',
         'wizard/review_close_wizard_views.xml',
