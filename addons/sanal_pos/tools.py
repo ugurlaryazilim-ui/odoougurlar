@@ -138,6 +138,65 @@ def network_label(code):
     return code.replace('_', ' ').title()
 
 
+# ---------------------------------------------------------------- kart tanıma (A2, K-19)
+# QUERYBIN issuerType kodu -> ekrandaki banka adı. issuer/cardName serbest metni kullanılmaz (spike).
+# EKIP-BORC: spike'ta yalnız AKBANK görüldü; canlıda görülen kodlar (Garanti, İş, YKB...) duman testinden
+# sonra eklenir. Eklenene kadar bilinmeyen kod başlık biçiminde gösterilir (kaybolmaz).
+BANK_NAMES = {
+    'AKBANK': 'Akbank',
+}
+CARD_TYPE_LABELS = {'credit': 'Kredi kartı', 'debit': 'Banka kartı', 'prepaid': 'Ön ödemeli kart'}
+# QUERYBIN cardBrand kodu -> kart sayfası logo anahtarı (``img[data-brand]``)
+BRAND_KEYS = {'VISA': 'visa', 'MC': 'mastercard', 'MASTERCARD': 'mastercard', 'TROY': 'troy',
+              'AMEX': 'amex'}
+_BRAND_KEY_RE = re.compile(r'[a-z0-9_]{1,32}', re.ASCII)
+# NEDEN re.ASCII: \d / [0-9] Unicode modunda Arapça-Hint rakamlarını da kabul eder (KK-2.7)
+_BIN_RE = re.compile(r'[0-9]{8}', re.ASCII)
+
+
+def valid_bin(value):
+    """Tam 8 ASCII rakam, Amex (34/37) değil. BIN ucu ve model aynı kuralı kullanır (KK-2.7)."""
+    return (isinstance(value, str) and bool(_BIN_RE.fullmatch(value))
+            and not value.startswith(('34', '37')))
+
+
+def bank_label(code):
+    """Banka kodu -> ad; bilinmeyen kod ``YENI_BANKA`` -> ``Yeni Banka``; boş -> ``''``."""
+    code = code.strip().upper() if isinstance(code, str) else ''
+    if code in BANK_NAMES:
+        return BANK_NAMES[code]
+    return code.replace('_', ' ').title()
+
+
+def program_label(code):
+    """Kredi programı (cardNetwork) -> ad; ``UNKNOWN`` ve boş gizlenir."""
+    code = code.strip() if isinstance(code, str) else ''
+    if not code or code.upper() in HIDDEN_NETWORKS:
+        return ''
+    return network_label(code)
+
+
+def brand_key(code):
+    """Kart markası kodu -> logo anahtarı (küçük harf); tanınmayan biçim ``''``."""
+    code = code.strip().upper() if isinstance(code, str) else ''
+    key = BRAND_KEYS.get(code, code.lower())
+    return key if _BRAND_KEY_RE.fullmatch(key) else ''
+
+
+def card_label(bank, program, card_type, foreign=False):
+    """``Banka · Program · Tür[ · Yurt dışı]``; olmayan parça yazılmaz.
+
+    NEDEN program yalnız kredi kartında: hesap kartı da bir kredi programı kodu taşıyor (spike Q5).
+    """
+    parts = [(bank or '').strip()]
+    if card_type == 'credit':
+        parts.append((program or '').strip())
+    parts.append(CARD_TYPE_LABELS.get(card_type, ''))
+    if foreign:
+        parts.append('Yurt dışı')
+    return ' · '.join(part for part in parts if part)
+
+
 def _visible_networks(codes):
     labels = []
     for code in codes or []:
@@ -206,7 +265,7 @@ def installment_table(amount, options):
 
     ``options``: ``[{'count', 'networks', 'rate'}]`` (provider çıktısı). Dönüş:
     ``{'common_networks': [ad], 'per_row': bool, 'rows': [{'count', 'networks', 'rate_text', 'total_text',
-    'monthly_text', 'select_text', 'label', 'surcharge_text'}]}``. Tüm satırlarda program listesi aynıysa
+    'monthly_text', 'label', 'surcharge_text'}]}``. ``rows`` BIN ucunun yanıtına da aynen girer (A2). Tüm satırlarda program listesi aynıysa
     ``common_networks`` dolu, satırlarda ``networks`` boş olur; farklıysa tersi.
     İlk satır tek çekimdir (vade farkı yok, toplam = tutar).
     """
@@ -217,10 +276,7 @@ def installment_table(amount, options):
     rows = [{'count': 1, 'networks': [], 'rate_text': 'Vade farkı yok',
              'label': 'Tek çekim', 'surcharge_text': '',
              'total_text': format_try(base),
-             'monthly_text': format_try(base),
-             # EKIP-BORC: select_text eski şablon için kalır (redeploy ile -u arasında eski şablon onu
-             # okur; kaldırılırsa kart sayfası 500 verir); A2-G3'te kaldırılır.
-             'select_text': 'Tek çekim — %s' % format_try(base)}]
+             'monthly_text': format_try(base)}]
     for option, networks in zip(options or [], per_row):
         rate = Decimal(str(option.get('rate') or 0))
         total, monthly = installment_totals(amount, rate, option['count'])
@@ -236,8 +292,6 @@ def installment_table(amount, options):
             'rate_text': format_rate(rate) if rate else 'Vade farkı yok',
             'total_text': format_try(total),
             'monthly_text': format_try(monthly),
-            'select_text': '%s taksit — toplam %s%s' % (
-                option['count'], format_try(total), ' (%s)' % ', '.join(shown) if shown else ''),
         })
     return {'common_networks': first if same else [], 'per_row': not same, 'rows': rows}
 
