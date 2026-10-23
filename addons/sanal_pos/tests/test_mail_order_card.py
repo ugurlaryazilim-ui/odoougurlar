@@ -167,9 +167,14 @@ class TestCardPageScriptCsp(CardPageCase):
             self.assertEqual(self.csp(response)['script-src'],
                              ["'sha256-%s'" % sha256_b64('void 0;\n/* ç ğ ş */\n')])
 
-    def test_kk_1_14c_connect_src_yok_default_src_none(self):
-        policy = self.csp(self.page(self.make_mail_order()))
-        self.assertNotIn('connect-src', policy)
+    def test_kk_1_14c_connect_src_yalniz_bin_ucu_default_src_none(self):
+        """A2 (B-1): Aşama 1'deki "connect-src yok" sözleşmesi değişti. Script'li sayfada
+        ``connect-src`` TAM olarak ``<host_url>/sanal_pos/mail_order/bin`` olur (başka kaynak yok);
+        ``default-src 'none'`` korunur. HttpCase loopback (http://127.0.0.1:port) olduğu için http kabul."""
+        response = self.page(self.make_mail_order())
+        policy = self.csp(response)
+        host_url = '{0.scheme}://{0.netloc}'.format(urlsplit(response.url))
+        self.assertEqual(policy.get('connect-src'), [host_url + '/sanal_pos/mail_order/bin'])
         self.assertEqual(policy.get('default-src'), ["'none'"])
 
     def test_kk_1_14e_diger_basliklar_degismez(self):
@@ -180,9 +185,9 @@ class TestCardPageScriptCsp(CardPageCase):
         self.assertEqual(policy.get('base-uri'), ["'none'"])
         self.assertEqual(policy.get('style-src'), ["'self'"])
         self.assertEqual(policy.get('img-src'), ["'self'"])
-        self.assertEqual(sorted(policy), ['base-uri', 'default-src', 'form-action', 'frame-ancestors',
-                                          'img-src', 'script-src', 'style-src'],
-                         'Aşama 1\'de CSP\'ye yalnız script-src eklenir')
+        self.assertEqual(sorted(policy), ['base-uri', 'connect-src', 'default-src', 'form-action',
+                                          'frame-ancestors', 'img-src', 'script-src', 'style-src'],
+                         'Aşama 2\'de CSP\'ye script-src (A1) ve connect-src (A2) eklenir')
         self.assertIn('no-store', response.headers.get('Cache-Control', ''))
         self.assertEqual(response.headers.get('Cross-Origin-Opener-Policy'), 'same-origin')
         self.assertEqual(response.headers.get('X-Frame-Options'), 'DENY')
@@ -284,22 +289,45 @@ class TestCardPageScriptCsp(CardPageCase):
     def test_kapatma_anahtari_bool_bicimleri_kapatir_d1(self):
         """D-1/Ö-2: anahtar get_bool_param ile okunur; elle yazılan 'false'/'0' de kapatır."""
         params = self.env['ir.config_parameter'].sudo()
-        for value in ('false', '0', 'FALSE', ' False', 'no'):
+        # D-4 (A2): izin listesi dışındaki HER değer kapatır (yazım hatası, boş, boşluk dahil)
+        for value in ('false', '0', 'FALSE', ' False', 'no', 'off', 'hayır', 'kapalı', '', '   ',
+                      'tru', 'acik', '2'):
             with self.subTest(deger=value):
                 params.set_param(SCRIPT_ICP, value)
                 response = self.page(self.make_mail_order(invoice_no='OFF-%s' % value.strip()))
                 self.assertEqual(response.status_code, 200)
                 self.assertNotIn('<script', self.body(response).lower())
                 self.assertNotIn('script-src', self.csp(response))
+                self.assertNotIn('connect-src', self.csp(response))
+                form = self.doc(response).xpath('//form[@id="mo-form"]')[0]
+                self.assertIsNone(form.get('data-bin'), 'betik yokken data-bin da olmaz')
 
-    def test_kapatma_anahtari_acikken_script_var_false_disi_deger_kapatmaz(self):
+    def test_kapatma_anahtari_acikken_script_var_yalniz_izin_listesi(self):
         params = self.env['ir.config_parameter'].sudo()
-        for value in ('True', '1', 'evet'):
+        for value in ('True', '1', 'evet', 'yes', ' TRUE ', 'Evet'):
             with self.subTest(deger=value):
                 params.set_param(SCRIPT_ICP, value)
-                response = self.page(self.make_mail_order(invoice_no='ON-%s' % value))
+                response = self.page(self.make_mail_order(invoice_no='ON-%s' % value.strip()))
                 self.assertEqual(self.body(response).lower().count('<script'), 1)
                 self.assertIn('script-src', self.csp(response))
+                self.assertIn('connect-src', self.csp(response))
+
+    def test_kapatma_anahtari_yoksa_script_acik_d4(self):
+        self.env['ir.config_parameter'].sudo().search([('key', '=', SCRIPT_ICP)]).unlink()
+        response = self.page(self.make_mail_order(invoice_no='ON-YOK'))
+        self.assertEqual(self.body(response).lower().count('<script'), 1)
+        self.assertIn('script-src', self.csp(response))
+
+    def test_get_bool_param_genel_davranisi_degismez_d4(self):
+        """D-4 yalnız kapatma anahtarını sıkılaştırır; ``get_bool_param`` ortak davranışı (yok ->
+        varsayılan, '', 'false', '0', 'no', 'none' dışı -> True) aynı kalır (başka ayarlar ona bağlı)."""
+        from odoo.addons.sanal_pos.models.res_config_settings import get_bool_param
+        params = self.env['ir.config_parameter'].sudo()
+        params.set_param('sanal_pos.test_anahtar_d4', 'acik')
+        self.assertTrue(get_bool_param(self.env, 'sanal_pos.test_anahtar_d4', default=False))
+        params.set_param('sanal_pos.test_anahtar_d4', 'False')
+        self.assertFalse(get_bool_param(self.env, 'sanal_pos.test_anahtar_d4', default=True))
+        self.assertTrue(get_bool_param(self.env, 'sanal_pos.test_anahtar_yok_d4', default=True))
 
     def test_script_dosyasi_yoksa_sayfa_scriptsiz_acilir(self):
         with script_file(None):

@@ -26,7 +26,8 @@ from odoo.tools import html2plaintext
 
 from .mocks import (  # noqa: F401  (testler buradan alır)
     LIVE_URL_PREFIX, TEST_URL_PREFIX, ParatikaMock, RawResponse, connection_exc,
-    err_body, installment_body, make_send_patch, ok_body, qt_body, timeout_exc, tran,
+    err_body, installment_body, make_send_patch, ok_body, paymentsystems_body, qt_body,
+    querybin_body, timeout_exc, tran,
 )
 
 INV_NO = 'UGR2026000012587'
@@ -75,6 +76,9 @@ MAIL_ORDER_RESULT_PATH = '/sanal_pos/mail_order/result'
 LEAK_PAN = '4355084355084358'
 LEAK_CVV = '000'
 LEAK_OWNER = 'ZZQXKART TESTI'
+# Aşama 2 (BIN): PAN'ın ilk 8 hanesi; herkese açık test BIN'i. Hiçbir kalıcı yerde bulunmamalı (KK-2.9).
+LEAK_BIN = LEAK_PAN[:8]
+MAIL_ORDER_BIN_PATH = '/sanal_pos/mail_order/bin'
 
 
 def invoice_rows(invoice_no=INV_NO, total='9000.00', currency='TRY', lines=3, **overrides):
@@ -471,4 +475,5 @@ __all__ = [
     'ok_body', 'qt_body', 'timeout_exc', 'tran', 'ParatikaMock', 'installment_body',
     'CARD_PARAM_NAMES', 'MAIL_ORDER_PAY_PATH', 'MAIL_ORDER_RETURN_PATH',
     'MAIL_ORDER_RESULT_PATH', 'LEAK_PAN', 'LEAK_CVV', 'LEAK_OWNER', 'CRON_SYNC_FLAGGED',
+    'LEAK_BIN', 'MAIL_ORDER_BIN_PATH', 'querybin_body', 'paymentsystems_body',
 ]
