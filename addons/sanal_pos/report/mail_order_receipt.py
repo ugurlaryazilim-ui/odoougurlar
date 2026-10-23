@@ -4,14 +4,14 @@
 Yetki ve durum denetimi şablonda değil burada yapılır: çekirdek ``group_ids``'i yalnız menü/eylem
 bağlamasında uygular, ``/report/pdf/...`` rotası ve ``_render_qweb_*`` bunu denetlemez.
 """
-from decimal import Decimal, InvalidOperation
+from decimal import Decimal
 
 from odoo import api, models
 from odoo.exceptions import UserError
 
+from ..models.sanal_pos_payment import RECEIPT_NOT_PAID_MSG
 from ..tools import format_try
 
-NOT_ELIGIBLE_MSG = 'Dekont yalnız ödemesi alınmış (Ödendi) Mail Order kayıtları için üretilebilir.'
 NO_RECORD_MSG = 'Dekont için bir ödeme kaydı seçilmedi.'
 
 
@@ -35,7 +35,7 @@ class ReportMailOrderReceipt(models.AbstractModel):
         # NEDEN: durum denetimi okumadan SONRA, şablondan ÖNCE; kısmi iade/iptal dahil paid dışı
         # her durumda dekont yok (KK-4.4) ve hata istemci hatasıdır (UserError -> 4xx, 5xx değil).
         if any(doc.payment_method != 'mail_order' or doc.state != 'paid' for doc in docs):
-            raise UserError(NOT_ELIGIBLE_MSG)
+            raise UserError(RECEIPT_NOT_PAID_MSG)
         return {
             'doc_ids': docs.ids,
             'doc_model': 'sanal.pos.payment',
@@ -47,10 +47,7 @@ class ReportMailOrderReceipt(models.AbstractModel):
     def _receipt_values(self, doc):
         """Şablona yalnız basılacak metinler gider; kart için yalnız son 4 hane (PAN/BIN yok)."""
         paid = doc.paid_amount or doc.amount
-        try:
-            surcharge = Decimal(str(paid or 0)) - Decimal(str(doc.amount or 0))
-        except InvalidOperation:
-            surcharge = Decimal('0')
+        surcharge = Decimal(str(paid or 0)) - Decimal(str(doc.amount or 0))
         # NEDEN: onay kodu yalnız dekontun işlem numarasıyla eşleşen onaylı denemeden alınır;
         # başka denemenin kodunu yazmak, kodsuz dekonttan kötüdür.
         approved = doc.attempt_ids.filtered(
@@ -59,7 +56,7 @@ class ReportMailOrderReceipt(models.AbstractModel):
         last4 = (doc.card_last4 or '')[-4:]
         return {
             'amount_text': format_try(doc.amount),
-            'paid_text': format_try(paid),
+            'paid_text': doc.receipt_amount_text,     # e-posta gövdesiyle aynı metin (tek kaynak)
             # 0,01 TL'den küçük fark yuvarlama artığıdır, vade farkı sayılmaz
             'surcharge_text': format_try(surcharge) if surcharge >= Decimal('0.01') else False,
             'installments': doc.installment_count or 1,

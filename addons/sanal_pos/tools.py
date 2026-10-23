@@ -99,6 +99,16 @@ def validate_email(s):
     return len(s) <= _EMAIL_MAX and bool(_EMAIL_RE.match(s))
 
 
+# NEDEN: _EMAIL_RE yalnız boşluk (CRLF ve denetim karakterleri dahil) ve ikinci '@' dışlar;
+# virgül/noktalı virgül/ayraç/tırnak alıcı listesi ya da görünen ad açardı.
+_RECEIPT_EMAIL_FORBIDDEN = re.compile(r'[,;<>()"\']')
+
+
+def valid_receipt_email(s):
+    """Dekont alıcısı: tek, çıplak adres. Otomatik (cron) ve elle (sihirbaz) gönderimin TEK kuralı."""
+    return validate_email(s) and not _RECEIPT_EMAIL_FORBIDDEN.search(s)
+
+
 # ---------------------------------------------------------------- tutar
 def format_try(amount):
     """``Decimal('9000')`` -> ``'9.000,00 TL'`` (kullanıcı dilinden bağımsız)."""

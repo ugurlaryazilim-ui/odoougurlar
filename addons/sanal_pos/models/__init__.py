@@ -6,3 +6,4 @@ from . import sanal_pos_refund
 from . import sanal_pos_log
 from . import provider
 from . import provider_paratika
+from . import mail_mail

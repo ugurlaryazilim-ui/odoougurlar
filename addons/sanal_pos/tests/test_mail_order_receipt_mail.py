@@ -9,18 +9,22 @@ DIKKAT: gerçek iki bağlantılı SKIP LOCKED/serileştirme yarışı Transactio
 (veri commit edilmez); hata yolları yamalarla taklit edilir (BORC: iki bağlantılı PoC).
 """
 import smtplib
+from datetime import datetime, timedelta
 from unittest.mock import patch
 
+from lxml import etree
 from psycopg2 import errors as pg_errors
 
 from odoo.tests import tagged
+from odoo.tools.safe_eval import safe_eval
 
-from .common import EMAIL, tran
+from .common import CRON_DAILY, EMAIL, tran
 from .test_mail_order import MailOrderCase
-from .test_mail_order_receipt import CRON_RECEIPT, PAYMENT, ReceiptMixin
+from .test_mail_order_receipt import CRON_RECEIPT, PAYMENT, WIZARD, ReceiptMixin
 
 QUEUE_FAILED_NOTE = 'otomatik gönderim için kuyruğa alınamadı'
 SENT_NOTE = 'Dekont %s adresine gönderildi' % EMAIL
+FAILED_NOTE = 'Dekont gönderilemedi'
 
 
 @tagged('post_install', '-at_install', 'sanal_pos')
@@ -218,3 +222,108 @@ class TestReceiptSiblings(ReceiptMixin, MailOrderCase):
         self.reload(payment)
         self.assertEqual(payment.receipt_state, 'sent', "cron'un 'failed' sonucu elle gönderimi ezmez")
         self.assertEqual(self.count_notes(payment, 'Dekont gönderilemedi'), 1)
+
+    # -- düzeltme turu #1 (Aşama 4 kalite kapıları) ---------------------------------------
+    def test_r2_eposta_govdesi_tutari_pdf_ile_ayni_tr_bicimi(self):
+        payment = self.paid_order()                              # tahsil 9120.4
+        payment.sudo().write({'receipt_state': 'pending'})
+        self.run_receipt_cron()
+        self.assertEqual(len(self.sent), 1)
+        self.assertIn('9.120,40', self.sent[0].body, 'Ö-2/B-B: gövde TR biçimi (format_try)')
+        self.assertNotIn('9,120.40', self.sent[0].body)
+        self.assertIn('9.120,40', self.sent[0].attachments[0][1], 'PDF ile aynı metin')
+
+    def send_by_wizard(self, payment):
+        self.env[WIZARD].with_user(self.user_sp).create(
+            {'payment_id': payment.id, 'email': EMAIL}).action_send()
+        self.assertEqual(self.reload(payment).receipt_state, 'sent', 'kuyruğa alındı')
+
+    def test_r3_elle_gonderim_kuyruk_smtp_reddederse_failed_yeniden_denemede_sent(self):
+        payment = self.paid_order()
+        self.send_by_wizard(payment)
+        self.smtp_error = smtplib.SMTPException('SMTP kapalı')
+        self.queued_mails(payment).send()                        # posta kuyruğu cron'u
+        self.reload(payment)
+        self.assertEqual((payment.state, payment.receipt_state), ('paid', 'failed'), 'B-C')
+        self.assertEqual(self.count_notes(payment, FAILED_NOTE), 1)
+        self.assertEqual(self.queued_mails(payment).mapped('state'), ['exception'])
+        # kuyruk yeniden dener (Ayarlar > Teknik > E-postalar "Yeniden dene") ve gönderir
+        self.smtp_error = None
+        mails = self.queued_mails(payment)
+        mails.mark_outgoing()
+        mails.send()
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(self.reload(payment).receipt_state, 'sent')
+        self.assertEqual(self.count_notes(payment, SENT_NOTE), 2)
+        self.assertEqual(self.count_notes(payment, FAILED_NOTE), 1)
+
+    def test_r3_elle_gonderim_kuyruk_basariliysa_sent_kalir_ek_not_yok(self):
+        payment = self.paid_order()
+        self.send_by_wizard(payment)
+        self.queued_mails(payment).send()
+        self.assertEqual(len(self.sent), 1)
+        self.assertEqual(self.reload(payment).receipt_state, 'sent')
+        self.assertEqual(self.count_notes(payment, SENT_NOTE), 1)
+        self.assertEqual(self.count_notes(payment, FAILED_NOTE), 0)
+        self.assertFalse(self.queued_mails(payment), 'başarıda çekirdek siler (auto_delete)')
+
+    def test_r3_cron_eposta_kaydi_silinmisse_gonderildi_sayilmaz(self):
+        payment = self.paid_via_sync()
+        MailMail = type(self.env['mail.mail'])
+
+        def vanishing(this, *args, **kwargs):                    # Ö-3: geçersiz adreste auto_delete taklidi
+            this.sudo().unlink()
+            return True
+
+        with patch.object(MailMail, '_send', vanishing):
+            self.run_receipt_cron()
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.reload(payment).receipt_state, 'failed')
+        self.assertEqual(self.count_notes(payment, FAILED_NOTE), 1)
+
+    def test_r4_gunluk_cron_30_gunluk_basarisiz_dekont_epostasini_siler_durum_korunur(self):
+        self.smtp_error = smtplib.SMTPException('SMTP kapalı')
+        old = self.paid_via_sync(invoice_no=self.next_inv())
+        fresh = self.paid_via_sync(tran_ref='PG-AP2', invoice_no=self.next_inv())
+        self.run_receipt_cron()
+        old_mail, fresh_mail = self.queued_mails(old), self.queued_mails(fresh)
+        self.assertEqual((old_mail.state, fresh_mail.state), ('exception', 'exception'))
+        message, attachments = old_mail.mail_message_id, old_mail.attachment_ids
+        self.assertTrue(attachments, 'PDF eki var')
+        notifications = self.env['mail.mail'].sudo().search(
+            [('model', '=', PAYMENT), ('res_id', '=', old.id), ('is_notification', '=', True)])
+        aged = datetime.utcnow() - timedelta(days=31)
+        self.env.flush_all()
+        self.env.cr.execute('UPDATE mail_mail SET create_date = %s WHERE id IN %s',
+                            [aged, tuple((old_mail | notifications).ids)])
+        self.env.invalidate_all()
+        self.run_cron(CRON_DAILY)
+        self.assertFalse(old_mail.exists(), 'G4-2: 30 günlük başarısız dekont e-postası silinir')
+        self.assertFalse(message.exists())
+        self.assertFalse(attachments.exists(), 'PDF eki de silinir')
+        self.assertEqual(fresh_mail.exists(), fresh_mail, '30 günden yeni olan kalır')
+        self.assertEqual(notifications.exists(), notifications, 'bildirim e-postalarına dokunulmaz')
+        self.reload(old)
+        self.assertEqual((old.state, old.receipt_state), ('paid', 'failed'), 'durum korunur')
+        self.assertEqual(self.count_notes(old, FAILED_NOTE), 1, 'kayıt notu korunur')
+
+    def test_r5_otomatik_gonderim_tek_adres_kurali_sihirbazla_ayni(self):
+        payment = self.paid_via_sync(customer_email='a@example.com,b@example.com')
+        self.run_receipt_cron()
+        self.assertEqual(self.sent, [])
+        self.assertEqual(self.reload(payment).receipt_state, 'no_email')
+
+    def test_r6_odemesi_iptal_edilen_kayitta_bekleyen_dekont_gorunmez(self):
+        arch = etree.fromstring(self.env[PAYMENT].get_view(
+            self.env.ref('sanal_pos.view_sanal_pos_payment_form').id, 'form')['arch'])
+        expr = arch.xpath("//field[@name='receipt_state']")[0].get('invisible')
+        for (method, state, receipt), hidden in (
+                (('mail_order', 'voided', 'pending'), True),
+                (('mail_order', 'refunded', 'sending'), True),
+                (('mail_order', 'voided', 'sent'), False),
+                (('mail_order', 'paid', 'pending'), False),
+                (('mail_order', 'paid', 'failed'), False),
+                (('link', 'paid', 'sent'), True)):
+            with self.subTest(method=method, state=state, receipt=receipt):
+                ctx = {'payment_method': method, 'state': state, 'receipt_state': receipt}
+                self.assertEqual(bool(safe_eval(expr, ctx)), hidden)

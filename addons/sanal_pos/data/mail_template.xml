@@ -15,7 +15,7 @@
     <p>Sayın <t t-out="object.customer_name or 'Müşterimiz'"/>,</p>
     <p>
         <t t-out="object.invoice_no"/> numaralı faturanız için
-        <strong><t t-out="format_amount(object.paid_amount or object.amount, object.currency_id)"/></strong>
+        <strong><t t-out="object.receipt_amount_text"/></strong>
         tutarındaki ödemeniz alınmıştır. Ödeme dekontunuz ektedir.
     </p>
     <p>Teşekkür ederiz.<br/><t t-out="object.company_id.name"/></p>

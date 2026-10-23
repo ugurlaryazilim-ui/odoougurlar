@@ -83,8 +83,8 @@
                     <button name="action_mail_order_to_link" type="object" string="Bunun yerine link gönder"
                             class="btn-secondary"
                             invisible="payment_method != 'mail_order' or state not in ('sent', 'expired', 'error')"/>
-                    <!-- A4-G3 (KK-4.4): dekont. Gizleme yetki değildir; sunucu denetler (_check_receipt_action).
-                         groups yok: A3-G3 düğmeleri gibi, form zaten yalnız Sanal POS gruplarına açık -->
+                    <!-- A4-G3 (KK-4.4): dekont. NEDEN: groups yok; gizleme yetki değildir, sunucu denetler
+                         (_check_receipt_action). A3-G3 düğmeleri gibi, form zaten yalnız Sanal POS gruplarına açık -->
                     <button name="action_receipt_download" type="object" string="Dekontu İndir"
                             class="btn-secondary"
                             invisible="payment_method != 'mail_order' or state != 'paid'"/>
@@ -174,8 +174,10 @@
                                     <field name="installment_count"/>
                                     <field name="card_last4"/>
                                     <field name="provider_tran_ref"/>
+                                    <!-- NEDEN: ödeme paid'den çıktıysa (iptal/iade) bekleyen dekont artık
+                                         gönderilmez (claim state='paid' ister); "Gönderilecek" yanıltmasın (Ö-5) -->
                                     <field name="receipt_state" widget="badge"
-                                           invisible="payment_method != 'mail_order'"
+                                           invisible="payment_method != 'mail_order' or (state != 'paid' and receipt_state in ('pending', 'sending'))"
                                            decoration-success="receipt_state == 'sent'"
                                            decoration-info="receipt_state in ('pending', 'sending')"
                                            decoration-warning="receipt_state == 'no_email'"
