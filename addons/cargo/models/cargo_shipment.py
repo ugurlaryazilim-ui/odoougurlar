@@ -77,6 +77,9 @@ class CargoShipment(models.Model):
 
     # NEDEN: bir iş referansıyla yalnız tek AKTİF gönderi olur (KK-API-2, picking'den ikinci gönderi yok);
     # iptal/hatalı olanın ardından yenisi açılabilir (K-21).
+    # NEDEN (company_id'siz, bilinçli): kargo firması kaydı şirketler arası paylaşılabilir (D-4, company_id boş) ve
+    # sağlayıcı "bul" sorgusu referansla HESAP kapsamında arar; şirket kapsamlı indeks aynı hesapta aynı referanslı
+    # iki aktif gönderiye izin verip uzlaştırmada yanlış takip no eşlerdi. Çakışan referans önek ile ayrılmalı.
     _origin_ref_active_uniq = models.UniqueIndex(
         "(origin_ref) WHERE origin_ref IS NOT NULL AND state NOT IN ('cancelled', 'failed')",
         message='Bu iş referansıyla açık bir kargo gönderisi zaten var.')
@@ -322,11 +325,13 @@ class CargoShipment(models.Model):
         if not STREET_MIN <= len((self.recipient_street or '').strip()) <= STREET_MAX:
             errors.append(_('%(field)s %(min)d-%(max)d karakter olmalı.',
                             field=label('recipient_street'), min=STREET_MIN, max=STREET_MAX))
+        address_errors = len(errors)
         if not self.recipient_state_id or self.recipient_state_id.country_id.code != 'TR':
             errors.append(_('%s: Türkiye ili seçin.', label('recipient_state_id')))
         if not (self.recipient_district or '').strip():
             errors.append(_('%s boş olamaz.', label('recipient_district')))
-        if not self.area_id and self.area_match_note:
+        # NEDEN: il/ilçe alan hatası varken eşleme notu aynı sorunu ikinci kez söyler (05-test B-2).
+        if not self.area_id and self.area_match_note and len(errors) == address_errors:
             errors.append(self.area_match_note)
         if not 1 <= self.package_count <= PACKAGE_MAX:
             errors.append(_('%(field)s 1-%(max)d arası olmalı.', field=label('package_count'), max=PACKAGE_MAX))
@@ -408,6 +413,41 @@ class CargoShipment(models.Model):
     def action_cancel(self):
         self.ensure_one()
         return self._cargo_notification(self._cargo_cancel())
+
+    def action_mark_missing(self):
+        self.ensure_one()
+        return {
+            'type': 'ir.actions.act_window', 'name': _('Kargo firmasında yok'),
+            'res_model': 'cargo.shipment.missing.wizard', 'view_mode': 'form', 'target': 'new',
+            'context': {'default_shipment_id': self.id},
+        }
+
+    def _cargo_mark_missing(self, reason):
+        """Belirsiz gönderiyi elle ``failed`` yapar: kargo firmasında olmadığı panelden doğrulandı (K-28).
+
+        Dış çağrı yapmaz. NEDEN: uzlaştırma sorgusu "bulunamadı"yı kesin sayamadığında (genç kayıt, sorgu hatası)
+        belirsiz gönderinin başka çıkışı yoktu; transfer yeni gönderiye kilitli kalıyordu (05-inceleme Ö1).
+        DIKKAT: yanlış işaret mükerrer (ücretli) gönderi açtırır; bu yüzden yalnız Kargo / Yönetici, gerekçe zorunlu
+        ve chatter'a kim/ne zaman/neden yazılır.
+        """
+        self.ensure_one()
+        if not self.env.user.has_group('cargo.group_cargo_manager'):
+            raise AccessError(_('Gönderiyi "kargo firmasında yok" olarak işaretlemek için "Kargo / Yönetici" yetkisi gerekir.'))
+        self.check_access('read')
+        reason = (reason or '').strip()
+        if not reason:
+            raise UserError(_('Gerekçe zorunludur: kargo firmasının panelinde nasıl kontrol ettiğinizi yazın.'))
+        if self._cargo_lock() != 'uncertain':
+            raise UserError(_('Yalnız sonucu belirsiz gönderi "kargo firmasında yok" olarak işaretlenebilir.'))
+        carrier = self.carrier_id.sudo().display_name
+        self.sudo().write({
+            'state': 'failed', 'error_code': False,
+            'error_message': _('"%(carrier)s" panelinde yok olarak işaretlendi: %(reason)s',
+                               carrier=carrier, reason=reason)[:ERROR_MESSAGE_MAX],
+        })
+        self._cargo_post(_(
+            'Gönderi "%(carrier)s" kargo firmasında yok olarak işaretlendi (Belirsiz → Hatalı). İşaretleyen: '
+            '%(user)s. Gerekçe: %(reason)s', carrier=carrier, user=self.env.user.display_name, reason=reason))
 
     def action_print_label(self):
         """Etiket PDF'ini saklanan PNG'lerden yeniden üretir ve indirme eylemi döner (KK-21).
@@ -614,16 +654,16 @@ class CargoShipment(models.Model):
             raise UserError(_('Yalnız oluşturulmuş gönderi iptal edilebilir.'))
         result = self._cargo_provider_call('cancel')
         status = result['status']
-        reason = self._cargo_error_text(result['error_code'], result['error_message'])
         if status == 'ok':
             self.sudo().write({'state': 'cancelled', 'cancelled_at': fields.Datetime.now()})
             self._cargo_commit()
             text = _('Kargo gönderisi iptal edildi. Takip no: %s', self.tracking_ref)
             self._cargo_side_job('transfer', self._cargo_clear_picking_tracking)
         elif status == 'error':
-            text = _('İptal edilemedi: %s', reason)
+            text = _('İptal edilemedi: %s', self._cargo_error_text(result['error_code'], result['error_message']))
         else:
-            text = _('İptal sonucu belirsiz: %s. Gönderi durumu değişmedi; tekrar deneyin.', reason)
+            text = _('İptal sonucu belirsiz: %s. Gönderi durumu değişmedi; tekrar deneyin.',
+                     self._cargo_error_text(result['error_code'], result['error_message']))
         self._cargo_side_job('chatter', self._cargo_post, text)
         self._cargo_commit()
         return {'status': status, 'message': text}
@@ -700,9 +740,10 @@ class CargoShipment(models.Model):
             'count': count if isinstance(count, int) else 0,
         }
 
-    @staticmethod
-    def _cargo_error_text(code, message):
-        return ' '.join(part for part in (code and '[%s]' % code, message) if part) or _('ayrıntı verilmedi')
+    def _cargo_error_text(self, code, message):
+        # NEDEN: staticmethod'da ``_()`` çerçevede env bulamaz, "no translation language detected" uyarısı
+        # basar (05-test B-1); dil kullanıcının env'inden alınır.
+        return ' '.join(part for part in (code and '[%s]' % code, message) if part) or self.env._('ayrıntı verilmedi')
 
     def _cargo_side_job(self, label, func, *args):
         """Yan iş (chatter, ek, transfer): ayrı savepoint; hatası gönderi durumunu bozmaz (K-21)."""

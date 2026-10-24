@@ -7,21 +7,22 @@
     </record>
 
     <!-- Kargo / Yönetici: firma ODP bayrakları, sağlayıcı hesap bilgileri, il/ilçe kodları.
-         base.group_system bu gruba OTOMATİK EKLENMEZ (sanal_pos kalıbı; en az yetki);
+         NEDEN: base.group_system bu gruba OTOMATİK EKLENMEZ (sanal_pos kalıbı; en az yetki);
          atama README'dedir. -->
     <record id="group_cargo_manager" model="res.groups">
         <field name="name">Kargo / Yönetici</field>
         <field name="implied_ids" eval="[(4, ref('group_cargo_user'))]"/>
     </record>
 
-    <!-- Çok şirket: gönderi yalnız seçili şirketlerde görünür (grupsuz = global kural; tüm işlemler). -->
+    <!-- Çok şirket: gönderi yalnız seçili şirketlerde görünür.
+         NEDEN: grupsuz = global kural; diğer kurallarla AND'lenir, tüm işlemleri (okuma dahil) sınırlar. -->
     <record id="rule_cargo_shipment_company" model="ir.rule">
         <field name="name">Kargo gönderisi: şirket ayrımı</field>
         <field name="model_id" ref="model_cargo_shipment"/>
         <field name="domain_force">[('company_id', 'in', company_ids)]</field>
     </record>
 
-    <!-- Gönderi kilitleri (DERSLER: kilit write override'ıyla değil kayıt kuralıyla).
+    <!-- Gönderi kilitleri. NEDEN: kilit write override'ıyla değil kayıt kuralıyla (DERSLER); sudo'suz her yol uyar.
          ACL kullanıcıya tam yetki verir; asıl sınır bu kurallardır. Okuma şirket kuralı dışında serbest.
          Yazma/oluşturma yalnız taslak ve hatalı gönderide; sistem alanları ayrıca modelde env.su ister. -->
     <record id="rule_cargo_shipment_write" model="ir.rule">
@@ -35,7 +36,9 @@
         <field name="perm_unlink" eval="False"/>
     </record>
 
-    <!-- Silme: kullanıcı yalnız taslağı; yönetici taslak ve hatalıyı (kurallar grup içinde OR'lanır). -->
+    <!-- Silme: kullanıcı yalnız taslağı; yönetici taslak ve hatalıyı.
+         DIKKAT: gruplu kurallar kendi aralarında OR'lanır (yönetici kullanıcı grubunu da taşır): bir gruba
+         daha geniş kural eklemek o grubun tüm üyelerinin sınırını genişletir. Daraltma global kural ister. -->
     <record id="rule_cargo_shipment_unlink_user" model="ir.rule">
         <field name="name">Kargo gönderisi: kullanıcı yalnız taslağı siler</field>
         <field name="model_id" ref="model_cargo_shipment"/>

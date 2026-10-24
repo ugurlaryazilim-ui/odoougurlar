@@ -23,6 +23,7 @@ Kargo çekirdeği
         'data/ir_sequence.xml',
         'security/cargo_security.xml',
         'security/ir.model.access.csv',
+        'wizard/cargo_shipment_missing_views.xml',
         'views/delivery_carrier_views.xml',
         'views/res_config_settings_views.xml',
         'views/cargo_area_views.xml',

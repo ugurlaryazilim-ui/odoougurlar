@@ -102,6 +102,26 @@ class DeliveryCarrier(models.Model):
         return [vals and {key: value for key, value in vals.items() if key not in hidden}
                 for vals in super().copy_data(default)]
 
+    # ------------------------------------------------------------------ stock_delivery yolları
+    def send_shipping(self, pickings):
+        # NEDEN: yönetilen firmada ``<tip>_send_shipping`` yok; Odoo None döner ve ``send_to_shipper``
+        # ``None[0]`` ile traceback verir (05-inceleme Ö3). Gönderi yalnız kargo gönderisi formundan açılır
+        # (adres/ODP doğrulaması, mükerrer koruması orada).
+        self.ensure_one()
+        if self._cargo_is_managed():
+            raise UserError(_('"%s" ile gönderi buradan açılamaz. Transferdeki "Kargo gönderisi" düğmesiyle '
+                              'kargo gönderisi formundan gönderin.', self.display_name))
+        return super().send_shipping(pickings)
+
+    def cancel_shipment(self, pickings):
+        # NEDEN: transferin "İptal" düğmesi kargo gönderisini bilmez; firmada iptal edip gönderiyi açık bırakırdı.
+        # DIKKAT: cargo_ups testleri bu metnin 'Kargo gönderisi formundan iptal edin' kısmını arar.
+        self.ensure_one()
+        if self._cargo_is_managed():
+            raise UserError(_('"%s" gönderisi buradan iptal edilemez. Kargo gönderisi formundan iptal edin.',
+                              self.display_name))
+        return super().cancel_shipment(pickings)
+
     @api.depends('delivery_type')
     def _compute_cargo_managed(self):
         for carrier in self:

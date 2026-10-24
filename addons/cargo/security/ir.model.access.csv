@@ -3,4 +3,5 @@ access_delivery_carrier_cargo_user,delivery.carrier cargo user,delivery.model_de
 access_delivery_carrier_cargo_manager,delivery.carrier cargo manager,delivery.model_delivery_carrier,group_cargo_manager,1,1,0,0
 access_cargo_area_cargo_user,cargo.area cargo user,model_cargo_area,group_cargo_user,1,0,0,0
 access_cargo_area_cargo_manager,cargo.area cargo manager,model_cargo_area,group_cargo_manager,1,1,1,1
+access_cargo_shipment_missing_wizard_cargo_manager,cargo.shipment.missing.wizard cargo manager,model_cargo_shipment_missing_wizard,group_cargo_manager,1,1,1,0
 access_cargo_shipment_cargo_user,cargo.shipment cargo user,model_cargo_shipment,group_cargo_user,1,1,1,1

@@ -15,6 +15,10 @@ _CARGO_MARKETPLACES = (
     ('pazarama_order_id', 'Pazarama'), ('n11_order_id', 'N11'), ('flo_order_id', 'Flo'),
     ('idefix_order_id', 'Idefix'), ('pttavm_order_id', 'PttAvm'), ('shopify_order_id', 'Shopify'),
 )
+# NEDEN: shopify_integration transferi ``shopify.order.sale_order_id`` ile tanır; sale.shopify_order_id boş olan
+# (alan eklenmeden önceki, elle bağlanan) siparişte yalnız alana bakmak takip noyu Shopify'a yanlış firmayla
+# gönderirdi (05-inceleme Shopify). (model, siparişe bağlayan alan, ad)
+_CARGO_MARKETPLACE_MODELS = (('shopify.order', 'sale_order_id', 'Shopify'),)
 
 
 class StockPicking(models.Model):
@@ -30,8 +34,11 @@ class StockPicking(models.Model):
     def _compute_cargo_marketplace_name(self):
         for picking in self:
             sale = picking.sudo().sale_id
-            picking.cargo_marketplace_name = next(
-                (name for field, name in _CARGO_MARKETPLACES if field in sale._fields and sale[field]), False)
+            name = next((name for field, name in _CARGO_MARKETPLACES if field in sale._fields and sale[field]), False)
+            if not name and sale:
+                name = next((name for model, field, name in _CARGO_MARKETPLACE_MODELS if model in self.env
+                             and self.env[model].sudo().search_count([(field, '=', sale.id)], limit=1)), False)
+            picking.cargo_marketplace_name = name
 
     def action_cargo_shipment_open(self):
         """Transferin açık kargo gönderisini açar; yoksa teslimat adresinden taslak oluşturur (02-tasarim §4.6)."""

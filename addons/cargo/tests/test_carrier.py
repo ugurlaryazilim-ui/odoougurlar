@@ -73,6 +73,17 @@ class TestCarrierExtension(CargoTestCase):
             'name': 'Kural', 'delivery_type': 'base_on_rule', 'product_id': self._service_product().id})
         self.assertFalse(other.cargo_managed)
 
+    def test_yonetilen_firmada_stock_delivery_gonder_iptal_engellenir(self):
+        """Ö3: yönetilen firmada Odoo'nun send_shipping/cancel_shipment yolları açık hata verir (traceback değil)."""
+        no_picking = self.env['stock.picking']
+        self.assertEqual(self.carrier.send_shipping(no_picking), [])     # yönetilmeyen: Odoo davranışı
+        calls = self.stub_provider('fixed', ops=('send', 'cancel'))
+        with self.assertRaisesRegex(UserError, 'kargo gönderisi formundan gönderin'):
+            self.carrier.send_shipping(no_picking)
+        with self.assertRaisesRegex(UserError, 'Kargo gönderisi formundan iptal edin'):
+            self.carrier.cancel_shipment(no_picking)
+        self.assertEqual(calls, [])
+
     def test_yonetilmeyen_tipte_cargo_call_user_error(self):
         other = self.env['delivery.carrier'].create({
             'name': 'Kural', 'delivery_type': 'base_on_rule', 'product_id': self._service_product().id})

@@ -16,6 +16,55 @@ class TestGuvenlikDt1(PickingBase):
             recipient_name='Ali Veli', phone='05321234567', street='Gercek adres Gul Sk. No:5', state=self.st('06'),
             district='Cankaya', reference=reference), **kw)
 
+    # ------------------------------------------------------------------ Ö3
+    def test_transferden_send_to_shipper_acik_hata(self):
+        """Ö3 PoC: send_to_shipper ups_tr'de None[0] TypeError veriyordu; ``<tip>_send_shipping``'i olan tipte
+        (burada fixed) kargo gönderisi açmadan Odoo'nun kendi gönderimini yapıyordu."""
+        picking = self.make_picking()
+        picking.carrier_id = self.carrier
+        with self.assertRaisesRegex(UserError, 'kargo gönderisi formundan gönderin'):
+            picking.send_to_shipper()
+        with self.assertRaisesRegex(UserError, 'Kargo gönderisi formundan iptal edin'):
+            picking.cancel_shipment()
+        self.assertEqual(self.provider.count('send'), 0)
+        self.assertEqual(self.provider.count('cancel'), 0)
+
+    # ------------------------------------------------------------------ B-1
+    def test_iptal_basarisinda_ceviri_uyarisi_yok(self):
+        """B-1: staticmethod'daki ``_()`` env bulamayıp her iptalde 'no translation language' uyarısı basıyordu."""
+        shipment = self.sent()
+        with self.assertNoLogs('odoo.tools.translate', 'WARNING'):
+            shipment.with_user(self.user).action_cancel()
+            self.assertEqual(shipment._cargo_error_text(False, False), 'ayrıntı verilmedi')
+        self.assertEqual(shipment.state, 'cancelled')
+
+    # ------------------------------------------------------------------ B-2
+    def test_il_ilce_alan_hatasinda_esleme_notu_tekrarlanmaz(self):
+        for over, expected in (({'recipient_district': ''}, 'boş olamaz'),
+                               ({'recipient_state_id': False}, 'Türkiye ili seçin')):
+            with self.subTest(over=over):
+                shipment = self.mk(**over)
+                with self.assertRaisesRegex(UserError, expected) as caught:
+                    shipment._cargo_check_ready()
+                message = str(caught.exception)
+                self.assertNotIn('İlçe belirsiz', message)
+                self.assertNotIn('İl seçilmedi', message)
+        # alan hatası yokken eşleme notu yine söylenir
+        shipment = self.mk(recipient_district='Olmayan Ilce Adi')
+        with self.assertRaisesRegex(UserError, 'İlçe eşleşmedi'):
+            shipment._cargo_check_ready()
+
+    # ------------------------------------------------------------------ Shopify sinyali
+    def test_pazaryeri_kaydi_ile_baglanan_siparis_taninir(self):
+        """05-inceleme: sipariş alanı boşken pazaryeri kaydı (shopify.order.sale_order_id) siparişi işaret eder.
+        Kurulu olmayan modül yerine aynı biçimde siparişe bağlı sale.order.line ile sınanır."""
+        picking = self.make_picking()
+        self.assertFalse(picking.cargo_marketplace_name)
+        with patch('odoo.addons.cargo.models.stock_picking._CARGO_MARKETPLACE_MODELS',
+                   (('olmayan.model', 'x', 'Yok'), ('sale.order.line', 'order_id', 'Shopify'))):
+            picking.invalidate_recordset(['cargo_marketplace_name'])
+            self.assertEqual(picking.cargo_marketplace_name, 'Shopify')
+
     # ------------------------------------------------------------------ D-1
     def test_gonderi_erisilemeyen_sirkete_tasinamaz(self):
         other = self.env['res.company'].create({'name': 'D1 Diger Sirket'})
