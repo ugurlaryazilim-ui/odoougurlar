@@ -31,3 +31,6 @@ from . import test_mail_order_result
 from . import test_mail_order_result_page
 from . import test_mail_order_attempts
 from . import test_mail_order_retry
+from . import test_mail_order_receipt
+from . import test_mail_order_receipt_mail
+from . import test_mail_order_receipt_wizard

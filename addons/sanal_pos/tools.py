@@ -99,6 +99,24 @@ def validate_email(s):
     return len(s) <= _EMAIL_MAX and bool(_EMAIL_RE.match(s))
 
 
+# NEDEN: _EMAIL_RE yalnız boşluk ve ikinci '@' dışlar; virgül/noktalı virgül/ayraç/tırnak alıcı
+# listesi ya da görünen ad açardı. G4-8: \s'e girmeyen denetim karakterleri (\x00 PostgreSQL yazımını
+# patlatır), yön (bidi) denetimi ve sıfır genişlikli karakterler chatter notunda adresi gizler/ters gösterir.
+_RECEIPT_EMAIL_FORBIDDEN = re.compile(
+    r'[,;<>()"\'\x00-\x1f\x7f\u200b-\u200f\u202a-\u202e\u2060\u2066-\u2069\ufeff]')
+# NEDEN: _EMAIL_RE '$' ile biter, '$' sondaki tek '\n'i kabul eder; \Z dizenin gerçek sonudur.
+_RECEIPT_EMAIL_END_RE = re.compile(r'[^@\s]+@[^@\s]+\.[^@\s]+\Z')
+
+
+def valid_receipt_email(s):
+    """Dekont alıcısı: tek, çıplak adres. Otomatik (cron) ve elle (sihirbaz) gönderimin TEK kuralı.
+
+    Çağıranın strip etmesine güvenmez: sondaki satır sonu dahil denetim karakteri reddedilir.
+    """
+    return bool(validate_email(s) and _RECEIPT_EMAIL_END_RE.match(s)
+                and not _RECEIPT_EMAIL_FORBIDDEN.search(s))
+
+
 # ---------------------------------------------------------------- tutar
 def format_try(amount):
     """``Decimal('9000')`` -> ``'9.000,00 TL'`` (kullanıcı dilinden bağımsız)."""

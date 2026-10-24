@@ -129,7 +129,7 @@ class TestPciStatic(SanalPosCase):
         path = os.path.join(os.path.dirname(os.path.dirname(__file__)), '__manifest__.py')
         with open(path, encoding='utf-8') as fh:
             manifest = ast.literal_eval(fh.read())
-        self.assertEqual(manifest['version'], '19.0.1.4.0')
+        self.assertEqual(manifest['version'], '19.0.1.5.0')
 
 
 # ======================================================================================

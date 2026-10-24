@@ -38,6 +38,8 @@ EXPECTED_PUBLIC = {
         'action_open_card_page', 'action_mail_order_close',
         # A3-G3: Tekrar dene / link; aynı metot içi grup denetimi (_check_mail_order_action)
         'action_mail_order_retry', 'action_mail_order_to_link',
+        # A4-G3: dekont; ikisi de metot içi grup + paid denetimi (_check_receipt_action)
+        'action_receipt_download', 'action_receipt_send',
     },
     'sanal.pos.refund': {'write', 'unlink'},
     'sanal.pos.payment.create.wizard': {'create', 'write', 'action_fetch_invoice', 'action_create_link'},
@@ -46,6 +48,7 @@ EXPECTED_PUBLIC = {
                                     'action_create_mail_order'},
     'sanal.pos.payment.resend.wizard': {'default_get', 'action_confirm'},
     'sanal.pos.payment.refund.wizard': {'action_confirm'},
+    'sanal.pos.receipt.send.wizard': {'default_get', 'action_send'},      # A4-G3
     'sanal.pos.payment.review.close.wizard': {'action_confirm'},
     # default_get/create/write: yalnız yönetici ACL'i; aşama/rapor alanlarını atar (D-1, test_refund_migration)
     'sanal.pos.refund.approval.wizard': {'default_get', 'create', 'write', 'action_compare',
@@ -64,7 +67,7 @@ ACTION_ARGS = {
 }
 SP_MODELS = ('sanal.pos.payment', 'sanal.pos.refund', 'sanal.pos.log',
              'sanal.pos.payment.create.wizard', 'sanal.pos.mail.order.wizard',
-             'sanal.pos.payment.resend.wizard',
+             'sanal.pos.payment.resend.wizard', 'sanal.pos.receipt.send.wizard',
              'sanal.pos.payment.refund.wizard', 'sanal.pos.payment.review.close.wizard')
 
 
@@ -242,6 +245,7 @@ class TestRoleMatrix(SecurityCase):
             'sanal.pos.payment.create.wizard': (self.user_sp, self.user_mgr),
             'sanal.pos.mail.order.wizard': (self.user_sp, self.user_mgr),
             'sanal.pos.payment.resend.wizard': (self.user_sp, self.user_mgr),
+            'sanal.pos.receipt.send.wizard': (self.user_sp, self.user_mgr),
             'sanal.pos.payment.refund.wizard': (self.user_mgr,),
             'sanal.pos.payment.review.close.wizard': (self.user_mgr,),
         }

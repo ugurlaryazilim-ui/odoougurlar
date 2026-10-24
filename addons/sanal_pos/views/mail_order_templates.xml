@@ -366,6 +366,7 @@
                                         <dt t-if="card_masked">Kart</dt><dd t-if="card_masked" t-out="card_masked"/>
                                         <dt t-if="tran_ref">İşlem no</dt><dd t-if="tran_ref" t-out="tran_ref"/>
                                         <dt t-if="paid_local">Zaman</dt><dd t-if="paid_local" t-out="paid_local"/>
+                                        <dt t-if="receipt_label">Dekont e-postası</dt><dd t-if="receipt_label" t-out="receipt_label"/>
                                     </dl>
                                 </t>
                                 <t t-elif="view == 'review'">
@@ -419,6 +420,8 @@
                                     </form>
                                     <p t-if="link_wait" class="mo-note" t-out="link_wait"/>
                                     <a t-if="view == 'pending' and refresh_stopped" class="mo-btn mo-btn-secondary" t-att-href="result_url">Yeniden denetle</a>
+                                    <!-- DIKKAT: düz GET bağlantısı; script ve form YOK (CSP değişmez, Aşama 3) -->
+                                    <a t-if="receipt_url" class="mo-btn mo-btn-primary" t-att-href="receipt_url" target="_blank" rel="noopener">Dekontu indir</a>
                                     <a class="mo-btn mo-btn-secondary" t-att-href="record_url">Kayda git</a>
                                 </div>
                             </div>
