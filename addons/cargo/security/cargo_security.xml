@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- Kargo / Kullanıcı: gönderi açar, gönderir, etiket basar -->
+    <record id="group_cargo_user" model="res.groups">
+        <field name="name">Kargo / Kullanıcı</field>
+        <field name="implied_ids" eval="[(4, ref('base.group_user'))]"/>
+    </record>
+
+    <!-- Kargo / Yönetici: firma ODP bayrakları, sağlayıcı hesap bilgileri, il/ilçe kodları.
+         base.group_system bu gruba OTOMATİK EKLENMEZ (sanal_pos kalıbı; en az yetki);
+         atama README'dedir. -->
+    <record id="group_cargo_manager" model="res.groups">
+        <field name="name">Kargo / Yönetici</field>
+        <field name="implied_ids" eval="[(4, ref('group_cargo_user'))]"/>
+    </record>
+</odoo>

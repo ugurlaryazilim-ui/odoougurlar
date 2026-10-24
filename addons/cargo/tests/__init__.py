@@ -7,3 +7,5 @@ from . import test_kabul_akis
 from . import test_kabul_etiket
 from . import test_kabul_picking
 from . import test_kabul_api
+from . import test_settings
+from . import test_carrier

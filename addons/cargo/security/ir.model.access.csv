@@ -1,0 +1,3 @@
+id,name,model_id:id,group_id:id,perm_read,perm_write,perm_create,perm_unlink
+access_delivery_carrier_cargo_user,delivery.carrier cargo user,delivery.model_delivery_carrier,group_cargo_user,1,0,0,0
+access_delivery_carrier_cargo_manager,delivery.carrier cargo manager,delivery.model_delivery_carrier,group_cargo_manager,1,1,0,0

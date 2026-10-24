@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <record id="res_config_settings_view_form_cargo" model="ir.ui.view">
+        <field name="name">res.config.settings.view.form.inherit.cargo</field>
+        <field name="model">res.config.settings</field>
+        <field name="inherit_id" ref="base.res_config_settings_view_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//form" position="inside">
+                <!-- Bu ekranda sır yoktur; sağlayıcı kimlikleri Kargo firması kaydındadır. -->
+                <app data-string="Kargo" string="Kargo" name="cargo" groups="base.group_system">
+                    <block title="Kargo" name="cargo_general">
+                        <field name="cargo_currency_id" invisible="1"/>
+                        <setting string="Varsayılan kargo firması" help="Gönderide firma seçilmezse kullanılır. Yalnız kargo çekirdeğinin yönettiği firmalar listelenir.">
+                            <field name="cargo_default_carrier_id" options="{'no_create': True}"/>
+                        </setting>
+                        <setting string="Varsayılan paket ağırlığı (kg)" help="Gönderide ağırlık verilmezse paket başına kullanılır.">
+                            <field name="cargo_default_weight"/>
+                        </setting>
+                        <setting string="Kapıda ödeme üst sınırı" help="0 = sınırsız. Kapıda ödeme bayrağı kargo firması kaydındadır.">
+                            <field name="cargo_cod_max_amount"/>
+                        </setting>
+                        <setting string="Etiket sayfası" help="10x15 termal (varsayılan) ya da A4. Yazdırırken ölçek %100 / gerçek boyut olmalıdır.">
+                            <field name="cargo_label_size"/>
+                        </setting>
+                    </block>
+                </app>
+            </xpath>
+        </field>
+    </record>
+</odoo>

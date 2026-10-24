@@ -1,0 +1,15 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- Menü kökü. Alt menüler (Gönderiler, Yapılandırma > İl/İlçe Kodları) sonraki görevlerde gelir;
+         alt menüsü olmayan kök Odoo'da görünmez. -->
+    <menuitem id="menu_cargo_root"
+              name="Kargo"
+              groups="cargo.group_cargo_user"
+              sequence="85"/>
+
+    <menuitem id="menu_cargo_config"
+              name="Yapılandırma"
+              parent="menu_cargo_root"
+              groups="cargo.group_cargo_manager"
+              sequence="90"/>
+</odoo>
