@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
-    <!-- Menü kökü. Alt menüler (Gönderiler, Yapılandırma > İl/İlçe Kodları) sonraki görevlerde gelir;
+    <!-- Menü kökü. Gönderiler alt menüsü sonraki görevde gelir;
          alt menüsü olmayan kök Odoo'da görünmez. -->
     <menuitem id="menu_cargo_root"
               name="Kargo"
@@ -12,4 +12,11 @@
               parent="menu_cargo_root"
               groups="cargo.group_cargo_manager"
               sequence="90"/>
+
+    <menuitem id="menu_cargo_area"
+              name="İl/İlçe Kodları"
+              parent="menu_cargo_config"
+              action="action_cargo_area"
+              groups="cargo.group_cargo_manager"
+              sequence="10"/>
 </odoo>

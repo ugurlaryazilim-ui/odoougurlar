@@ -9,3 +9,4 @@ from . import test_kabul_picking
 from . import test_kabul_api
 from . import test_settings
 from . import test_carrier
+from . import test_area

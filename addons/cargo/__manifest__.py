@@ -24,6 +24,7 @@ Kargo çekirdeği
         'security/ir.model.access.csv',
         'views/delivery_carrier_views.xml',
         'views/res_config_settings_views.xml',
+        'views/cargo_area_views.xml',
         'views/cargo_menus.xml',
     ],
     'application': True,
