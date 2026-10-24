@@ -830,7 +830,9 @@ class SanalPosProviderParatika(models.AbstractModel):
         code = str(item.get('transactionStatus') or '').upper()
         kind = _KIND_BY_TYPE.get(ttype, ttype.lower())
         status = _STATUS_BY_CODE.get(code, code.lower())
-        if code and code not in _STATUS_BY_CODE:
+        # NEDEN: WA yalnız REFUND'da görüldü; iade dışı işlemde anlamı doğrulanmadı, uyarı sürer.
+        # Yine de 'pending' eşlenir (ne başarılı ne başarısız sayılır).
+        if code and (code not in _STATUS_BY_CODE or (code == 'WA' and kind != 'refund')):
             # Gerçek "onay bekliyor" kodu böyle yakalanır; gövde/kart verisi loglanmaz (K-12).
             _logger.warning('sanal_pos: tanınmayan transactionStatus %s (transactionType %s, pgTranId %s)',
                             code, ttype, item.get('pgTranId'))

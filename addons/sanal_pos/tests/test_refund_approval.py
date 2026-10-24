@@ -649,13 +649,17 @@ class TestWaiting(ApprovalCase):
         self.sync(payment)
         self.refresh(line)
         self.assertEqual(line.state, 'pending_approval')
+        self.assertFalse(line.provider_ref, "WA ref'siz satıra ref bağlamaz")
+        self.assertEqual(line.provider_status, 'WA', 'ham durum yine görünür')
         self.assertEqual(payment.refunded_amount, 0.0)
 
     def test_wa_satis_islemi_odemeyi_basarili_ya_da_basarisiz_saymaz(self):
         payment = self.paid()
         self.set_query_transactions(tran('WA', 'SALE', '9000.00', 'T-WA'))
-        approved, in_review, pending, failed, others = self.env[PAYMENT]._classify(
-            self.env[PROVIDER].query_status(payment)['transactions'])
+        with self.assertLogs('odoo.addons.sanal_pos', level='WARNING') as logs:
+            transactions = self.env[PROVIDER].query_status(payment)['transactions']
+        self.assertIn('WA', ' '.join(logs.output), 'iade dışı WA uyarı üretir')
+        approved, in_review, pending, failed, others = self.env[PAYMENT]._classify(transactions)
         self.assertEqual((approved, in_review, failed, others), ([], [], set(), []))
         self.assertEqual(len(pending), 1, 'WA satışı bekleyen sayılır')
 
