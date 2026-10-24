@@ -18,13 +18,15 @@ Kargo çekirdeği
     # NEDEN: stock_delivery -> delivery + sale_stock; picking'deki carrier_id/carrier_tracking_ref
     # ve "Send to Shipper" akışı oradadır (bkz. KARARLAR K-20).
     'depends': ['mail', 'stock_delivery'],
-    # Sıra: security xml -> csv -> görünümler -> menüler.
+    # Sıra: veri -> security xml -> csv -> görünümler -> menüler.
     'data': [
+        'data/ir_sequence.xml',
         'security/cargo_security.xml',
         'security/ir.model.access.csv',
         'views/delivery_carrier_views.xml',
         'views/res_config_settings_views.xml',
         'views/cargo_area_views.xml',
+        'views/cargo_shipment_views.xml',
         'views/cargo_menus.xml',
     ],
     'application': True,

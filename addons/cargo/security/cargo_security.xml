@@ -13,4 +13,41 @@
         <field name="name">Kargo / Yönetici</field>
         <field name="implied_ids" eval="[(4, ref('group_cargo_user'))]"/>
     </record>
+
+    <!-- Gönderi kilitleri (DERSLER: kilit write override'ıyla değil kayıt kuralıyla).
+         ACL kullanıcıya tam yetki verir; asıl sınır bu kurallardır. Okuma serbest (kural yok).
+         Yazma/oluşturma yalnız taslak ve hatalı gönderide; sistem alanları ayrıca modelde env.su ister. -->
+    <record id="rule_cargo_shipment_write" model="ir.rule">
+        <field name="name">Kargo gönderisi: yalnız taslak/hatalı düzenlenir</field>
+        <field name="model_id" ref="model_cargo_shipment"/>
+        <field name="groups" eval="[(4, ref('group_cargo_user'))]"/>
+        <field name="domain_force">[('state', 'in', ('draft', 'failed'))]</field>
+        <field name="perm_read" eval="False"/>
+        <field name="perm_write" eval="True"/>
+        <field name="perm_create" eval="True"/>
+        <field name="perm_unlink" eval="False"/>
+    </record>
+
+    <!-- Silme: kullanıcı yalnız taslağı; yönetici taslak ve hatalıyı (kurallar grup içinde OR'lanır). -->
+    <record id="rule_cargo_shipment_unlink_user" model="ir.rule">
+        <field name="name">Kargo gönderisi: kullanıcı yalnız taslağı siler</field>
+        <field name="model_id" ref="model_cargo_shipment"/>
+        <field name="groups" eval="[(4, ref('group_cargo_user'))]"/>
+        <field name="domain_force">[('state', '=', 'draft')]</field>
+        <field name="perm_read" eval="False"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="True"/>
+    </record>
+
+    <record id="rule_cargo_shipment_unlink_manager" model="ir.rule">
+        <field name="name">Kargo gönderisi: yönetici taslak ve hatalıyı siler</field>
+        <field name="model_id" ref="model_cargo_shipment"/>
+        <field name="groups" eval="[(4, ref('group_cargo_manager'))]"/>
+        <field name="domain_force">[('state', 'in', ('draft', 'failed'))]</field>
+        <field name="perm_read" eval="False"/>
+        <field name="perm_write" eval="False"/>
+        <field name="perm_create" eval="False"/>
+        <field name="perm_unlink" eval="True"/>
+    </record>
 </odoo>

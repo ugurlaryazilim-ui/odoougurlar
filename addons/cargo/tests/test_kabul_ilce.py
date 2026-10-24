@@ -180,9 +180,9 @@ class TestKabulIlceEsleme(IlceBase):
         self.assertNoMatch('06', 'Cankayaa')
         self.assertNoMatch('06', 'Canka')
         self.assertNoMatch('35', 'Beyda')
-        # bosluk ile bolunmez: "Merkez Efendi" MERKEZ olmaz, "Pamuk Kale" KALE olmaz
+        # bosluk ile bolunmez: "Merkez Efendi" MERKEZ olmaz, "Pamuk Kalee" KALE olmaz (boşluk normalize'ı "Pamuk Kale"yi PAMUKKALE yapar)
         self.assertMatches('20', 'Merkez Efendi', 'MERKEZEFENDI')
-        self.assertNoMatch('20', 'Pamuk Kale')
+        self.assertNoMatch('20', 'Pamuk Kalee')
         self.assertNoMatch('06', 'Eski Cankaya Mahallesi')
 
     def test_tam_ad_ile_alt_dize_ciftleri(self):
