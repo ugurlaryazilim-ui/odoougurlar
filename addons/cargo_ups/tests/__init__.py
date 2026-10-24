@@ -7,3 +7,4 @@ from . import test_ups_setup
 from . import test_ups_area
 from . import test_ups_soap
 from . import test_ups_provider
+from . import test_ups_carrier_guard

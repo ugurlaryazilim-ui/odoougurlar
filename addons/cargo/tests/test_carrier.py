@@ -117,3 +117,84 @@ class TestCarrierExtension(CargoTestCase):
             'name': 'Varsayilan', 'delivery_type': 'fixed', 'integration_level': 'rate',
             'product_id': self._service_product().id})
         self.assertEqual([fresh[name] for name in COD_FIELDS], [False, True, False, False])
+
+
+@tagged('post_install', '-at_install', 'cargo')
+class TestCarrierProtectedFields(CargoTestCase):
+    """05-guvenlik O-1: yönetilen firmanın korunan alanlarını yalnız Kargo / Yönetici yazar (stok/satış yöneticisi değil)."""
+
+    @classmethod
+    def _kur(cls):
+        super()._kur()
+        cls.stock_manager = cls.mk_user('o1_stok', 'base.group_user,stock.group_stock_manager')
+        cls.sale_manager = cls.mk_user('o1_satis', 'base.group_user,sales_team.group_sale_manager')
+        cls.stock_cargo_manager = cls.mk_user(
+            'o1_stok_kargo', 'base.group_user,stock.group_stock_manager,cargo.group_cargo_manager')
+        cls.free = cls.make_carrier('Serbest kural', ptype='base_on_rule')
+
+    def setUp(self):
+        super().setUp()
+        # NEDEN: CargoTestCase sağlayıcı yamalamaz; 'fixed' ancak <tip>_cargo_send varken yönetilendir.
+        self.stub_provider('fixed', ops=('send',))
+
+    def protected_values(self):
+        return {
+            'prod_environment': True, 'delivery_type': 'base_on_rule', 'integration_level': 'rate',
+            'active': False, 'company_id': self.env.company.id,
+            'product_id': self.env['product.product'].create({'name': 'Baska hizmet', 'type': 'service'}).id,
+        }
+
+    def test_korunan_alanlar_stok_ve_satis_yoneticisi_yazamaz(self):
+        for user in (self.stock_manager, self.sale_manager):
+            for field, value in self.protected_values().items():
+                with self.subTest(user=user.login, field=field), self.assertRaises(AccessError):
+                    self.carrier.with_user(user).write({field: value})
+        self.assertFalse(self.carrier.prod_environment)
+        self.assertTrue(self.carrier.active)
+        self.assertEqual(self.carrier.delivery_type, 'fixed')
+        # korunmayan alan (ad) serbest kalır
+        self.carrier.with_user(self.stock_manager).write({'name': 'KK Kargo (yeni ad)'})
+
+    def test_korunan_alanlar_kargo_yoneticisi_yazar(self):
+        self.carrier.with_user(self.manager).write({'prod_environment': True})
+        self.assertTrue(self.carrier.prod_environment)
+        self.carrier.with_user(self.stock_cargo_manager).write({'active': False})
+        self.assertFalse(self.carrier.active)
+
+    def test_yonetilen_firma_acma_silme_yalniz_kargo_yoneticisi(self):
+        vals = {'name': 'Yeni yonetilen', 'delivery_type': 'fixed', 'integration_level': 'rate',
+                'product_id': self._service_product().id}
+        for user in (self.stock_manager, self.sale_manager):
+            with self.subTest(user=user.login):
+                with self.assertRaises(AccessError):
+                    self.env['delivery.carrier'].with_user(user).create(dict(vals))
+                with self.assertRaises(AccessError):
+                    self.carrier_y.with_user(user).unlink()
+        # yönetilmeyen firmayı yönetilen tipe çevirmek de korunur
+        with self.assertRaises(AccessError):
+            self.free.with_user(self.stock_manager).write({'delivery_type': 'fixed'})
+        created = self.env['delivery.carrier'].with_user(self.stock_cargo_manager).create(dict(vals))
+        created.with_user(self.stock_cargo_manager).unlink()
+        self.assertFalse(created.exists())
+
+    def test_yonetilmeyen_firma_serbest(self):
+        self.free.with_user(self.stock_manager).write({'prod_environment': True, 'active': False})
+        self.assertFalse(self.free.active)
+        other = self.env['delivery.carrier'].with_user(self.stock_manager).create({
+            'name': 'Serbest 2', 'delivery_type': 'base_on_rule', 'product_id': self._service_product().id})
+        other.unlink()
+        self.assertFalse(other.exists())
+
+    def test_stok_yoneticisi_firma_cogaltabilir_gizli_alan_kopyalanmaz(self):
+        """groups'lu alanlar (ODP bayrakları) üyesi olmayanın kopyasını AccessError'a düşürmez; varsayılanı alır."""
+        self.free.sudo().write({'cargo_cod_enabled': True, 'cargo_cod_allow_card': True})
+        copy = self.free.with_user(self.stock_manager).copy()
+        self.assertEqual(copy.delivery_type, 'base_on_rule')
+        self.assertEqual([copy.sudo()[name] for name in COD_FIELDS], [False, True, False, False])
+        # yetkili kullanıcının kopyası bayrakları taşır
+        copy = self.carrier.with_user(self.stock_cargo_manager).copy()
+        self.assertEqual(copy.delivery_type, 'fixed')
+        self.assertTrue(copy.sudo().cargo_cod_enabled)
+        # yönetilen firmanın kopyası yönetilen firma açmaktır (O-1)
+        with self.assertRaises(AccessError):
+            self.carrier.with_user(self.stock_manager).copy()

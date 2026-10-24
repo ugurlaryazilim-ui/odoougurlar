@@ -9,9 +9,14 @@ isteğe bağlı ``<tip>_cargo_cod_code``. ``<tip>_cargo_send`` tanımlı olan fi
 (Odoo ``delivery``'nin ``<tip>_send_shipping`` kalıbı).
 """
 from odoo import _, api, fields, models
-from odoo.exceptions import UserError, ValidationError
+from odoo.exceptions import AccessError, UserError, ValidationError
 
 _CARGO_OPS = ('send', 'cancel', 'find', 'track', 'cod_code')
+# NEDEN: yönetilen firmada bu alanlar faturalanan hesabı, test/canlı ucunu ve gönderinin açılıp açılamayacağını
+# belirler; çekirdek ACL stok/satış yöneticisine de delivery.carrier yazımı verir (05-guvenlik O-1).
+# Sağlayıcıya özgü hizmet alanları sağlayıcı eklentisinde ``groups`` ile korunur.
+_CARGO_PROTECTED_FIELDS = frozenset((
+    'prod_environment', 'delivery_type', 'integration_level', 'active', 'company_id', 'product_id'))
 
 
 class DeliveryCarrier(models.Model):
@@ -48,6 +53,54 @@ class DeliveryCarrier(models.Model):
         """Yönetilen ``delivery_type`` değerleri (varsayılan firma domain'i için)."""
         return [value for value, _label in self._fields['delivery_type'].selection
                 if hasattr(self, f'{value}_cargo_send')]
+
+    @api.model
+    def _cargo_type_is_managed(self, delivery_type):
+        return bool(delivery_type) and hasattr(self, f'{delivery_type}_cargo_send')
+
+    def _cargo_check_protected_write(self, vals=None):
+        """Yönetilen firmanın korunan alanlarına (ya da kaydın kendisine) yalnız Kargo / Yönetici dokunur.
+
+        ``vals`` None: silme. DIKKAT: super()'den ÖNCE çağrılır (DERSLER 4); env.su (kurulum verisi) muaftır.
+        """
+        if self.env.su or self.env.user.has_group('cargo.group_cargo_manager'):
+            return
+        if vals is not None and _CARGO_PROTECTED_FIELDS.isdisjoint(vals):
+            return
+        managed = any(carrier._cargo_is_managed() for carrier in self) or (
+            vals is not None and self._cargo_type_is_managed(vals.get('delivery_type')))
+        if managed:
+            raise AccessError(_(
+                'Kargo firmasının test/canlı, tip, entegrasyon, etkinlik, şirket ve ürün ayarlarını yalnız '
+                '"Kargo / Yönetici" değiştirebilir.'))
+
+    @api.model_create_multi
+    def create(self, vals_list):
+        for vals in vals_list:
+            delivery_type = vals.get('delivery_type') or self.default_get(['delivery_type']).get('delivery_type')
+            if self._cargo_type_is_managed(delivery_type):
+                self.browse()._cargo_check_protected_write(dict(vals, delivery_type=delivery_type))
+        return super().create(vals_list)
+
+    def write(self, vals):
+        self._cargo_check_protected_write(vals)
+        return super().write(vals)
+
+    def unlink(self):
+        self._cargo_check_protected_write()
+        return super().unlink()
+
+    def copy_data(self, default=None):
+        # NEDEN: copy_data copy=True olan her alanı okur; groups'lu alanlar (ODP bayrakları, sağlayıcı hizmet
+        # alanları) üyesi olmayan stok/satış yöneticisinde AccessError verip HİÇBİR firmanın çoğaltılmasına
+        # izin vermiyordu. Okuyamadığı alan kopyada atlanır; yeni kayıt alanın varsayılanını (güvenli) alır.
+        default = dict(default or {})
+        hidden = [name for name, field in self._fields.items()
+                  if field.copy and field.groups and name not in default and not self._has_field_access(field, 'read')]
+        # yer tutucu: copy_data default'taki alanı okumaz; sonra vals'tan çıkarılır
+        default.update(dict.fromkeys(hidden, False))
+        return [vals and {key: value for key, value in vals.items() if key not in hidden}
+                for vals in super().copy_data(default)]
 
     @api.depends('delivery_type')
     def _compute_cargo_managed(self):
