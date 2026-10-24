@@ -103,3 +103,13 @@ shipment = env['cargo.shipment'].create_and_send(
 ## 11. Yeni sağlayıcı eklemek
 
 Çekirdeğe dokunmadan: `delivery.carrier.delivery_type`'a `selection_add` + `<tip>_cargo_send(shipment)`, `_cargo_cancel`, `_cargo_find`, isteğe bağlı `_cargo_cod_code(method)`; ayrıca kendi `cargo.area` verisi (`provider='<tip>'`). Dönüş sözlükleri ve durum değerleri `models/delivery_carrier.py` ve `cargo.shipment` docstring'lerindedir. Sağlayıcı istisna fırlatmaz; çekirdek yine de beklenmeyen istisnayı yakalar (send/cancel: `uncertain`, find: `error`). Hata metni sırlardan temizlenerek döndürülmelidir.
+
+## 12. Bilinen sınırlar
+
+- Gönderi formunda partner seçmek alıcı adı/telefon/adresi doldurmaz; bunlar yalnız transferden açılışta dolar, formda elle yazılır (CARGO-B5).
+- İlçe "Diğer ad" eklenince, daha önce eşleşemeyen taslaklar kendiliğinden yeniden eşlenmez; taslak açılıp **Kargo ilçesi** yeniden seçilir (CARGO-B4).
+- Belirsiz iptali bekleyen `created` gönderide "Etiketi Bas" açık kalır; kargo firmasında iptal edilmiş olabileceğinden o etiketi basmadan önce firma panelinden kontrol edin (CARGO-B6).
+- Transfer formundaki Kargo gönderisi düğmeleri yetkisiz kullanıcıya da görünür; yetki tıklamada denetlenir ve hata verir (CARGO-B1).
+- Pazaryeri modülleri `_CARGO_MARKETPLACES` listesiyle tanınır; yeni pazaryeri modülü eklenince liste güncellenmelidir (CARGO-B2).
+- Kapıda ödeme üst sınırı varsayılanı 0 (sınırsız) kalır; canlıdan önce sınır girilmelidir (CARGO-B3, 3. bölüm).
+- Takip (durum güncelleme) bu sürümde yoktur (A2).
