@@ -22,14 +22,15 @@ class PickingBase(CargoKabulCase):
     def _kur(cls):
         super()._kur()
         cls.product = cls.env['product.product'].create({'name': 'KK Urun', 'type': 'consu', 'list_price': 100.0})
-        cls.cust = cls.make_partner('Ayse Musteri', mobile='05321234567', phone='03121112233')
-        cls.cust_phone_only = cls.make_partner('Fatma Telefon', mobile=False, phone='03129998877')
+        # NEDEN: Odoo 19 res.partner'da 'mobile' alani yok; telefon yalniz 'phone' alanindan gelir.
+        cls.cust = cls.make_partner('Ayse Musteri', phone='05321234567')
+        cls.cust_landline = cls.make_partner('Fatma Telefon', phone='03129998877')
 
     @classmethod
-    def make_partner(cls, name, mobile=False, phone=False, **kw):
+    def make_partner(cls, name, phone=False, **kw):
         vals = {'name': name, 'street': 'Ataturk Mah. Gul Sk. No:5', 'street2': 'D:3', 'city': 'Cankaya',
                 'state_id': cls.st('06').id, 'country_id': cls.tr.id, 'zip': '06100',
-                'mobile': mobile, 'phone': phone, 'email': 'musteri@example.com'}
+                'phone': phone, 'email': 'musteri@example.com'}
         vals.update(kw)
         return cls.env['res.partner'].create(vals)
 
@@ -76,8 +77,8 @@ class TestKabulTransferGonderi(PickingBase):
         self.assertEqual(picking.sudo().cargo_shipment_ids, shipment)
         self.assertFalse(picking.sudo().cargo_marketplace_name, 'pazaryeri siparisi degil')
 
-    def test_mobil_yoksa_telefon(self):
-        picking = self.make_picking(partner=self.cust_phone_only)
+    def test_ortagin_telefonu_tasinir(self):
+        picking = self.make_picking(partner=self.cust_landline)
         self.open_action(picking)
         self.assertEqual(self.shipment_of(picking).recipient_phone, '03129998877')
 

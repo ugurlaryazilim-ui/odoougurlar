@@ -180,6 +180,8 @@ class TestKabulGenisletilebilirlik(CargoKabulCase):
     def test_iki_saglayici_uctan_uca(self):
         carrier_b = self.make_carrier('Ikinci saglayici', ptype='base_on_rule')
         area_b = self.make_area('06', 'CANKAYA', provider='base_on_rule')
+        # NEDEN: gonderici dogrulamasi (V-3) gondericinin ilcesini ikinci saglayicinin verisinde de arar.
+        self.make_area('34', 'KADIKOY', provider='base_on_rule')
         self.assertNotEqual(area_b.area_code, self.area_cankaya.area_code)
         a = self.sent()
         b = self.sent(carrier_id=carrier_b.id)
@@ -199,5 +201,6 @@ class TestKabulGenisletilebilirlik(CargoKabulCase):
         """Bir saglayicinin metotlari digerinin firmasi icin cagrilmaz."""
         carrier_b = self.make_carrier('Ikinci saglayici', ptype='base_on_rule')
         self.make_area('06', 'CANKAYA', provider='base_on_rule')
+        self.make_area('34', 'KADIKOY', provider='base_on_rule')   # gonderici ilcesi (V-3)
         self.sent(carrier_id=carrier_b.id)
         self.assertEqual({c['carrier_id'] for c in self.provider.calls}, {carrier_b.id})

@@ -60,11 +60,24 @@ class TestCargoSettings(CargoTestCase):
         self.Settings.with_user(self.admin).create({'cargo_default_carrier_id': False}).set_values()
         self.assertFalse(self.company.cargo_default_carrier_id)
 
+    def _firma_domaini_tipleri(self, model):
+        field = self.env[model].fields_get(['cargo_default_carrier_id'])['cargo_default_carrier_id']
+        (name, op, types), = field['domain']
+        self.assertEqual((name, op), ('delivery_type', 'in'), model)
+        return set(types)
+
     def test_varsayilan_firma_domaini_yonetilenlerle_sinirli(self):
+        # NEDEN: kurulu saglayici modulleri (or. cargo_ups -> ups_tr) domaine kendiliginden girer; test
+        # kurulu saglayicilardan bagimsiz kalsin diye 'fixed' stub'indan ONCE/SONRA farki dogrulanir.
+        models = ('res.company', 'res.config.settings')
+        before = {model: self._firma_domaini_tipleri(model) for model in models}
         self.stub_provider('fixed', ops=('send',))
-        for model in ('res.company', 'res.config.settings'):
-            domain = self.env[model].fields_get(['cargo_default_carrier_id'])['cargo_default_carrier_id']['domain']
-            self.assertEqual(domain, [('delivery_type', 'in', ['fixed'])], model)
+        for model in models:
+            after = self._firma_domaini_tipleri(model)
+            self.assertEqual(after, before[model] | {'fixed'}, model)
+            # stub'siz tip ('base_on_rule', kendi sagl. modulu yoksa) domaine girmez
+            if 'base_on_rule' not in before[model]:
+                self.assertNotIn('base_on_rule', after, model)
 
     def test_sirket_degerleri_dogrulanir(self):
         with self.assertRaises(ValidationError):
