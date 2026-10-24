@@ -530,7 +530,7 @@ class TestRejected(ApprovalCase):
 class TestWaiting(ApprovalCase):
 
     def test_kk7_bekleyen_durumlar_satiri_beklemede_tutar(self):
-        for status in ('IP', 'MR', 'CA', 'VD', 'XY'):
+        for status in ('IP', 'MR', 'CA', 'VD', 'WA', 'XY'):
             with self.subTest(durum=status):
                 payment, line = self.pending_payment(2500.0, ref='R-W-%s' % status,
                                                      invoice_no='WAIT-%s' % status)
@@ -603,6 +603,61 @@ class TestWaiting(ApprovalCase):
         self.assertFalse([r for r in records if 'tanınmayan' in r], records)
         _line.invalidate_recordset()
         self.assertEqual(_line.provider_status, 'IP', 'tanınan kod da ham durum olarak saklanır')
+
+    # WA: canlıda finans onayındaki REFUND için görüldü (Paratika belgesinde yok; "onay bekliyor" yorumu)
+    def test_wa_refund_satiri_onay_bekliyor_kalir_uyari_yok(self):
+        payment, line = self.pending_payment(2500.0, ref='R-WA1')
+        self.query(payment, rt('WA', 2500.0, 'R-WA1'))
+        with self.capture_logs() as records:
+            self.sync(payment)
+        self.assertFalse([r for r in records if 'tanınmayan' in r], records)
+        self.refresh(line)
+        self.assertEqual((line.state, line.provider_status), ('pending_approval', 'WA'))
+        self.assertEqual(payment.state, 'refund_pending')
+        self.assertEqual(payment.refunded_amount, 0.0)
+        self.assertEqual(line.amount, 2500.0)
+        self.assertFalse(line.error_code or line.error_message)
+        self.assertEqual(len(self.lines(payment)), 1)
+
+    def test_wa_sonra_ap_gelince_done(self):
+        payment, line = self.pending_payment(2500.0, ref='R-WA2')
+        self.query(payment, rt('WA', 2500.0, 'R-WA2'))
+        self.sync(payment)
+        self.refresh(line)
+        self.assertEqual(line.state, 'pending_approval')
+        self.query(payment, rt('AP', 2500.0, 'R-WA2'))
+        self.sync(payment)
+        self.refresh(line)
+        self.assertEqual((line.state, line.provider_status), ('done', 'AP'))
+        self.assertEqual(payment.state, 'partial_refund')
+        self.assertEqual(payment.refunded_amount, 2500.0)
+
+    def test_wa_sonra_red_gelince_rejected(self):
+        payment, line = self.pending_payment(2500.0, ref='R-WA3')
+        self.query(payment, rt('WA', 2500.0, 'R-WA3'))
+        self.sync(payment)
+        self.query(payment, rt('FA', 2500.0, 'R-WA3', errorCode='ERR10153'))
+        self.sync(payment)
+        self.refresh(line)
+        self.assertEqual(line.state, 'rejected')
+        self.assertEqual(payment.state, 'paid')
+        self.assertEqual(payment.refunded_amount, 0.0)
+
+    def test_wa_ref_siz_satirda_ref_bagla_ya_da_bekle_done_olmaz(self):
+        payment, line = self.pending_payment(2500.0, ref=None)
+        self.query(payment, rt('WA', 2500.0, 'R-WA4'))
+        self.sync(payment)
+        self.refresh(line)
+        self.assertEqual(line.state, 'pending_approval')
+        self.assertEqual(payment.refunded_amount, 0.0)
+
+    def test_wa_satis_islemi_odemeyi_basarili_ya_da_basarisiz_saymaz(self):
+        payment = self.paid()
+        self.set_query_transactions(tran('WA', 'SALE', '9000.00', 'T-WA'))
+        approved, in_review, pending, failed, others = self.env[PAYMENT]._classify(
+            self.env[PROVIDER].query_status(payment)['transactions'])
+        self.assertEqual((approved, in_review, failed, others), ([], [], set(), []))
+        self.assertEqual(len(pending), 1, 'WA satışı bekleyen sayılır')
 
     def test_kk8_bulunamadi_hicbir_sayi_ve_yasta_basarisiz_yapmaz(self):
         payment, line = self.pending_payment(2500.0, ref='R-N1')
@@ -1323,9 +1378,16 @@ class TestProviderNormalize(ApprovalCase):
         self.assertIn('XY', joined)
         self.assertNotIn('9876', joined)
 
+    def test_wa_pending_olarak_eslenir_ham_kod_korunur(self):
+        for ttype, kind in (('REFUND', 'refund'), ('SALE', 'sale'), ('VOID', 'void')):
+            with self.subTest(tur=ttype):
+                result = self.norm(tran('wa', ttype, '10.00', 'R-1'))
+                self.assertEqual((result['kind'], result['status'], result['raw_status']),
+                                 (kind, 'pending', 'WA'))
+
     def test_kk7_taninan_kodlar_warning_uretmez(self):
         with self.capture_logs() as records:
-            for code in ('AP', 'FA', 'CA', 'IP', 'MR', 'VD'):
+            for code in ('AP', 'FA', 'CA', 'IP', 'MR', 'VD', 'WA'):
                 self.norm(tran(code, 'REFUND', '10.00', 'R-1'))
         self.assertFalse([r for r in records if 'tanınmayan' in r], records)
 

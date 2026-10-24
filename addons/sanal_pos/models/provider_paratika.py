@@ -159,6 +159,11 @@ _STATUS_BY_CODE = {
     'FA': 'failed',
     'CA': 'cancelled',
     'IP': 'pending',
+    # NEDEN: WA resmi Paratika belgesinde transactionStatus olarak yok (yalnız IP/CA/FA/AP/VD/MR).
+    # Canlı QUERYTRANSACTION'da finans onayındaki REFUND için görüldü; "Waiting Approval" olarak
+    # yorumlandı (doğrulanmadı). Güvenli taraf: sonuçsuz/bekleyen (IP gibi); ne onay ne red sayılır.
+    # Ham kod raw_status'ta 'WA' olarak kalır. Bilinmeyen kodlar yine uyarı verir.
+    'WA': 'pending',
     'MR': 'review',
     'VD': 'voided',
 }
