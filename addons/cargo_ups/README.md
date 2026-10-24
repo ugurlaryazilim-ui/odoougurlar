@@ -27,11 +27,15 @@ Hizmet alanları (hizmet, ödeme türü, paket türü, SMS) da faturayı belirle
 
 Ayar ekranına (Ayarlar > Kargo) sır girilmez; yalnız varsayılan firma seçilir. Hangi **tüzel kişiliğin** UPS hesabının girildiği (şirket/hesap eşleşmesi) canlıdan önce yöneticiyle teyit edilmelidir.
 
+**Firma şirketler arasında paylaşımlıdır (D-4).** Hazır "UPS Türkiye" kaydında şirket (`company_id`) boştur; alan teslimat ürününün şirketinden gelir, ürün de şirketsizdir. Çok şirketli veritabanında **her şirketin gönderisi aynı UPS hesabıyla açılır ve aynı hesaba faturalanır**. Gönderici adı ve adresi ise gönderiyi açan şirketten gelir. Canlıda birden çok şirket varsa duman testinden önce firmaya ve teslimat ürününe hesabın sahibi olan şirketi atayın. Başka şirket UPS kullanacaksa ona kendi hesabıyla ayrı bir UPS firması açın.
+
 ## 3. Test ucu / canlı bayrağı (K-26)
 
 - Firmadaki **Üretim ortamı (`prod_environment`)** bayrağı: **kapalı = UPS test ucu** (`wsCreateShipmenttest`), **açık = canlı**. Kurulumda kapalı gelir; canlıya geçiş yöneticinin elle yaptığı bir eylemdir ve duman testi (6. bölüm) bittikten sonra yapılır.
 - Test ucu yalnız oluştur / iptal / oturum içindir. UPS'in **sorgu (takip) servisinin test ucu yoktur**: test modunda "referansla sorgu" UPS'e **gitmez** ve "bulunamadı" döner. Test gönderisi ücretsiz kabul edilir; 15 dk kuralı yine uygulanır.
-- Test gönderisi formda/listede **TEST** işaretlidir, transfere takip numarası yazılmaz. Test ucunun canlı kimlik bilgisini kabul edip etmediği canlıda ilk adımdır (CD-1).
+- Test gönderisi formda/listede **TEST** işaretlidir. Test ucunun canlı kimlik bilgisini kabul edip etmediği canlıda ilk adımdır (CD-1).
+- **Test modunda transfere hiçbir şey yazılmaz (K-26):** ne kargo firması (`carrier_id`) ne takip numarası. Transferin "Takip numarası" alanı boş kalır ve pazaryerine/Shopify'a takip gitmez. Bu bilinçlidir: test barkodu gerçek değildir, müşteriye gitmemelidir. Gönderi, takip numarası ve etiket yalnız gönderi kaydında (Kargo menüsü ve transferdeki gönderi bağlantısı) görünür. Duman testinde "transferde takip no yok" bir hata **değildir**; takip no yalnız canlı gönderide yazılır. Canlıda da pazaryeri transferine yazılmaz.
+- Canlı gönderi iptal edilince transferdeki takip numarası silinir; kargo firması (`carrier_id`) transferde kalabilir.
 - **DB kopyasında** firmanın bayrağını kapatın (kopya canlı UPS'e değil test ucuna gitmeli).
 
 ## 4. Kapıda ödeme (ODP)
@@ -60,7 +64,7 @@ Ayar ekranına (Ayarlar > Kargo) sır girilmez; yalnız varsayılan firma seçil
 
 ## 7. Deploy ve geri alma
 
-Deploy adımları `addons/cargo/README.md` 8. bölümdedir (canlıda yeni modül: önce `-i cargo,cargo_ups`; üretim compose'u bunları otomatik kurmaz). Özet: yedek + rollback etiketi → redeploy → `-i cargo,cargo_ups` → grup atama → UPS hesabı → duman testi → bayrağı canlıya al. **Canlıda UPS'e ilk çağrıdan önce sunucunun çıkış IP'sinin UPS izin listesinde olması gerekiyorsa ekletin (CD-2).**
+Deploy adımları `addons/cargo/README.md` 8. bölümdedir (canlıda yeni modül: önce `-i cargo,cargo_ups`; üretim compose'u bunları otomatik kurmaz). Özet: yedek + rollback etiketi → redeploy → `-i cargo,cargo_ups` → grup atama → UPS hesabı → (çok şirketse) firmaya şirket ata (D-4, 2. bölüm) → duman testi → bayrağı canlıya al. **Canlıda UPS'e ilk çağrıdan önce sunucunun çıkış IP'sinin UPS izin listesinde olması gerekiyorsa ekletin (CD-2).**
 
 Geri alma sırası: (1) firmada `prod_environment` kapat / firmayı arşivle; (2) gönderi listesini CSV dışa aktar, **önce `cargo_ups`, sonra `cargo`** kaldır (`ups_tr` firmaları: gönderi kaydı varsa `fixed` + arşivli, yoksa hazır UPS kaydı silinir ve transferlerde `carrier_id` boşalır); (3) git revert ancak modüller kaldırıldıktan sonra; (4) UPS'te açık kalan gönderileri UPS panelinden iptal et.
 
@@ -70,7 +74,7 @@ Kullanıcıyla birlikte yapılır; her satır geçince işaretlenir. Önce firma
 
 | # | Doğrulanacak | Durum | Nasıl bakılır |
 |---|---|---|---|
-| CD-1 | Test ucu canlı kimlikle oturum açıyor mu; oluştur + iptal çalışıyor mu | Açık | Bayrak kapalı: ODP'siz 1 gönderi oluştur, hemen iptal et. Test ucu kimliği reddederse UPS'ten test hesabı iste ya da canlıda ODP'siz 1 gönderi oluşturup hemen iptal et (iptalin ücretlendirilip ücretlendirilmediğini UPS'e sor). |
+| CD-1 | Test ucu canlı kimlikle oturum açıyor mu; oluştur + iptal çalışıyor mu; **telefon biçimi** | Açık | Bayrak kapalı: ODP'siz 1 gönderi oluştur, hemen iptal et. Test ucu kimliği reddederse UPS'ten test hesabı iste ya da canlıda ODP'siz 1 gönderi oluşturup hemen iptal et (iptalin ücretlendirilip ücretlendirilmediğini UPS'e sor). **Telefon biçimi:** telefon rakamlara indirgenip olduğu gibi gider; `+90 532 123 45 67` → `905321234567` (12 hane, 90 önekli), `0532…` → `05321234567`. Cep numarası cep alanına, diğerleri sabit alana gider. İlk gönderide UPS panelinde alıcı ve gönderici telefonunun doğru göründüğünü (Alıcıya SMS açıksa SMS'in de gittiğini) kontrol et; UPS 10 hane (`5321234567`) isterse düzeltme tek yerdedir (`models/delivery_carrier.py` `_phones`). |
 | CD-2 | Sunucu IP'si UPS izin listesine alınmalı mı | Açık | İlk çağrıda bağlantı/yetki hatası geliyorsa IP'yi UPS'e bildir. |
 | CD-3 | Kuruşlu ODP tutarı panelde aynen görünüyor mu | Kısmen (noktalı ondalık canlıda kabul ediliyor) | İlk ODP gönderisi (ör. 1249,90): UPS panelinde kuruşu karşılaştır. |
 | CD-4 | ODP ödeme kodları: nakit=1 doğrulandı; kart=3, çek=2 açık | Nakit kapandı; kart/çek açık | Kart/çek gerekirse tek gönderiyle panelde doğrula, sonra firma formundan aç. |
