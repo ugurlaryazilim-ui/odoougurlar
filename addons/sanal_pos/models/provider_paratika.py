@@ -159,6 +159,11 @@ _STATUS_BY_CODE = {
     'FA': 'failed',
     'CA': 'cancelled',
     'IP': 'pending',
+    # NEDEN: WA resmi Paratika belgesinde transactionStatus olarak yok (yalnız IP/CA/FA/AP/VD/MR).
+    # Canlı QUERYTRANSACTION'da finans onayındaki REFUND için görüldü; "Waiting Approval" olarak
+    # yorumlandı (doğrulanmadı). Güvenli taraf: sonuçsuz/bekleyen (IP gibi); ne onay ne red sayılır.
+    # Ham kod raw_status'ta 'WA' olarak kalır. Bilinmeyen kodlar yine uyarı verir.
+    'WA': 'pending',
     'MR': 'review',
     'VD': 'voided',
 }
@@ -825,7 +830,9 @@ class SanalPosProviderParatika(models.AbstractModel):
         code = str(item.get('transactionStatus') or '').upper()
         kind = _KIND_BY_TYPE.get(ttype, ttype.lower())
         status = _STATUS_BY_CODE.get(code, code.lower())
-        if code and code not in _STATUS_BY_CODE:
+        # NEDEN: WA yalnız REFUND'da görüldü; iade dışı işlemde anlamı doğrulanmadı, uyarı sürer.
+        # Yine de 'pending' eşlenir (ne başarılı ne başarısız sayılır).
+        if code and (code not in _STATUS_BY_CODE or (code == 'WA' and kind != 'refund')):
             # Gerçek "onay bekliyor" kodu böyle yakalanır; gövde/kart verisi loglanmaz (K-12).
             _logger.warning('sanal_pos: tanınmayan transactionStatus %s (transactionType %s, pgTranId %s)',
                             code, ttype, item.get('pgTranId'))

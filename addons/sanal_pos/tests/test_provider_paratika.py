@@ -563,6 +563,8 @@ class TestQueryStatusNormalization(ProviderCase):
             (('CA', 'SALE'), [('sale', 'cancelled')]),
             (('IP', 'SALE'), [('sale', 'pending')]),
             (('MR', 'SALE'), [('sale', 'review')]),
+            (('WA', 'SALE'), [('sale', 'pending')]),
+            (('WA', 'REFUND'), [('refund', 'pending')]),
             (('AP', 'VOID'), [('void', 'approved')]),
             (('AP', 'REFUND'), [('refund', 'approved')]),
             (('AP', 'PTREFUND'), [('refund', 'approved')]),
