@@ -27,7 +27,7 @@ Hizmet alanları (hizmet, ödeme türü, paket türü, SMS) da faturayı belirle
 
 Ayar ekranına (Ayarlar > Kargo) sır girilmez; yalnız varsayılan firma seçilir. Hangi **tüzel kişiliğin** UPS hesabının girildiği (şirket/hesap eşleşmesi) canlıdan önce yöneticiyle teyit edilmelidir.
 
-**Firma şirketler arasında paylaşımlıdır (D-4).** Hazır "UPS Türkiye" kaydında şirket (`company_id`) boştur; alan teslimat ürününün şirketinden gelir, ürün de şirketsizdir. Çok şirketli veritabanında **her şirketin gönderisi aynı UPS hesabıyla açılır ve aynı hesaba faturalanır**. Gönderici adı ve adresi ise gönderiyi açan şirketten gelir. Canlıda birden çok şirket varsa duman testinden önce firmaya ve teslimat ürününe hesabın sahibi olan şirketi atayın. Başka şirket UPS kullanacaksa ona kendi hesabıyla ayrı bir UPS firması açın.
+**Firma şirketler arasında paylaşımlıdır (D-4).** Hazır "UPS Türkiye" kaydında şirket (`company_id`) boştur; alan teslimat ürününün şirketinden gelir, ürün de şirketsizdir. Çok şirketli veritabanında **her şirketin gönderisi aynı UPS hesabıyla açılır ve aynı hesaba faturalanır**. Gönderici adı ve adresi ise gönderiyi açan şirketten gelir. Canlıda birden çok şirket varsa duman testinden önce firmaya ve teslimat ürününe hesabın sahibi olan şirketi atayın. Başka şirket UPS kullanacaksa ona kendi hesabıyla ayrı bir UPS firması açın. Teslimat ürününün şirketini (dolayısıyla firmanın şirketini) yalnız Kargo / Yönetici değiştirebilir; ürün yöneticisi değiştirmeye çalışırsa yetki hatası alır.
 
 ## 3. Test ucu / canlı bayrağı (K-26)
 

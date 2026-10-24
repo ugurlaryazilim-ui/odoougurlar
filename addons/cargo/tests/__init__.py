@@ -20,3 +20,4 @@ from . import test_system_defaults
 from . import test_guvenlik_dt1
 from . import test_mark_missing
 from . import test_mark_cancelled
+from . import test_guvenlik_dt2

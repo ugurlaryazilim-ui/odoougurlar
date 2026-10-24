@@ -15,7 +15,7 @@ Bağımlılıklar: `mail`, `stock_delivery` (Odoo çekirdeği). **Mevcut Uğurla
 | Grup | Ne yapar |
 |---|---|
 | **Kargo / Kullanıcı** | Gönderi açar, gönderir, uzlaştırır, iptal eder, etiket basar; transferden gönderi açar; `create_and_send` çağırabilir. |
-| **Kargo / Yönetici** | Kullanıcı yetkileri + firma kapıda ödeme (ODP) bayrakları, sağlayıcı hesap bilgileri, il/ilçe kodları ve diğer adlar. |
+| **Kargo / Yönetici** | Kullanıcı yetkileri + firma kapıda ödeme (ODP) bayrakları, sağlayıcı hesap bilgileri, il/ilçe kodları ve diğer adlar. Yönetilen firmanın test/canlı, tip, entegrasyon, etkinlik, şirket ve ürün alanları ile **teslimat ürününün şirketi** (firma şirketi ondan gelir) yalnız bu grupta değişir. |
 
 `base.group_system` bu gruplara **otomatik eklenmez**; kullanıcıya grup elle atanır (en az yetki). Gruba sahip olmayan kullanıcı, `sudo()` ile bile gönderi işlemi yapamaz (AccessError). Gönderi çok şirketlidir: yalnız seçili şirketlerin gönderileri görünür.
 
