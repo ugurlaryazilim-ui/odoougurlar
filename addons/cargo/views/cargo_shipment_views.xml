@@ -46,6 +46,8 @@
                     <button name="action_cancel" type="object" string="İptal et"
                             invisible="state != 'created'" groups="cargo.group_cargo_user"
                             confirm="Gönderi kargo firmasında iptal edilecek. Emin misiniz?"/>
+                    <button name="action_mark_cancelled" type="object" string="Kargo firmasında iptal edildi"
+                            invisible="state != 'created' or not cancel_uncertain_at" groups="cargo.group_cargo_manager"/>
                     <button name="action_print_label" type="object" string="Etiketi Bas"
                             invisible="state not in ('created', 'in_transit', 'out_for_delivery', 'delivered', 'returned', 'exception') or label_missing"
                             groups="cargo.group_cargo_user"/>
@@ -55,7 +57,12 @@
                 <div class="alert alert-warning mb-0" role="alert" invisible="state != 'uncertain'">
                     Gönderinin sonucu belirsiz: kargo firmasında oluşmuş olabilir. Yeniden göndermeyin; "Uzlaştır" ile sorgulayın.
                     Uzlaştırma sonuç vermezse kargo firmasının panelinden kontrol edin; gönderi orada yoksa Kargo / Yönetici
-                    "Kargo firmasında yok" ile kapatır ve transferden yeni gönderi açılabilir.
+                    gönderimden en az 15 dk sonra "Kargo firmasında yok" ile kapatır ve transferden yeni gönderi açılabilir.
+                </div>
+                <div class="alert alert-warning mb-0" role="alert" invisible="state != 'created' or not cancel_uncertain_at">
+                    İptal isteğinin sonucu belirsiz kaldı: gönderi kargo firmasında iptal edilmiş olabilir. "İptal et" ile
+                    yeniden deneyin. Kargo firması gönderinin zaten iptal edildiğini bildirirse panelinden kontrol edin;
+                    iptal edilmişse Kargo / Yönetici en az 15 dk sonra "Kargo firmasında iptal edildi" ile kapatır.
                 </div>
                 <div class="alert alert-warning mb-0" role="alert" invisible="not label_missing or state == 'cancelled'">
                     Etiket kargo firmasından alınamadı: kargo firmasının panelinden basın ya da gönderiyi iptal edip yeniden oluşturun.
@@ -101,6 +108,7 @@
                             <field name="test_mode" readonly="1"/>
                             <field name="sent_at" readonly="1"/>
                             <field name="cancelled_at" readonly="1" invisible="not cancelled_at"/>
+                            <field name="cancel_uncertain_at" readonly="1" invisible="not cancel_uncertain_at"/>
                         </group>
                     </group>
                     <group string="Hata" invisible="not error_message">

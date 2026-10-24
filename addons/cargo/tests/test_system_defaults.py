@@ -14,6 +14,7 @@ from .test_kabul_picking import PickingBase
 _SYSTEM_DEFAULTS = (
     ('label_missing', True), ('tracking_ref', '1ZSAHTE'), ('error_message', 'sahte'), ('source_model', 'res.partner'),
     ('source_id', 7), ('error_code', 'X'), ('sent_at', '2026-01-01 00:00:00'),
+    ('cancel_uncertain_at', '2026-01-01 00:00:00'),
 )
 
 
@@ -53,6 +54,7 @@ class TestSystemFieldDefaults(PickingBase):
         self.assertFalse(shipment.error_code)
         self.assertFalse(shipment.sent_at)
         self.assertFalse(shipment.label_missing)
+        self.assertFalse(shipment.cancel_uncertain_at)
 
     def assert_victims_untouched(self):
         self.victim.invalidate_recordset()

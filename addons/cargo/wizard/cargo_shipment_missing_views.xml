@@ -4,19 +4,26 @@
         <field name="name">cargo.shipment.missing.wizard.form</field>
         <field name="model">cargo.shipment.missing.wizard</field>
         <field name="arch" type="xml">
-            <form string="Kargo firmasında yok">
-                <div class="alert alert-warning" role="alert">
+            <form string="Gönderiyi elle kapat">
+                <div class="alert alert-warning" role="alert" invisible="mode != 'missing'">
                     Önce kargo firmasının panelinden kontrol edin. Gönderi orada varsa bu işlem mükerrer
                     (ücretli) gönderiye yol açar: kapatılan gönderinin yerine transferden yeni gönderi açılabilir.
                 </div>
+                <div class="alert alert-warning" role="alert" invisible="mode != 'cancelled'">
+                    Önce kargo firmasının panelinden gönderinin iptal edildiğini doğrulayın. Gönderi orada iptal
+                    edilmemişse paket yola çıkabilir ve transferden yeni gönderi açılırsa mükerrer (ücretli) gönderi olur.
+                </div>
                 <group>
+                    <field name="mode"/>
                     <field name="shipment_id"/>
                     <field name="carrier_id"/>
-                    <field name="reason" placeholder="Ör. 24.10 16:00 panelde referansla arandı, kayıt yok."/>
+                    <field name="reason" placeholder="Ör. 24.10 16:00 panelde referansla arandı, kayıt yok / iptal görünüyor."/>
                 </group>
                 <footer>
                     <button name="action_confirm" type="object" string="Kargo firmasında yok olarak işaretle"
-                            class="btn-primary"/>
+                            class="btn-primary" invisible="mode != 'missing'"/>
+                    <button name="action_confirm" type="object" string="Kargo firmasında iptal edildi olarak işaretle"
+                            class="btn-primary" invisible="mode != 'cancelled'"/>
                     <button string="Vazgeç" class="btn-secondary" special="cancel"/>
                 </footer>
             </form>

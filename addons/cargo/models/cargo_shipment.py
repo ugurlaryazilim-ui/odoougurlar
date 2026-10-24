@@ -41,7 +41,8 @@ DESCRIPTION_MAX = 120
 # DIKKAT: bir sistem alanı ekler/çıkarırsan test_shipment_model'deki kilit testlerini de güncelle.
 _CARGO_SYSTEM_FIELDS = frozenset((
     'name', 'state', 'picking_id', 'source_model', 'source_id', 'test_mode', 'tracking_ref',
-    'label_pdf_id', 'label_png_ids', 'label_missing', 'error_code', 'error_message', 'sent_at', 'cancelled_at'))
+    'label_pdf_id', 'label_png_ids', 'label_missing', 'error_code', 'error_message', 'sent_at', 'cancelled_at',
+    'cancel_uncertain_at'))
 _EDITABLE_STATES = ('draft', 'failed')
 # NEDEN: kaynaksız ``create_and_send`` kaydının işareti (05-guvenlik D-2 ek). Formla açılan kaynaksız kayıt
 # source_model=False taşır ve hiçbir API çağrısına dönmez; işaretli kaydı yalnız create_and_send yazar (sistem alanı).
@@ -52,6 +53,7 @@ _SHIPPED_STATES = ('in_transit', 'out_for_delivery', 'delivered', 'returned')
 _PRINTABLE_STATES = ('created',) + _SHIPPED_STATES + ('exception',)
 # NEDEN: sağlayıcıda kaydın sorguda görünme gecikmesi bilinmiyor (CD-6); daha genç "bulunamadı" kesin değildir,
 # yanlış "yok" kararı mükerrer gönderi açar (K-21). Yaş son sending geçişinden (sent_at) ölçülür.
+# Elle kapatma eylemleri (K-28 yok, K-29 iptal edildi) de aynı eşiği bekler (KARARLAR K-29, DERSLER 22).
 RECONCILE_MIN_AGE = timedelta(minutes=15)
 # NEDEN: sağlayıcı hata metnini sırlardan temizler (sağlayıcı ``_scrub``); çekirdek yalnız uzunluğu sınırlar.
 ERROR_MESSAGE_MAX = 500
@@ -114,6 +116,10 @@ class CargoShipment(models.Model):
     error_message = fields.Text(string='Hata mesajı', copy=False)
     sent_at = fields.Datetime(string='Gönderim zamanı', copy=False)
     cancelled_at = fields.Datetime(string='İptal zamanı', copy=False)
+    # NEDEN: son SONUCU BELİRSİZ iptal isteğinin zamanı (K-29). Kargo yöneticisinin "iptal edildi" eylemi yalnız bu
+    # doluyken açılır ve yaş bundan ölçülür. Sonraki "hata" yanıtı silmez: belirsiz iptal firmada işlendiyse yeniden
+    # deneme de "zaten iptal" gibi bir hata koduyla döner, yani hata iptalin olmadığını kanıtlamaz (05-inceleme Y3).
+    cancel_uncertain_at = fields.Datetime(string='Belirsiz iptal zamanı', copy=False)
 
     # ------------------------------------------------------------------ kilitli (draft/failed) alanlar
     carrier_id = fields.Many2one(
@@ -416,29 +422,62 @@ class CargoShipment(models.Model):
 
     def action_mark_missing(self):
         self.ensure_one()
+        return self._cargo_manual_close_action('missing', _('Kargo firmasında yok'))
+
+    def action_mark_cancelled(self):
+        self.ensure_one()
+        return self._cargo_manual_close_action('cancelled', _('Kargo firmasında iptal edildi'))
+
+    def _cargo_manual_close_action(self, mode, name):
         return {
-            'type': 'ir.actions.act_window', 'name': _('Kargo firmasında yok'),
+            'type': 'ir.actions.act_window', 'name': name,
             'res_model': 'cargo.shipment.missing.wizard', 'view_mode': 'form', 'target': 'new',
-            'context': {'default_shipment_id': self.id},
+            'context': {'default_shipment_id': self.id, 'default_mode': mode},
         }
 
-    def _cargo_mark_missing(self, reason):
-        """Belirsiz gönderiyi elle ``failed`` yapar: kargo firmasında olmadığı panelden doğrulandı (K-28).
+    def _cargo_manual_close_check(self, reason, label):
+        """K-28/K-29 elle kapatmanın ortak ön koşulu: yönetici, okuma erişimi, gerekçe; kilidi alıp SQL durumunu döner.
 
-        Dış çağrı yapmaz. NEDEN: uzlaştırma sorgusu "bulunamadı"yı kesin sayamadığında (genç kayıt, sorgu hatası)
-        belirsiz gönderinin başka çıkışı yoktu; transfer yeni gönderiye kilitli kalıyordu (05-inceleme Ö1).
         DIKKAT: yanlış işaret mükerrer (ücretli) gönderi açtırır; bu yüzden yalnız Kargo / Yönetici, gerekçe zorunlu
-        ve chatter'a kim/ne zaman/neden yazılır.
+        ve chatter'a kim/ne zaman/neden yazılır. Dış çağrı yapılmaz.
         """
         self.ensure_one()
         if not self.env.user.has_group('cargo.group_cargo_manager'):
-            raise AccessError(_('Gönderiyi "kargo firmasında yok" olarak işaretlemek için "Kargo / Yönetici" yetkisi gerekir.'))
+            raise AccessError(_('Gönderiyi "%s" olarak işaretlemek için "Kargo / Yönetici" yetkisi gerekir.', label))
         self.check_access('read')
         reason = (reason or '').strip()
         if not reason:
             raise UserError(_('Gerekçe zorunludur: kargo firmasının panelinde nasıl kontrol ettiğinizi yazın.'))
-        if self._cargo_lock() != 'uncertain':
+        return reason, self._cargo_lock()
+
+    def _cargo_check_min_age(self, since, message):
+        """``since``'tan bu yana RECONCILE_MIN_AGE dolmadıysa UserError.
+
+        ``message`` yer tutucuları: ``%(minutes)s`` kalan dk, ``%(min_age)s`` eşik dk.
+
+        NEDEN: yaş son durum geçişinin/isteğin zamanından ölçülür, create_date'ten değil (DERSLER 22): yeniden
+        gönderilen kayıt eskidir ama son isteği gençtir. ``since`` boşsa eski sayılır (uzlaştırmayla aynı).
+        """
+        age = fields.Datetime.now() - since if since else RECONCILE_MIN_AGE
+        if age < RECONCILE_MIN_AGE:
+            raise UserError(message % {
+                'minutes': math.ceil((RECONCILE_MIN_AGE - age).total_seconds() / 60),
+                'min_age': int(RECONCILE_MIN_AGE.total_seconds() // 60)})
+
+    def _cargo_mark_missing(self, reason):
+        """Belirsiz gönderiyi elle ``failed`` yapar: kargo firmasında olmadığı panelden doğrulandı (K-28).
+
+        NEDEN: uzlaştırma sorgusu "bulunamadı"yı kesin sayamadığında (sorgu hatası) belirsiz gönderinin başka çıkışı
+        yoktu; transfer yeni gönderiye kilitli kalıyordu (05-inceleme Ö1). Uzlaştırmanın "genç kayıt" kuralı burada da
+        geçerlidir (05-inceleme Y1): yeni açılan gönderi panelde henüz görünmeyebilir.
+        """
+        reason, state = self._cargo_manual_close_check(reason, _('kargo firmasında yok'))
+        if state != 'uncertain':
             raise UserError(_('Yalnız sonucu belirsiz gönderi "kargo firmasında yok" olarak işaretlenebilir.'))
+        # NEDEN: uncertain'e tek yol son sending geçişidir; sent_at o geçişin zamanıdır (uzlaştırmayla aynı ölçü).
+        self._cargo_check_min_age(self.sent_at, _(
+            'Gönderi kargo firmasında birkaç dakika içinde görünmeyebilir: "kargo firmasında yok" işareti gönderimden '
+            'en az %(min_age)s dk sonra verilebilir (%(minutes)s dk kaldı). Önce "Uzlaştır" ile sorgulayın.'))
         carrier = self.carrier_id.sudo().display_name
         self.sudo().write({
             'state': 'failed', 'error_code': False,
@@ -448,6 +487,30 @@ class CargoShipment(models.Model):
         self._cargo_post(_(
             'Gönderi "%(carrier)s" kargo firmasında yok olarak işaretlendi (Belirsiz → Hatalı). İşaretleyen: '
             '%(user)s. Gerekçe: %(reason)s', carrier=carrier, user=self.env.user.display_name, reason=reason))
+
+    def _cargo_mark_cancelled(self, reason):
+        """İptal isteği belirsiz kalmış ``created`` gönderiyi elle ``cancelled`` yapar (K-29; K-28'in iptal eşi).
+
+        NEDEN: belirsiz iptal firmada işlendiyse yeniden deneme "zaten iptal" hatası alır ve gönderi ``created``'da
+        takılır; transferde geçersiz takip no ve basılabilir etiket kalırdı (05-inceleme Y3).
+        DIKKAT: yanlış işaret gerçekte yola çıkacak paketi iptal görünür yapar ve transferden yeni gönderi açtırır.
+        """
+        reason, state = self._cargo_manual_close_check(reason, _('kargo firmasında iptal edildi'))
+        if state != 'created' or not self.cancel_uncertain_at:
+            raise UserError(_('Yalnız iptal isteğinin sonucu belirsiz kalmış oluşturulmuş gönderi "kargo firmasında '
+                              'iptal edildi" olarak işaretlenebilir.'))
+        self._cargo_check_min_age(self.cancel_uncertain_at, _(
+            'İptal isteği kargo firmasında birkaç dakika içinde işlenmiş görünmeyebilir: "kargo firmasında iptal '
+            'edildi" işareti son belirsiz iptalden en az %(min_age)s dk sonra verilebilir (%(minutes)s dk kaldı). '
+            'Önce "İptal et" ile yeniden deneyin.'))
+        carrier = self.carrier_id.sudo().display_name
+        self.sudo().write({'state': 'cancelled', 'cancelled_at': fields.Datetime.now()})
+        # NEDEN: normal iptalle aynı yan iş (yalnız bu gönderinin takip no'su silinir, hatası durumu bozmaz).
+        self._cargo_side_job('transfer', self._cargo_clear_picking_tracking)
+        self._cargo_post(_(
+            'Gönderi "%(carrier)s" kargo firmasında iptal edildi olarak işaretlendi (Oluşturuldu → İptal). Takip no: '
+            '%(tracking)s. İşaretleyen: %(user)s. Gerekçe: %(reason)s', carrier=carrier, tracking=self.tracking_ref,
+            user=self.env.user.display_name, reason=reason))
 
     def action_print_label(self):
         """Etiket PDF'ini saklanan PNG'lerden yeniden üretir ve indirme eylemi döner (KK-21).
@@ -662,8 +725,13 @@ class CargoShipment(models.Model):
         elif status == 'error':
             text = _('İptal edilemedi: %s', self._cargo_error_text(result['error_code'], result['error_message']))
         else:
-            text = _('İptal sonucu belirsiz: %s. Gönderi durumu değişmedi; tekrar deneyin.',
-                     self._cargo_error_text(result['error_code'], result['error_message']))
+            # NEDEN: K-29 eylemini açar ve yaşını başlatır; durum created kalır (iptal firmada olmamış olabilir).
+            self.sudo().write({'cancel_uncertain_at': fields.Datetime.now()})
+            self._cargo_commit()
+            text = _('İptal sonucu belirsiz: %(error)s. Gönderi durumu değişmedi; tekrar deneyin. Kargo firması '
+                     'gönderinin zaten iptal edildiğini bildirirse firmanın panelinden kontrol edin; iptal edilmişse '
+                     'Kargo / Yönetici "Kargo firmasında iptal edildi" ile kapatır.',
+                     error=self._cargo_error_text(result['error_code'], result['error_message']))
         self._cargo_side_job('chatter', self._cargo_post, text)
         self._cargo_commit()
         return {'status': status, 'message': text}

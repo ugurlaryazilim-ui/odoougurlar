@@ -76,6 +76,9 @@ class DeliveryCarrier(models.Model):
     def ups_tr_cancel_shipment(self, pickings):
         # NEDEN: stock_delivery'nin "Cancel" düğmesi bu kancayı çağırır; gönderi picking'e değil
         # cargo.shipment'a bağlıdır, iptal kayıt durumunu ve uzlaştırmayı oradan yönetir (K-21).
+        # NEDEN (bilinçli yedek): cargo'nun cancel_shipment override'ı yönetilen firmada önce raise eder, bu kanca
+        # normal akışta erişilmez; override kaldırılırsa çekirdek bu kancayı çağırır ve UPS'te iptal edip gönderiyi
+        # açık bırakmasın diye kalır. KK-33 kabul testi (test_kabul_ups_kurulum) kancayı doğrudan çağırır.
         raise UserError(_('UPS gönderisi buradan iptal edilemez. Kargo gönderisi formundan iptal edin.'))
 
     def ups_tr_get_tracking_link(self, picking):
@@ -177,7 +180,9 @@ class DeliveryCarrier(models.Model):
         """-> (ShipmentInfo alanları, paket listesi). Veri hatası UpsError('error') olur (UPS'e gidilmez)."""
         carrier = self.sudo()
         company = shipment.company_id
-        sender_area = self.env['cargo.area']._match('ups_tr', company.state_id, company.city)
+        # NEDEN: çekirdekteki gönderici kuralının kendisi (tek kural, 05-inceleme ÖNERİ 8); çekirdek doğrulaması
+        # dışından çağrılırsa diye boşluk burada da UPS'e gitmeden hataya çevrilir.
+        sender_area = shipment._cargo_sender_area()
         if not sender_area:
             raise ups_soap.UpsError('error', '', _('Şirket adresinin ilçesi eşleşmedi: %(state)s/%(city)s.',
                                                    state=company.state_id.name or '?', city=company.city or '?'))

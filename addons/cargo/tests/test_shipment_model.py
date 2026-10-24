@@ -249,7 +249,7 @@ class TestShipmentModel(CargoTestCase):
         shipment = self.mk()
         for field, value in (('state', 'created'), ('tracking_ref', 'X'), ('name', 'KRG/HACK'), ('test_mode', False),
                              ('error_message', 'x'), ('label_missing', True), ('sent_at', '2026-01-01 00:00:00'),
-                             ('cancelled_at', '2026-01-01 00:00:00'), ('source_id', 5), ('source_model', 'x'),
+                             ('cancelled_at', '2026-01-01 00:00:00'), ('cancel_uncertain_at', '2026-01-01 00:00:00'), ('source_id', 5), ('source_model', 'x'),
                              ('error_code', 'x'), ('picking_id', 1), ('label_pdf_id', 1),
                              ('label_png_ids', [(6, 0, [])])):
             for user in (self.user, self.manager):

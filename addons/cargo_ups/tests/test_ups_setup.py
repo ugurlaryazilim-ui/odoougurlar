@@ -131,8 +131,6 @@ class TestUpsSetup(TransactionCase):
                                 'product_id': self.env.ref('delivery.product_product_delivery').id})
         fixed.write({'name': 'O1 sabit 2'})
         self.assertEqual(fixed.sudo().ups_tr_payment_type, '2', 'varsayilan create yolunda yazildi')
-        # NEDEN: copy() burada sinanmaz: stok yoneticisi copy_data'da groups'lu cargo_cod_* alanini okuyamaz
-        # (cargo'da, bu degisiklikten once de var; DT1 raporunda bildirildi).
         # Kargo yoneticisi yazar.
         self.ups.with_user(self.cargo_manager).write(values)
         self.assertEqual(tuple(self.ups.sudo()[f] for f in values), tuple(values.values()))
