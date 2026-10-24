@@ -3,3 +3,5 @@
 from . import test_kabul_ups_kurulum
 from . import test_kabul_ups_alan
 from . import test_kabul_ups_soap
+from . import test_ups_setup
+from . import test_ups_area

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- UPS hesap ve hizmet alanları: yalnız Kargo / Yönetici görür (sırlar alan düzeyinde de kapalı). -->
+    <record id="view_delivery_carrier_form_ups_tr" model="ir.ui.view">
+        <field name="name">delivery.carrier.form.ups_tr</field>
+        <field name="model">delivery.carrier</field>
+        <field name="inherit_id" ref="delivery.view_delivery_carrier_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//notebook" position="inside">
+                <page name="ups_tr" string="UPS Türkiye" invisible="delivery_type != 'ups_tr'"
+                      groups="cargo.group_cargo_manager">
+                    <group>
+                        <group name="ups_tr_account" string="Gönderi hesabı">
+                            <field name="ups_tr_customer_number"/>
+                            <field name="ups_tr_shipper_account"/>
+                            <field name="ups_tr_username"/>
+                            <field name="ups_tr_password" password="True"/>
+                        </group>
+                        <group name="ups_tr_track" string="Takip hesabı (boşsa gönderi hesabı)">
+                            <field name="ups_tr_track_username"/>
+                            <field name="ups_tr_track_password" password="True"/>
+                        </group>
+                    </group>
+                    <group name="ups_tr_service" string="Hizmet">
+                        <field name="ups_tr_service_level"/>
+                        <field name="ups_tr_payment_type"/>
+                        <field name="ups_tr_package_type"/>
+                        <field name="ups_tr_sms_to_consignee"/>
+                    </group>
+                </page>
+            </xpath>
+        </field>
+    </record>
+</odoo>

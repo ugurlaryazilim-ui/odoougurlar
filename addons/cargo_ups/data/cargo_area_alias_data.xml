@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo noupdate="1">
+    <!-- UPS listesindeki eski adlar: yalnız KESİN ad değişiklikleri (K-25).
+         NEDEN: noupdate=1; yöneticinin ekranda eklediği diğer adlar `-u cargo_ups` ile ezilmez.
+         CSV alias_names sütunu taşımaz. Bu kayıtlar CSV'den gelen cargo.area satırlarına xmlid ile bağlanır
+         (CSV önce yüklenir).
+         DIKKAT: Antakya (Hatay MERKEZ), Yenişehir (Diyarbakır MERKEZ) ve Antalya Aksu BURAYA EKLENMEZ:
+         UPS'in bu adların kodunu doğrulaması gerekir (CD-12); doğrulanınca yönetici adı ekranından ekler.
+         Yanlış takma ad, gönderinin sessizce yanlış ilçeye gitmesi demektir. -->
+    <record id="area_444" model="cargo.area">
+        <!-- İstanbul EYUP = bugünkü Eyüpsultan -->
+        <field name="alias_names">Eyüpsultan</field>
+    </record>
+    <record id="area_69" model="cargo.area">
+        <!-- Ankara KAZAN = bugünkü Kahramankazan -->
+        <field name="alias_names">Kahramankazan</field>
+    </record>
+    <record id="area_351" model="cargo.area">
+        <!-- Eskişehir BEYLIKAHIR(B.OVA) = Beylikova -->
+        <field name="alias_names">Beylikova</field>
+    </record>
+</odoo>
