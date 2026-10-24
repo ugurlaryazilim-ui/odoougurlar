@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
-    <!-- Gönder / Uzlaştır / İptal düğmeleri akış metotlarını (cargo_shipment.py) çağırır; etiket düğmesi etiket görevindedir. -->
+    <!-- Gönder / Uzlaştır / İptal düğmeleri akış metotlarını (cargo_shipment.py) çağırır; Etiketi Bas etiket PDF'ini yeniden üretir (KK-21). -->
     <record id="view_cargo_shipment_list" model="ir.ui.view">
         <field name="name">cargo.shipment.list</field>
         <field name="model">cargo.shipment</field>
@@ -44,11 +44,17 @@
                     <button name="action_cancel" type="object" string="İptal et"
                             invisible="state != 'created'" groups="cargo.group_cargo_user"
                             confirm="Gönderi kargo firmasında iptal edilecek. Emin misiniz?"/>
+                    <button name="action_print_label" type="object" string="Etiketi Bas"
+                            invisible="state not in ('created', 'in_transit', 'out_for_delivery', 'delivered', 'returned', 'exception') or label_missing"
+                            groups="cargo.group_cargo_user"/>
                     <field name="state" widget="statusbar"
                            statusbar_visible="draft,created,in_transit,delivered"/>
                 </header>
                 <div class="alert alert-warning mb-0" role="alert" invisible="state != 'uncertain'">
                     Gönderinin sonucu belirsiz: kargo firmasında oluşmuş olabilir. Yeniden göndermeyin; "Uzlaştır" ile sorgulayın.
+                </div>
+                <div class="alert alert-warning mb-0" role="alert" invisible="not label_missing or state == 'cancelled'">
+                    Etiket kargo firmasından alınamadı: kargo firmasının panelinden basın ya da gönderiyi iptal edip yeniden oluşturun.
                 </div>
                 <sheet>
                     <widget name="web_ribbon" title="TEST" bg_color="text-bg-warning" invisible="not test_mode"/>

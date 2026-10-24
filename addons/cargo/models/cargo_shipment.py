@@ -20,6 +20,7 @@ from psycopg2 import errors as pg_errors
 from odoo import _, api, fields, models
 from odoo.exceptions import AccessError, UserError, ValidationError
 
+from .cargo_label import build_label_pdf
 from .res_company import _cargo_carrier_domain
 
 _logger = logging.getLogger(__name__)
@@ -44,6 +45,8 @@ _CARGO_SYSTEM_FIELDS = frozenset((
     'label_pdf_id', 'label_missing', 'error_code', 'error_message', 'sent_at', 'cancelled_at'))
 _EDITABLE_STATES = ('draft', 'failed')
 _SHIPPED_STATES = ('in_transit', 'out_for_delivery', 'delivered', 'returned')
+# NEDEN: iptal edilmiş gönderinin etiketi geçersizdir (barkod firmada iptal); basılırsa yanlışlıkla pakete yapışır.
+_PRINTABLE_STATES = ('created',) + _SHIPPED_STATES + ('exception',)
 # NEDEN: sağlayıcıda kaydın sorguda görünme gecikmesi bilinmiyor (CD-6); daha genç "bulunamadı" kesin değildir,
 # yanlış "yok" kararı mükerrer gönderi açar (K-21). Yaş son sending geçişinden (sent_at) ölçülür.
 RECONCILE_MIN_AGE = timedelta(minutes=15)
@@ -358,6 +361,29 @@ class CargoShipment(models.Model):
         self.ensure_one()
         return self._cargo_notification(self._cargo_cancel())
 
+    def action_print_label(self):
+        """Etiket PDF'ini saklanan PNG'lerden yeniden üretir ve indirme eylemi döner (KK-21).
+
+        NEDEN: PDF önbellekten verilmez; yönetici etiket sayfası ayarını değiştirmiş olabilir. Sağlayıcı çağrılmaz:
+        etiket gönderi anında bir kez alınır, yeniden alma yolu belgesiz (§1.3).
+        """
+        self.ensure_one()
+        self._cargo_check_user()
+        if self.state not in _PRINTABLE_STATES:
+            raise UserError(_('Etiket yalnız oluşturulmuş (iptal edilmemiş) gönderi için basılır.'))
+        if self.label_missing:
+            raise UserError(_('Etiket kargo firmasından alınamadı: kargo firmasının panelinden basın ya da '
+                              'gönderiyi iptal edip yeniden oluşturun.'))
+        try:
+            pdf = self._cargo_build_label_pdf()
+        except Exception as error:      # noqa: BLE001 - bozuk PNG; ayrıntı kullanıcıya gitmez
+            _logger.warning('cargo.shipment %s: etiket PDF üretilemedi (%s)', self.id, type(error).__name__)
+            pdf = False
+        if not pdf:
+            raise UserError(_('Etiket PDF üretilemedi: gönderiye bağlı geçerli etiket görüntüsü yok.'))
+        self._cargo_side_job('chatter', self._cargo_post, _('Etiket basıldı.'))
+        return {'type': 'ir.actions.act_url', 'url': '/web/content/%d?download=false' % pdf.id, 'target': 'new'}
+
     def _cargo_send(self):
         """Gönder. ``{'status': 'ok'|'error'|'uncertain', 'message': str}`` döner (G7 ``create_and_send`` çağırır).
 
@@ -579,9 +605,13 @@ class CargoShipment(models.Model):
         self.message_post(body=body, subtype_xmlid='mail.mt_note')
 
     def _cargo_after_created(self, labels):
-        """created sonrası yan işler (her biri ayrı savepoint). G5 PDF adımını buraya ekler."""
+        """created sonrası yan işler (her biri ayrı savepoint)."""
         stored = self._cargo_side_job('etiket', self._cargo_store_labels, labels) or 0
-        if not stored:
+        if stored:
+            # NEDEN: PDF oluşturma anında da üretilir ki create_and_send çağıranı eki hemen okuyabilsin (K-23).
+            # Başarısızsa PNG'ler duruyordur; "Etiketi Bas" PDF'i yeniden üretir.
+            self._cargo_side_job('etiket pdf', self._cargo_build_label_pdf)
+        else:
             self._cargo_side_job('etiket', self.sudo().write, {'label_missing': True})
         self._cargo_side_job('chatter', self._cargo_post_created, stored)
         self._cargo_side_job('transfer', self._cargo_write_picking_tracking)
@@ -595,6 +625,25 @@ class CargoShipment(models.Model):
                 'res_model': self._name, 'res_id': self.id,
             } for index, data in enumerate(valid, 1)])
         return len(valid)
+
+    def _cargo_build_label_pdf(self):
+        """Saklanan PNG'lerden PDF üretir, ``label_pdf_id`` ekine yazar (yoksa açar) ve eki döner; PNG yoksa boş."""
+        prefix = '%s-' % self.name
+        pngs = self.env['ir.attachment'].sudo().search([
+            ('res_model', '=', self._name), ('res_id', '=', self.id), ('mimetype', '=', 'image/png')],
+            order='id').filtered(lambda att: att.name.startswith(prefix))
+        if not pngs:
+            return self.env['ir.attachment']
+        data = build_label_pdf([att.raw for att in pngs], self.company_id.cargo_label_size)
+        pdf = self.label_pdf_id.sudo()
+        if pdf:
+            pdf.write({'raw': data})
+        else:
+            pdf = self.env['ir.attachment'].sudo().create({
+                'name': '%s.pdf' % self.name, 'raw': data, 'mimetype': 'application/pdf',
+                'res_model': self._name, 'res_id': self.id})
+            self.sudo().write({'label_pdf_id': pdf.id})
+        return pdf
 
     def _cargo_post_created(self, stored):
         body = _('Kargo gönderisi oluşturuldu. Takip no: %s', self.tracking_ref)
