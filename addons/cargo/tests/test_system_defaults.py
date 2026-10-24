@@ -103,7 +103,7 @@ class TestSystemFieldDefaults(PickingBase):
             district='Cankaya', reference='K1-API')
         self.assertEqual(shipment.state, 'created')
         self.assertFalse(shipment.sudo().picking_id)
-        self.assertFalse(shipment.sudo().source_model)
+        self.assertEqual(shipment.sudo().source_model, 'cargo.create_and_send')   # kaynaksız API işareti
         self.assertNotEqual(shipment.sudo().label_pdf_id, self.victim)
         self.assert_victims_untouched()
 

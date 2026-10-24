@@ -43,6 +43,10 @@ _CARGO_SYSTEM_FIELDS = frozenset((
     'name', 'state', 'picking_id', 'source_model', 'source_id', 'test_mode', 'tracking_ref',
     'label_pdf_id', 'label_png_ids', 'label_missing', 'error_code', 'error_message', 'sent_at', 'cancelled_at'))
 _EDITABLE_STATES = ('draft', 'failed')
+# NEDEN: kaynaksız ``create_and_send`` kaydının işareti (05-guvenlik D-2 ek). Formla açılan kaynaksız kayıt
+# source_model=False taşır ve hiçbir API çağrısına dönmez; işaretli kaydı yalnız create_and_send yazar (sistem alanı).
+# DIKKAT: model adı değildir; source_model'i env[...] ile açan kod bu değeri atlamalı.
+_CARGO_API_NO_SOURCE = 'cargo.create_and_send'
 _SHIPPED_STATES = ('in_transit', 'out_for_delivery', 'delivered', 'returned')
 # NEDEN: iptal edilmiş gönderinin etiketi geçersizdir (barkod firmada iptal); basılırsa yanlışlıkla pakete yapışır.
 _PRINTABLE_STATES = ('created',) + _SHIPPED_STATES + ('exception',)
@@ -456,8 +460,10 @@ class CargoShipment(models.Model):
             if existing:
                 # NEDEN: referansı önceden alan başka bir kayıt (elle açılmış taslak, başka kaynak) çağırana
                 # yabancı adres/ODP ile dönmesin (05-guvenlik D-2). Yalnız aynı kaynağın gönderilmiş kaydı döner.
+                # DIKKAT: kaynaksız çağrı (False, 0) ile eşleşirse formla açılmış kaynaksız kaydı döndürür;
+                # bu yüzden kaynaksız çağrı yalnız işaretli (_CARGO_API_NO_SOURCE) kayda döner.
                 same_source = (existing.source_model, existing.source_id) == (
-                    (source._name, source.id) if source else (False, 0))
+                    (source._name, source.id) if source else (_CARGO_API_NO_SOURCE, 0))
                 if not same_source or existing.state == 'draft':
                     raise UserError(_(
                         '"%(ref)s" iş referansı başka bir kargo gönderisine ait: %(name)s.',
@@ -473,8 +479,7 @@ class CargoShipment(models.Model):
             vals['package_weight'] = weight
         if carrier:
             vals['carrier_id'] = carrier.id
-        if source:
-            vals['source_model'], vals['source_id'] = source._name, source.id
+        vals['source_model'], vals['source_id'] = (source._name, source.id) if source else (_CARGO_API_NO_SOURCE, 0)
         try:
             # NEDEN: doğrulama hatasında yalnız UserError değil kayıt da geri alınmalı (çağıran hatayı yakalayıp
             # devam edebilir); commit'ler bu savepoint kapandıktan sonra, ``_cargo_send`` içinde yapılır.

@@ -92,7 +92,7 @@ shipment = env['cargo.shipment'].create_and_send(
 ```
 
 - Yalnız anahtar-kelime parametreleri: `recipient_name, phone, street, state, district` (zorunlu), `package_count, weight, reference, invoice_no, cod_amount, cod_method, carrier, source, email, partner`. `@api.private`: RPC'den çağrılamaz.
-- **Aynı referans**: `reference` aynı olan açık kayıt yalnız aynı `source` ile açılmışsa ve taslak değilse döner; başka kaynağın (ya da elle açılmış taslağın) referansı `UserError` verir.
+- **Aynı referans**: `reference` aynı olan açık kayıt yalnız aynı `source` ile açılmışsa ve taslak değilse döner; başka kaynağın ya da formla açılmış (kaynaksız) kaydın referansı `UserError` verir. `source` verilmeyen çağrı yalnız yine `source`suz `create_and_send` ile açılmış kayda döner.
 - **Sağlayıcı hatası istisna değildir**: kayıt `failed` ya da `uncertain` döner. Doğrulama hataları (`UserError`: telefon, ilçe, ODP, paket sayısı, varsayılan firma yok) kayıt bırakmaz ve dış çağrı yapmaz. Yetkisiz çağrı `AccessError`.
 - **Idempotency:** `reference` ile aynı iş referanslı, iptal/hatalı olmayan kayıt varsa **yeni gönderi açılmaz, o kayıt döner** (durumu `sending`/`uncertain` olabilir; yeniden gönderilmez, uzlaştırılır). Eşzamanlı iki çağrıda DB indeksi mükerrerliği engeller; ikincisi "birkaç saniye sonra yeniden deneyin" hatası alır.
 - **DIKKAT:** çağrı ortasında `cr.commit()` yapar. Çağıranın o ana kadarki açık işlemi de kalıcılaşır; **savepoint içinden çağrılmaz**. Çağıran kendi kaydını çağrıdan önce tutarlı bırakmalıdır.

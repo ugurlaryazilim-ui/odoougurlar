@@ -37,6 +37,21 @@ class TestGuvenlikDt1(PickingBase):
             self.api('WH/OUT/99999')
         self.assertEqual(self.provider.count('send'), 0)
 
+    def test_kaynaksiz_cagri_elle_acilmis_kaynaksiz_kaydi_donmez(self):
+        """PoC (otomatik tarama): formla açılıp gönderilmiş kaynaksız kayıt, kaynaksız API çağrısına dönmez.
+
+        Önceden (False, 0) == (False, 0) eşleşip saldırganın adresi/ODP'si çağırana dönüyordu."""
+        squatter = self.sent(origin_ref='D2-KAYNAKSIZ', recipient_street='Saldirgan adresi Gul Sk.')
+        self.assertEqual(squatter.state, 'created')
+        with self.assertRaisesRegex(UserError, squatter.name):
+            self.api('D2-KAYNAKSIZ')
+        # kaynaksız API kaydı kaynaksız ikinci çağrıya döner (KK-API-2), kaynaklı çağrıya dönmez
+        first = self.api('D2-API-KAYNAKSIZ')
+        self.assertEqual(self.api('D2-API-KAYNAKSIZ'), first)
+        with self.assertRaisesRegex(UserError, first.name):
+            self.api('D2-API-KAYNAKSIZ', source=self.cust)
+        self.assertEqual(self.provider.count('send'), 2)
+
     def test_ayni_kaynagin_gonderilmis_kaydi_doner(self):
         first = self.api('D2-KAYNAK', source=self.cust)
         self.assertEqual(first.state, 'created')
