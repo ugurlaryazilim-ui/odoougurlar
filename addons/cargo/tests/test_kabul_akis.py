@@ -345,16 +345,57 @@ class TestKabulEszamanlilik(CargoKabulCase):
     """
     FAKE_COMMIT = False
 
+    @classmethod
+    def _kur(cls):
+        # NEDEN (G4, T1): taban _kur sinif isleminde res.company adini yazar; benzersiz indeksli satir kilidi
+        # (tuple res_company) ayri baglantidaki INSERT'in FK denetimini (FOR KEY SHARE) sonsuza dek bekletir.
+        # Bu sinif yalniz prepare()'in commit'li verisini kullanir.
+        pass
+
     def setUp(self):
         super().setUp()
         self.committed = {'shipments': [], 'areas': [], 'carriers': []}
         self.admin_id = self.env.ref('base.user_admin').id
         self.group_id = self.env.ref('cargo.group_cargo_user').id
+        self.purge_leftovers()
         self.addCleanup(self.purge)
         self.prepare()
+        # NEDEN (G4, T2): ayri baglanti commit'li sirketi gorur (adres/ilce bos olabilir); gonderici ilcesi
+        # prepare()'in commit'li alanina baglanir, sirket satirina dokunulmaz.
+        area_id = self.committed['areas'][0]
+        patcher = patch.object(type(self.env['cargo.shipment']), '_cargo_sender_area',
+                               lambda shipment: shipment.env['cargo.area'].browse(area_id))
+        patcher.start()
+        self.addCleanup(patcher.stop)
 
     def real_cursor(self):
-        return sql_db.db_connect(self.env.cr.dbname).cursor()
+        cr = sql_db.db_connect(self.env.cr.dbname).cursor()
+        # NEDEN (G4, T3): kilit sorunu testi sonsuza dek takmasin; hata verir ve purge yine calisir.
+        cr.execute("SET lock_timeout = '10s'")
+        # NEDEN (G4, T4): Environment, islemi olmayan imlecte Registry(dbname) cagirir; --stop-after-init test
+        # kosusunda ana is parcacigi Registry._lock'u tum testler boyunca tutar (server.run) ve yan is
+        # parcacigi orada sonsuza dek bekler. Islem nesnesi onceden verilince kilide gidilmez.
+        cr.transaction = type(self.env.transaction)(self.registry)
+        return cr
+
+    def purge_leftovers(self):
+        """(G4, T3) Yarida kesilmis eski kosularin commit'li artiklari (purge calismadan oldurulen surec)."""
+        cr = self.real_cursor()
+        try:
+            cr.execute("SELECT id FROM delivery_carrier WHERE name->>'en_US' = 'KK Esz Kargo'")
+            carriers = tuple(r[0] for r in cr.fetchall())
+            if carriers:
+                cr.execute('SELECT id FROM cargo_shipment WHERE carrier_id IN %s', [carriers])
+                self.committed['shipments'] += [r[0] for r in cr.fetchall()]
+                self.committed['carriers'] += list(carriers)
+            cr.execute("SELECT id FROM cargo_area WHERE provider = 'fixed' AND name = 'CANKAYA'"
+                       " AND area_code BETWEEN 990000 AND 999000")
+            self.committed['areas'] += [r[0] for r in cr.fetchall()]
+        finally:
+            cr.close()
+        self.committed['group_added'] = True
+        self.purge()
+        self.committed = {'shipments': [], 'areas': [], 'carriers': []}
 
     def prepare(self):
         cr = self.real_cursor()
