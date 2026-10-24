@@ -106,3 +106,28 @@ class TestLabelPdf(CargoKabulCase):
         arch = self.env['cargo.shipment'].with_user(self.user).get_view(view_type='form')['arch']
         self.assertIn('action_print_label', arch)
         self.assertIn('label_missing', arch)
+
+    # -- güvenlik: etikete yalnız sağlayıcı PNG'leri girer
+    def test_yabanci_ayni_adli_png_etikete_girmez(self):
+        shipment = self.sent(package_count=2)
+        foreign = make_label_png(5)
+        for name in ('%s-1.png' % shipment.name, '%s-9.png' % shipment.name):
+            self.env['ir.attachment'].sudo().create({
+                'name': name, 'raw': foreign, 'mimetype': 'image/png',
+                'res_model': 'cargo.shipment', 'res_id': shipment.id})
+        captured = []
+        real = build_label_pdf
+
+        def spy(images, size):
+            captured.append(list(images))
+            return real(images, size)
+        with patch(_MODULE + '.build_label_pdf', spy):
+            shipment.action_print_label()
+        self.assertEqual(captured, [[make_label_png(0), make_label_png(1)]], 'yalnız sağlayıcı PNG dosyaları, paket sırasıyla')
+        self.assertEqual(len(shipment.label_png_ids), 2)
+        self.assertEqual(len(self.pages(shipment)), 2)
+
+    def test_label_png_ids_kopyalanmaz(self):
+        shipment = self.sent()
+        self.assertTrue(shipment.label_png_ids)
+        self.assertFalse(shipment.copy().label_png_ids)

@@ -17,7 +17,7 @@ from datetime import timedelta
 
 from psycopg2 import errors as pg_errors
 
-from odoo import _, api, fields, models
+from odoo import Command, _, api, fields, models
 from odoo.exceptions import AccessError, UserError, ValidationError
 
 from .cargo_label import build_label_pdf
@@ -42,7 +42,7 @@ DESCRIPTION_MAX = 120
 # DIKKAT: bir sistem alanı ekler/çıkarırsan test_shipment_model'deki kilit testlerini de güncelle.
 _CARGO_SYSTEM_FIELDS = frozenset((
     'name', 'state', 'picking_id', 'source_model', 'source_id', 'test_mode', 'tracking_ref',
-    'label_pdf_id', 'label_missing', 'error_code', 'error_message', 'sent_at', 'cancelled_at'))
+    'label_pdf_id', 'label_png_ids', 'label_missing', 'error_code', 'error_message', 'sent_at', 'cancelled_at'))
 _EDITABLE_STATES = ('draft', 'failed')
 _SHIPPED_STATES = ('in_transit', 'out_for_delivery', 'delivered', 'returned')
 # NEDEN: iptal edilmiş gönderinin etiketi geçersizdir (barkod firmada iptal); basılırsa yanlışlıkla pakete yapışır.
@@ -97,6 +97,12 @@ class CargoShipment(models.Model):
     test_mode = fields.Boolean(string='Test', copy=False)
     tracking_ref = fields.Char(string='Takip no', copy=False, index=True)
     label_pdf_id = fields.Many2one('ir.attachment', string='Etiket (PDF)', copy=False, ondelete='set null')
+    # NEDEN: PDF yalnız sağlayıcıdan gelen PNG'lerden üretilir. Ek aramasını res_model/res_id/ad ile yapmak,
+    # gönderiye chatter'dan ek yükleyen birinin etikete yabancı bir barkod sokmasına izin verirdi (güvenlik taraması).
+    # Sistem alanıdır: yalnız ``_cargo_store_labels`` (sudo) yazar.
+    label_png_ids = fields.Many2many(
+        'ir.attachment', 'cargo_shipment_label_png_rel', 'shipment_id', 'attachment_id',
+        string='Etiket görüntüleri', copy=False)
     label_missing = fields.Boolean(string='Etiket yok', copy=False)
     error_code = fields.Char(string='Hata kodu', copy=False)
     error_message = fields.Text(string='Hata mesajı', copy=False)
@@ -620,18 +626,17 @@ class CargoShipment(models.Model):
         """Geçerli PNG etiketlerini sağlayıcıdan geldiği gibi ``<name>-<n>.png`` eki olarak saklar; sayısını döner."""
         valid = [data for data in labels if isinstance(data, bytes) and data.startswith(_PNG_MAGIC)]
         if valid:
-            self.env['ir.attachment'].sudo().create([{
+            attachments = self.env['ir.attachment'].sudo().create([{
                 'name': '%s-%d.png' % (self.name, index), 'raw': data, 'mimetype': 'image/png',
                 'res_model': self._name, 'res_id': self.id,
             } for index, data in enumerate(valid, 1)])
+            self.sudo().write({'label_png_ids': [Command.set(attachments.ids)]})
         return len(valid)
 
     def _cargo_build_label_pdf(self):
         """Saklanan PNG'lerden PDF üretir, ``label_pdf_id`` ekine yazar (yoksa açar) ve eki döner; PNG yoksa boş."""
-        prefix = '%s-' % self.name
-        pngs = self.env['ir.attachment'].sudo().search([
-            ('res_model', '=', self._name), ('res_id', '=', self.id), ('mimetype', '=', 'image/png')],
-            order='id').filtered(lambda att: att.name.startswith(prefix))
+        # NEDEN: sıra = sağlayıcının verdiği paket sırası (ek id sırası); ad ya da res_id ile arama yapılmaz.
+        pngs = self.sudo().label_png_ids.sorted('id')
         if not pngs:
             return self.env['ir.attachment']
         data = build_label_pdf([att.raw for att in pngs], self.company_id.cargo_label_size)
