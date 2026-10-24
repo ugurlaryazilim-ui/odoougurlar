@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo noupdate="1">
+    <!-- UPS Türkiye firma kaydı. Hesap bilgileri (sır) VERİDE YOKTUR; yönetici forma girer.
+         noupdate=1: yöneticinin ayarları (hesap, hizmet, ODP bayrakları) `-u cargo_ups` ile ezilmez. -->
+    <record id="carrier_ups_tr" model="delivery.carrier">
+        <field name="name">UPS Türkiye</field>
+        <field name="delivery_type">ups_tr</field>
+        <field name="product_id" ref="delivery.product_product_delivery"/>
+        <!-- NEDEN: 'rate' zorunlu (K-20): sevkiyat onayında kargo OTOMATİK açılmaz. -->
+        <field name="integration_level">rate</field>
+        <!-- NEDEN: False = UPS TEST ucu (K-26). DB kopyası canlı UPS'e değil test ucuna gider;
+             canlıya geçiş yönetici eylemidir (duman testi sonrası). -->
+        <field name="prod_environment" eval="False"/>
+        <!-- NEDEN: UPS hesabında kapıda ödeme açık (kullanıcı kararı S-1); yalnız nakit canlıda
+             kullanılmıştır, kart/çek kodları doğrulanana kadar kapalı (KK-19c). Çekirdek varsayılanı
+             False kalır; yalnız bu kayıt açık gelir. -->
+        <field name="cargo_cod_enabled" eval="True"/>
+        <field name="cargo_cod_allow_cash" eval="True"/>
+        <field name="cargo_cod_allow_card" eval="False"/>
+        <field name="cargo_cod_allow_check" eval="False"/>
+    </record>
+</odoo>
