@@ -266,9 +266,39 @@ class TestKabulUpsHataSiniflari(UpsBase):
         self.assertIn('Alici adresi hatali (fixture)', shipment.error_message)
         self.assertFalse(self.attachments(shipment, 'image/png'))
 
-    def test_soap_fault_error(self):
-        shipment = self.assert_outcome({'CreateShipment_Type3': make_response(soap_fault(), 500)}, 'failed', 1, 'SOAP Fault')
+    def test_soap_fault_server_belirsiz(self):
+        """K-27 (K-21'i daraltir): soap:Server Fault web metodu icindeki istisnadir; gonderi UPS'e yazildiktan
+        sonra da olusabilir -> uncertain (eskiden failed: yeniden gonderim mukerrer gonderi acardi)."""
+        shipment = self.assert_outcome({'CreateShipment_Type3': make_response(soap_fault(), 500)}, 'uncertain', 1,
+                                       'SOAP Server Fault')
         self.assertIn('Sunucu istegi isleyemedi', shipment.error_message)
+        self.assertFalse(shipment.tracking_ref)
+
+    def test_soap_fault_client_error(self):
+        """K-27: soap:Client Fault = istek okunamadi, islenmedi -> failed (yeniden gonderim guvenli)."""
+        shipment = self.assert_outcome({'CreateShipment_Type3': make_response(soap_fault('soap:Client'), 500)}, 'failed',
+                                       1, 'SOAP Client Fault')
+        self.assertIn('Sunucu istegi isleyemedi', shipment.error_message)
+
+    def test_odp_server_fault_ikinci_gonderi_acilmaz(self):
+        """K-27: canli ucta kapida odemeli gonderide Server Fault sonrasi ikinci Create gitmez (cift tahsilat
+        riski); gonderi UPS'te acilmissa uzlastirma onu bulur."""
+        self.ups.prod_environment = True
+        shipment = self.send_with(plan={'CreateShipment_Type3': make_response(soap_fault(), 500)},
+                                  cod_amount=1249.9, cod_method='cash')
+        self.assertEqual(shipment.state, 'uncertain')
+        self.assertEqual(find_text(self.create_root(), 'ValueOfGoods'), '1249.90', 'ODP gonderisi')
+        self.plan.pop('CreateShipment_Type3')
+        for action in (shipment.action_send, shipment.action_reconcile):
+            with self.subTest(action=action.__name__):
+                self.try_call(action)
+                self.assertEqual(len(self.ups_requests('CreateShipment_Type3')), 1, 'ikinci Create gitmemeli')
+                self.assertEqual(shipment.state, 'uncertain', 'bulunamadi + 15 dk\'dan genc: uncertain kalir')
+        self.plan['GetPackageInfoByReferance_V1'] = lambda r: query_packages(
+            [('1ZSERVERFAULT1', '1ZSERVERFAULT1', find_text(parse(r), 'Referance'))])
+        shipment.action_reconcile()
+        self.assertEqual((shipment.state, shipment.tracking_ref), ('created', '1ZSERVERFAULT1'))
+        self.assertEqual(len(self.ups_requests('CreateShipment_Type3')), 1)
 
     def test_basarili_yanit_etiketsiz_failed_olmaz(self):
         """ErrorCode 0 ama barkod yok (VARSAYIM: tasarimda belgesiz): gonderi UPS'te acilmistir -> 'failed' OLMAMALI
@@ -375,6 +405,20 @@ class TestKabulUpsIptal(UpsBase):
                 self.plan['Cancel_Shipment_V1'] = exc
                 self.try_call(shipment.action_cancel)
                 self.assertEqual(shipment.state, 'created', 'iptal belirsiz/basarisiz: cancelled yazilmamali')
+
+    def test_iptal_soap_fault_siniflari(self):
+        """K-27: iptalde Server Fault belirsiz, Client Fault hata; ikisinde de cancelled yazilmaz, metin gorunur."""
+        shipment = self.send_with()
+        for faultcode in ('soap:Server', 'soap:Client'):
+            with self.subTest(faultcode=faultcode):
+                self.plan['Cancel_Shipment_V1'] = make_response(soap_fault(faultcode), 500)
+                _result, error = self.try_call(shipment.action_cancel)
+                self.assertEqual(shipment.state, 'created')
+                shown = (str(error) if error else '') + self.chatter(shipment) + (shipment.error_message or '')
+                self.assertIn('Sunucu istegi isleyemedi', shown)
+        self.assertEqual(self.ups.ups_tr_cargo_cancel(shipment)['status'], 'error', 'Client Fault -> error')
+        self.plan['Cancel_Shipment_V1'] = make_response(soap_fault(), 500)
+        self.assertEqual(self.ups.ups_tr_cargo_cancel(shipment)['status'], 'uncertain', 'Server Fault -> uncertain')
 
     def test_iptal_login_hatasi(self):
         shipment = self.send_with()

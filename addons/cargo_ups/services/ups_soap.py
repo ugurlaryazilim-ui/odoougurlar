@@ -140,7 +140,8 @@ class UpsClient:
 
     # ------------------------------------------------------------------ taşıma
     def _unsure(self, unsafe, code, message):
-        # NEDEN: Create/Cancel yanıtı alınamadıysa UPS işlemi yapmış olabilir (K-21); Login/sorgu yan etkisizdir.
+        # NEDEN: Create/Cancel yanıtı alınamadıysa ya da Server Fault geldiyse UPS işlemi yapmış olabilir
+        # (K-21, K-27); Login/sorgu yan etkisizdir.
         if unsafe:
             return UpsError('uncertain', code, message + ' İşlem UPS\'te gerçekleşmiş olabilir; durumu kontrol edin.')
         return UpsError('error', code, message)
@@ -192,9 +193,16 @@ class UpsClient:
         if root is not None:
             fault = root.find('.//{*}Fault')
             if fault is not None:
-                # NEDEN: Fault = sunucu isteği işlemedi (CD-9); yeniden göndermek güvenli kabul edilir.
-                reason = fault.findtext('{*}faultstring') or fault.findtext('.//{*}Text') or ''
-                raise UpsError('error', 'SOAP Fault', self.scrub('UPS isteği reddetti: %s' % reason.strip()))
+                reason = (fault.findtext('{*}faultstring') or fault.findtext('.//{*}Text') or '').strip()
+                # SOAP 1.1 faultcode ('soap:Client', alt kodlu 'soap:Client.X'); SOAP 1.2 Code/Value ('soap:Sender').
+                code = (fault.findtext('{*}faultcode') or fault.findtext('{*}Code/{*}Value') or '').strip()
+                # NEDEN (K-27): yalnız istemci Fault'u "istek okunamadı, işlenmedi" demektir. Server Fault web
+                # metodu içindeki istisnadır; gönderi UPS'e yazıldıktan sonra da oluşabilir. Create/Cancel'da
+                # error saymak yeniden gönderime, yani çift (ODP'de çift tahsilatlı) gönderiye kapı açar.
+                # DIKKAT: bilinmeyen/boş faultcode da belirsiz sayılır; error listesini genişletme.
+                if code.rpartition(':')[2].split('.')[0] in ('Client', 'Sender'):
+                    raise UpsError('error', 'SOAP Fault', self.scrub('UPS isteği reddetti: %s' % reason))
+                raise self._unsure(unsafe, 'SOAP Fault', self.scrub('UPS isteği işleyemedi: %s' % reason))
         if response.status_code != 200:
             raise self._unsure(unsafe, 'HTTP %s' % response.status_code,
                                'UPS beklenmeyen yanıt verdi (HTTP %s).' % response.status_code)

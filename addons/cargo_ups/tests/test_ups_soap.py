@@ -43,6 +43,17 @@ def code_body(op, code, definition='UPS tanimi'):
     return result_body(op, inner)
 
 
+def fault_response(faultcode, status=500):
+    code = '<faultcode>%s</faultcode>' % faultcode if faultcode is not None else ''
+    return make_response(envelope('<soap:Fault>%s<faultstring>red</faultstring></soap:Fault>' % code), status)
+
+
+def fault12_response(value, status=500):
+    # NEDEN: SOAP 1.2 Fault biçimi (Code/Value, Reason/Text); .asmx 1.2 ucunda böyle döner.
+    return make_response(envelope('<soap:Fault><soap:Code><soap:Value>%s</soap:Value></soap:Code>'
+                                  '<soap:Reason><soap:Text>red</soap:Text></soap:Reason></soap:Fault>' % value), status)
+
+
 def local(node):
     return etree.QName(node).localname
 
@@ -181,8 +192,17 @@ class TestUpsSoap(BaseCase):
             'ConnectionError': (requests.ConnectionError('x'), 'unsafe'),
             'SSLError': (requests.exceptions.SSLError('x'), 'unsafe'),
             'RuntimeError': (RuntimeError('x'), 'unsafe'),
-            'Fault 500': (make_response(envelope('<soap:Fault><faultstring>red</faultstring></soap:Fault>'), 500), 'error'),
-            'Fault 200': (make_response(envelope('<soap:Fault><faultstring>red</faultstring></soap:Fault>'), 200), 'error'),
+            # K-27: yalnız istemci Fault'u (Client / 1.2 Sender) error; Server, bilinmeyen ve kodsuz Fault belirsiz.
+            'Fault Client 500': (fault_response('soap:Client'), 'error'),
+            'Fault Client alt kod 500': (fault_response('soap:Client.Authentication'), 'error'),
+            'Fault Client 200': (fault_response('soap:Client', 200), 'error'),
+            'Fault 1.2 Sender': (fault12_response('soap:Sender'), 'error'),
+            'Fault Server 500': (fault_response('soap:Server'), 'unsafe'),
+            'Fault Server 200': (fault_response('soap:Server', 200), 'unsafe'),
+            'Fault 1.2 Receiver': (fault12_response('soap:Receiver'), 'unsafe'),
+            'Fault bilinmeyen kod': (fault_response('soap:Baska'), 'unsafe'),
+            'Fault kodsuz 500': (fault_response(None), 'unsafe'),
+            'Fault ClientX benzeri': (fault_response('soap:Clientish'), 'unsafe'),
             '502 govdesiz': (make_response('', 502), 'unsafe'),
             '503 html': (make_response('<html>Service Unavailable</html>', 503), 'unsafe'),
             '302': (make_response('', 302), 'unsafe'),

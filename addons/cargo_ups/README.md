@@ -76,14 +76,14 @@ Kullanıcıyla birlikte yapılır; her satır geçince işaretlenir. Önce firma
 | CD-6 | İptal hangi aşamaya kadar mümkün; yeni gönderi referans sorgusunda kaç dakikada görünüyor | Açık | Kurye almadan/aldıktan sonra iptal dene; oluşturduktan N dakika sonra Uzlaştır'la bul (15 dk eşiği buna göre doğrulanır). |
 | CD-7 | İade gönderene teslim kodu (`StatusCode=2` + `ReturnFlag` mı, ayrı takip no mu); takip yanıtında kimlik alanı | Açık (A2) | Takip A2'dedir; bu sürümde yalnız not al. |
 | CD-8 | `ValueOfGoods` = tahsil tutarı | Kapandı | shopicargo canlı kullanımı + hesapta ODP açık teyidi. |
-| CD-9 | SOAP Fault = istek işlenmedi mi | Destekleniyor, canlıda gözlem | Bilerek hatalı biçimli bir istek gönderme; Fault gelirse UPS'te kayıt oluşmadığını panelden doğrula. Fault metni kayda yazılır (sırlar temizlenir). |
+| CD-9 | SOAP Fault türleri (K-27) | Destekleniyor, canlıda gözlem | `soap:Client` Fault (istek okunamadı) = işlenmedi → gönderi `failed`, yeniden gönderilebilir. `soap:Server` ya da kodsuz/bilinmeyen Fault oluştur/iptalde **belirsiz** sayılır (UPS kaydı yazdıktan sonra da hata verebilir): gönderi `uncertain` kalır, yeniden gönderilmez, Uzlaştır ile ya da UPS panelinden kontrol edilir. Bilerek hatalı istek gönderme; canlıda Fault görülürse türünü ve panelde kayıt olup olmadığını not al. Fault metni kayda yazılır (sırlar temizlenir). |
 | CD-10 | Takip sorgusu liste üst sınırı (50 varsayıldı) | A2, kapsam dışı | - |
 | CD-11 | `ProcessTimeStamp` saat dilimi (Türkiye saati varsayıldı) | A2, kapsam dışı | - |
 | CD-12 | UPS'e sorulacaklar: Hatay/Diyarbakır `MERKEZ`, Antalya Aksu kodu, güncel liste | Açık | Bu README 5. bölüm. |
 
 **G9 ek maddeleri (canlıda bakılacak):**
 - **"Bulunamadı" yanıt biçimi:** referansla sorguda kayıt yokken UPS boş liste mi, `ErrorCode≠0` mı dönüyor? `ErrorCode≠0` dönerse sonuç `error` olur ve gönderi `uncertain` kalır (güvenli; yalnız elle uzlaştırma gerekir). Test ucunda sorgu olmadığından yalnız canlıda görülebilir: ilk gönderiden sonra Uzlaştır'ı bir kez dene, ayrıca olmayan bir referansla.
-- **Fault = işlenmedi** (CD-9) ve **test ucunun canlı kimliği kabulü** (CD-1, R13).
+- **Fault türü** (CD-9: yalnız `soap:Client` işlenmedi sayılır) ve **test ucunun canlı kimliği kabulü** (CD-1, R13).
 - **Barkod PNG:** yanıttaki `BarkodArrayPng` blokundan etiket görüntüsü geliyor mu, paket sayısı kadar mı, PDF doğru mu (CD-5).
 - **Çok paketli sorgu:** 2+ paketli bir gönderi oluştur; takip no tek mi, etiket sayısı paket sayısına eşit mi, referans sorgusu `count>1` uyarısı vermeden doğru mu?
 - **Takip bağlantısı:** firma formundaki/transferdeki UPS takip bağlantısı gönderinin takip numarasıyla UPS sayfasında doğru gönderiyi açıyor mu (`ups_tr_get_tracking_link`).

@@ -60,9 +60,9 @@ def cancel_result(code=0, text=''):
                     % (NS_SHIP, code, text))
 
 
-def soap_fault():
-    return envelope('<soap:Fault><faultcode>soap:Server</faultcode><faultstring>Sunucu istegi isleyemedi (fixture)'
-                    '</faultstring></soap:Fault>')
+def soap_fault(faultcode='soap:Server'):
+    return envelope('<soap:Fault><faultcode>%s</faultcode><faultstring>Sunucu istegi isleyemedi (fixture)'
+                    '</faultstring></soap:Fault>' % faultcode)
 
 
 def query_login_ok(session=SECRETS['session']):
