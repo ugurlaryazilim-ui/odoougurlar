@@ -1,0 +1,22 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- İki düğme aynı eylemi çağırır: pazaryeri transferinde onay sorulur (KK-15). Takip no pazaryeri
+         transferine yazılmaz (K-20); düğme yalnız gönderi taslağını açar.
+         NEDEN: düğmelerde groups yok; yetki action_cargo_shipment_open içinde denetlenir (kargo grubu yoksa net bir
+         hata verir). groups ile görünüm süzülünce grup dışı kullanıcıda düğmenin varlığı doğrulanamaz. -->
+    <record id="view_picking_form_cargo" model="ir.ui.view">
+        <field name="name">stock.picking.form.cargo</field>
+        <field name="model">stock.picking</field>
+        <field name="inherit_id" ref="stock.view_picking_form"/>
+        <field name="arch" type="xml">
+            <xpath expr="//header" position="inside">
+                <field name="cargo_marketplace_name" invisible="1"/>
+                <button name="action_cargo_shipment_open" type="object" string="Kargo gönderisi"
+                        invisible="picking_type_code != 'outgoing' or state == 'cancel' or cargo_marketplace_name"/>
+                <button name="action_cargo_shipment_open" type="object" string="Kargo gönderisi"
+                        invisible="picking_type_code != 'outgoing' or state == 'cancel' or not cargo_marketplace_name"
+                        confirm="Bu sipariş pazaryeri kargosuyla gider. Yine de kargo gönderisi açılsın mı?"/>
+            </xpath>
+        </field>
+    </record>
+</odoo>

@@ -655,10 +655,12 @@ class CargoShipment(models.Model):
         self._cargo_post(body)
 
     def _cargo_picking_tracking_allowed(self):
-        """Takip no transfere yazılsın mı? G6 pazaryeri/Shopify koşuluyla genişletir."""
+        """Takip no transfere yazılsın mı? Test gönderisinde ve pazaryeri (Shopify dahil) transferinde hayır."""
         self.ensure_one()
+        picking = self.sudo().picking_id
         # NEDEN: test ucu takip no'su gerçek değildir; transfer üzerinden müşteriye/pazaryerine gitmemeli (K-26).
-        return bool(self.sudo().picking_id) and not self.test_mode
+        # NEDEN: pazaryeri kancaları carrier_tracking_ref'i pazaryerine kargo takip no diye gönderir (K-20).
+        return bool(picking) and not self.test_mode and not picking.cargo_marketplace_name
 
     def _cargo_write_picking_tracking(self):
         if self._cargo_picking_tracking_allowed():

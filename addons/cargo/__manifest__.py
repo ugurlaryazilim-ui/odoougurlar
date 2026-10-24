@@ -27,6 +27,7 @@ Kargo çekirdeği
         'views/res_config_settings_views.xml',
         'views/cargo_area_views.xml',
         'views/cargo_shipment_views.xml',
+        'views/stock_picking_views.xml',
         'views/cargo_menus.xml',
     ],
     'application': True,

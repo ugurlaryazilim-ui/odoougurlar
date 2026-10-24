@@ -14,3 +14,4 @@ from . import test_shipment_model
 from . import test_shipment_flow
 from . import test_shipment_concurrency
 from . import test_label
+from . import test_picking

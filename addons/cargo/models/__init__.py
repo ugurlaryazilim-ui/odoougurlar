@@ -5,3 +5,4 @@ from . import res_config_settings
 from . import cargo_area
 from . import cargo_label
 from . import cargo_shipment
+from . import stock_picking
