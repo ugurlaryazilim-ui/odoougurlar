@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<odoo>
+    <!-- Gönder / Uzlaştır / İptal / Etiket düğmeleri gönderi akışı görevinde eklenir (metotları orada). -->
+    <record id="view_cargo_shipment_list" model="ir.ui.view">
+        <field name="name">cargo.shipment.list</field>
+        <field name="model">cargo.shipment</field>
+        <field name="arch" type="xml">
+            <list string="Kargo gönderileri" decoration-warning="test_mode" decoration-muted="state == 'cancelled'">
+                <field name="name"/>
+                <field name="create_date" optional="show"/>
+                <field name="carrier_id"/>
+                <field name="recipient_name"/>
+                <field name="recipient_state_id" optional="show"/>
+                <field name="recipient_district" optional="show"/>
+                <field name="tracking_ref"/>
+                <field name="origin_ref" optional="show"/>
+                <field name="invoice_no" optional="hide"/>
+                <field name="currency_id" column_invisible="True"/>
+                <field name="cod_amount" widget="monetary" invisible="not cod_amount"/>
+                <field name="cod_method" widget="badge" optional="show" invisible="not cod_amount"/>
+                <field name="test_mode" optional="show"/>
+                <field name="state" widget="badge"
+                       decoration-success="state in ('created', 'in_transit', 'out_for_delivery', 'delivered')"
+                       decoration-warning="state in ('sending', 'uncertain', 'exception', 'returned')"
+                       decoration-danger="state == 'failed'"
+                       decoration-info="state == 'draft'"/>
+            </list>
+        </field>
+    </record>
+
+    <record id="view_cargo_shipment_form" model="ir.ui.view">
+        <field name="name">cargo.shipment.form</field>
+        <field name="model">cargo.shipment</field>
+        <field name="arch" type="xml">
+            <form string="Kargo gönderisi">
+                <field name="currency_id" invisible="1"/>
+                <field name="carrier_type" invisible="1"/>
+                <field name="company_id" invisible="1"/>
+                <header>
+                    <field name="state" widget="statusbar"
+                           statusbar_visible="draft,created,in_transit,delivered"/>
+                </header>
+                <sheet>
+                    <widget name="web_ribbon" title="TEST" bg_color="text-bg-warning" invisible="not test_mode"/>
+                    <div class="oe_title">
+                        <h1><field name="name"/></h1>
+                    </div>
+                    <group invisible="not area_match_note">
+                        <field name="area_match_note" nolabel="1" colspan="2" class="text-warning fw-bold"/>
+                    </group>
+                    <group>
+                        <group string="Gönderi">
+                            <field name="carrier_id" readonly="state not in ('draft', 'failed')" options="{'no_create': True}"/>
+                            <field name="origin_ref" readonly="state not in ('draft', 'failed')"/>
+                            <field name="invoice_no" readonly="state not in ('draft', 'failed')"/>
+                            <field name="picking_id" readonly="1"/>
+                            <field name="package_count" readonly="state not in ('draft', 'failed')"/>
+                            <field name="package_weight" readonly="state not in ('draft', 'failed')"/>
+                            <field name="description" readonly="state not in ('draft', 'failed')"/>
+                        </group>
+                        <group string="Alıcı">
+                            <field name="partner_id" readonly="state not in ('draft', 'failed')"/>
+                            <field name="recipient_name" readonly="state not in ('draft', 'failed')"/>
+                            <field name="recipient_phone" readonly="state not in ('draft', 'failed')"/>
+                            <field name="recipient_email" readonly="state not in ('draft', 'failed')"/>
+                            <field name="recipient_street" readonly="state not in ('draft', 'failed')"/>
+                            <field name="recipient_state_id" readonly="state not in ('draft', 'failed')" options="{'no_create': True}"/>
+                            <field name="recipient_district" readonly="state not in ('draft', 'failed')"/>
+                            <field name="area_id" readonly="state not in ('draft', 'failed')" options="{'no_create': True}"/>
+                        </group>
+                    </group>
+                    <group>
+                        <group string="Kapıda ödeme">
+                            <field name="cod_amount" readonly="state not in ('draft', 'failed')"/>
+                            <field name="cod_method" readonly="state not in ('draft', 'failed')" invisible="not cod_amount"/>
+                        </group>
+                        <group string="Takip">
+                            <field name="tracking_ref" readonly="1"/>
+                            <field name="label_pdf_id" readonly="1"/>
+                            <field name="label_missing" readonly="1" invisible="not label_missing"/>
+                            <field name="test_mode" readonly="1"/>
+                            <field name="sent_at" readonly="1"/>
+                            <field name="cancelled_at" readonly="1" invisible="not cancelled_at"/>
+                        </group>
+                    </group>
+                    <group string="Hata" invisible="not error_message">
+                        <field name="error_code" readonly="1"/>
+                        <field name="error_message" readonly="1"/>
+                    </group>
+                </sheet>
+                <chatter/>
+            </form>
+        </field>
+    </record>
+
+    <record id="view_cargo_shipment_search" model="ir.ui.view">
+        <field name="name">cargo.shipment.search</field>
+        <field name="model">cargo.shipment</field>
+        <field name="arch" type="xml">
+            <search string="Kargo gönderileri">
+                <field name="name"/>
+                <field name="recipient_name"/>
+                <field name="recipient_phone"/>
+                <field name="tracking_ref"/>
+                <field name="origin_ref"/>
+                <field name="invoice_no"/>
+                <field name="carrier_id"/>
+                <field name="recipient_state_id"/>
+                <filter name="filter_draft" string="Taslak" domain="[('state', '=', 'draft')]"/>
+                <filter name="filter_uncertain" string="Belirsiz" domain="[('state', '=', 'uncertain')]"/>
+                <filter name="filter_failed" string="Hatalı" domain="[('state', '=', 'failed')]"/>
+                <separator/>
+                <filter name="filter_cod" string="Kapıda ödemeli" domain="[('cod_amount', '&gt;', 0)]"/>
+                <filter name="filter_test" string="Test" domain="[('test_mode', '=', True)]"/>
+                <group>
+                    <filter name="group_state" string="Durum" context="{'group_by': 'state'}"/>
+                    <filter name="group_carrier" string="Kargo firması" context="{'group_by': 'carrier_id'}"/>
+                    <filter name="group_recipient_state" string="İl" context="{'group_by': 'recipient_state_id'}"/>
+                </group>
+            </search>
+        </field>
+    </record>
+
+    <record id="action_cargo_shipment" model="ir.actions.act_window">
+        <field name="name">Kargo gönderileri</field>
+        <field name="res_model">cargo.shipment</field>
+        <field name="view_mode">list,form</field>
+        <field name="search_view_id" ref="view_cargo_shipment_search"/>
+    </record>
+</odoo>

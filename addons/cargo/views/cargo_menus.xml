@@ -1,11 +1,17 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <odoo>
-    <!-- Menü kökü. Gönderiler alt menüsü sonraki görevde gelir;
-         alt menüsü olmayan kök Odoo'da görünmez. -->
+    <!-- Menü kökü. Alt menüsü olmayan kök Odoo'da görünmez. -->
     <menuitem id="menu_cargo_root"
               name="Kargo"
               groups="cargo.group_cargo_user"
               sequence="85"/>
+
+    <menuitem id="menu_cargo_shipment"
+              name="Gönderiler"
+              parent="menu_cargo_root"
+              action="action_cargo_shipment"
+              groups="cargo.group_cargo_user"
+              sequence="10"/>
 
     <menuitem id="menu_cargo_config"
               name="Yapılandırma"
