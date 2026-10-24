@@ -60,7 +60,7 @@ Ayar ekranına (Ayarlar > Kargo) sır girilmez; yalnız varsayılan firma seçil
 
 Deploy adımları `addons/cargo/README.md` 8. bölümdedir (canlıda yeni modül: önce `-i cargo,cargo_ups`; üretim compose'u bunları otomatik kurmaz). Özet: yedek + rollback etiketi → redeploy → `-i cargo,cargo_ups` → grup atama → UPS hesabı → duman testi → bayrağı canlıya al. **Canlıda UPS'e ilk çağrıdan önce sunucunun çıkış IP'sinin UPS izin listesinde olması gerekiyorsa ekletin (CD-2).**
 
-Geri alma sırası: (1) firmada `prod_environment` kapat / firmayı arşivle; (2) gönderi listesini CSV dışa aktar, **önce `cargo_ups`, sonra `cargo`** kaldır (`ups_tr` firmaları `fixed` + arşivli olur); (3) git revert ancak modüller kaldırıldıktan sonra; (4) UPS'te açık kalan gönderileri UPS panelinden iptal et.
+Geri alma sırası: (1) firmada `prod_environment` kapat / firmayı arşivle; (2) gönderi listesini CSV dışa aktar, **önce `cargo_ups`, sonra `cargo`** kaldır (`ups_tr` firmaları: gönderi kaydı varsa `fixed` + arşivli, yoksa hazır UPS kaydı silinir ve transferlerde `carrier_id` boşalır); (3) git revert ancak modüller kaldırıldıktan sonra; (4) UPS'te açık kalan gönderileri UPS panelinden iptal et.
 
 ## 8. CANLI DUMAN TESTİ (CD-1..CD-12)
 

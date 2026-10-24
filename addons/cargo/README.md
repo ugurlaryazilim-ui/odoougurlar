@@ -67,7 +67,7 @@ Ayar ekranında **sır yoktur**; hesap bilgileri firma kaydındadır (sağlayıc
 1. Veritabanı yedeği alın ve rollback etiketini atın.
 2. Önkoşul kontrolü (salt okunur): `SELECT name, state FROM ir_module_module WHERE name IN ('stock_delivery','delivery','sale_stock');` üçü de `installed` olmalı. (Pazaryeri modülleri `delivery`'ye bağlı olduğundan `stock_delivery` Odoo'nun otomatik kurulumuyla gelmiş olmalıdır; değilse `-i` onu da kurar, sakıncası yoktur.)
 3. Redeploy yapın (kod gelir; kurulu hiçbir modül yükseltilmez, mesai dışı zorunlu değil).
-4. Hemen `odoo -d <veritabani> -i cargo,cargo_ups --stop-after-init`. Yeni modül olduğundan arada çalışan ekran yoktur, kesinti oluşmaz.
+4. Hemen komut satırından kurun: `docker exec odoougurlar-odoo-prod odoo -d ugurlar -i cargo,cargo_ups --stop-after-init --no-http`. **Arayüzden Uygulamalar > Kur/Yükselt düğmesini kullanmayın:** canlıda `ir_cron` satır kilidine takılıp zaman aşımına düşer. Yeni modül olduğundan arada çalışan ekran yoktur, kesinti oluşmaz. Üretim kopyasında kurulum ~10 sn sürdü. Python bağımlılığı eklenmedi (requests, lxml, reportlab, Pillow imajda var).
 5. Kullanıcılara Kargo / Kullanıcı, yöneticiye Kargo / Yönetici grubu atayın.
 6. Sağlayıcı firmasını açın ve duman testini yapın (cargo_ups README). Ayarlar > Kargo'dan varsayılan firmayı seçin.
 7. Kontrol: Kargo menüsü görünür; Ayarlar > Teknik > Veri tabanı yapısı > Modeller'de `cargo.shipment` ve `cargo.area` var.
@@ -77,7 +77,7 @@ Ayar ekranında **sır yoktur**; hesap bilgileri firma kaydındadır (sağlayıc
 ## 9. Geri alma (sırası önemli)
 
 1. **Yumuşak (deploy gerekmez):** firmada `prod_environment` kapatılır (çağrılar test ucuna gider, ücretsizdir) ya da firma arşivlenir (KK-5 hatasıyla seçilemez olur). Kullanıcılardan Kargo gruplarını almak da ekranı kapatır.
-2. **Tam kaldırma:** önce gönderi listesini CSV olarak dışa aktarın (kaldırma `cargo_shipment` ve `cargo_area` tablolarını siler). Sonra Uygulamalar'dan **önce `cargo_ups`, sonra `cargo`** kaldırılır. `ups_tr` tipli firmalar `fixed` + arşivli olur; transferlerdeki `carrier_id` (arşivli firma) ve `carrier_tracking_ref` metni kalır, zararsızdır.
+2. **Tam kaldırma:** önce gönderi listesini CSV olarak dışa aktarın (kaldırma `cargo_shipment` ve `cargo_area` tablolarını siler). Sonra Uygulamalar'dan **önce `cargo_ups`, sonra `cargo`** kaldırılır. `ups_tr` firmaları: **gönderi kaydı bağlıysa** `fixed` + arşivli kalır (transferlerdeki `carrier_id` korunur); **hiç gönderi yoksa** hazır UPS kaydı silinir ve transferlerdeki `carrier_id` boşalır. Her iki durumda `carrier_tracking_ref` metni kalır, zararsızdır. Yeniden kurulumda arşivli firma `ups_tr` tipine döner ama arşivli kalır; açmadan önce `prod_environment` bayrağını kontrol edin.
 3. **Kod geri alma (git revert)** ancak modüller **kaldırıldıktan sonra** yapılır; kurulu modülün kodu silinirse kayıt defteri yüklenirken model/görünüm hatası çıkar.
 4. Odoo'dan silinen ama kargo firmasında açık kalan gönderiler firmanın panelinden iptal edilir.
 
