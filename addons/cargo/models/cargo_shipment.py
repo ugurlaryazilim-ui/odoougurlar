@@ -390,6 +390,60 @@ class CargoShipment(models.Model):
         self._cargo_side_job('chatter', self._cargo_post, _('Etiket basıldı.'))
         return {'type': 'ir.actions.act_url', 'url': '/web/content/%d?download=false' % pdf.id, 'target': 'new'}
 
+    @api.model
+    @api.private
+    def create_and_send(self, *, recipient_name, phone, street, state, district, package_count=1, weight=None,
+                        reference=None, invoice_no=None, cod_amount=0.0, cod_method=None, carrier=None, source=None,
+                        email=None, partner=None):
+        """Gönderi açar ve kargo firmasına gönderir (KK-API, K-24); tek ``cargo.shipment`` kaydı döner.
+
+        ``state``: res.country.state, ``carrier``: delivery.carrier (yoksa şirket varsayılanı), ``source``: gönderiyi
+        açan herhangi bir kayıt. Sonuç kayıttan okunur (``state``, ``tracking_ref``, ``error_message``,
+        ``label_pdf_id``): sağlayıcı hatası istisna olmaz, kayıt ``failed``/``uncertain`` döner (KK-API-1).
+        Doğrulama hatası UserError'dur ve kayıt bırakmaz; yetkisiz çağrı AccessError'dur (sudo ile bile, KK-API-3).
+        ``reference`` aynı olan ``cancelled``/``failed`` dışındaki kayıt varsa YENİ GÖNDERİ AÇILMAZ, o kayıt
+        döner (KK-API-2; durumuna bakılır: ``sending``/``uncertain`` olabilir, yeniden gönderilmez).
+
+        DIKKAT: çağrı ortasında ``cr.commit()`` yapar (``_cargo_send`` ara noktaları): çağıranın o ana kadarki
+        açık işlemi de kalıcılaşır ve çağrı savepoint içinden yapılamaz. Çağıran, kendi kaydını bu çağrıdan ÖNCE
+        tutarlı bırakmalı.
+        """
+        if not self.env.user.has_group('cargo.group_cargo_user'):
+            raise AccessError(_('Kargo gönderisi işlemleri için "Kargo / Kullanıcı" yetkisi gerekir.'))
+        # NEDEN: '' boş referanstır (create da aynısını yapar); boş referansla "aynı kayıt" aranmaz.
+        reference = (reference or '').strip() or False
+        if reference:
+            existing = self.search([('origin_ref', '=', reference), ('state', 'not in', ('cancelled', 'failed'))], limit=1)
+            if existing:
+                return existing
+        vals = {
+            'recipient_name': recipient_name, 'recipient_phone': phone, 'recipient_email': email,
+            'recipient_street': street, 'recipient_state_id': state.id, 'recipient_district': district,
+            'package_count': package_count, 'origin_ref': reference, 'invoice_no': invoice_no,
+            'cod_amount': cod_amount, 'cod_method': cod_method, 'partner_id': partner.id if partner else False,
+        }
+        if weight is not None:
+            vals['package_weight'] = weight
+        if carrier:
+            vals['carrier_id'] = carrier.id
+        if source:
+            vals['source_model'], vals['source_id'] = source._name, source.id
+        try:
+            # NEDEN: doğrulama hatasında yalnız UserError değil kayıt da geri alınmalı (çağıran hatayı yakalayıp
+            # devam edebilir); commit'ler bu savepoint kapandıktan sonra, ``_cargo_send`` içinde yapılır.
+            with self.env.cr.savepoint():
+                # NEDEN: source_*/picking_id sistem alanıdır (yalnız sudo yazar); yetki yukarıda denetlendi.
+                shipment = self.sudo().create(vals)
+                shipment._cargo_check_ready()
+        except pg_errors.UniqueViolation:
+            # NEDEN: eşzamanlı ikinci çağrı aynı referansla birinciyi görmeden eklemeyi denedi; DB indeksi
+            # mükerrerliği engeller. Birinci işlem commit'li değilse bu işlemin anlık görüntüsü onu göremez.
+            raise UserError(_('Bu iş referansıyla açık bir kargo gönderisi zaten var. Birkaç saniye sonra '
+                              'yeniden deneyin.')) from None
+        shipment = shipment.with_env(self.env)
+        shipment._cargo_send()
+        return shipment
+
     def _cargo_send(self):
         """Gönder. ``{'status': 'ok'|'error'|'uncertain', 'message': str}`` döner (G7 ``create_and_send`` çağırır).
 
