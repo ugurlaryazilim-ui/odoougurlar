@@ -11,3 +11,5 @@ from . import test_settings
 from . import test_carrier
 from . import test_area
 from . import test_shipment_model
+from . import test_shipment_flow
+from . import test_shipment_concurrency

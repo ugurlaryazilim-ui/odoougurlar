@@ -2,22 +2,29 @@
 """Kargo gönderisi (02-tasarim 4.5, KARARLAR K-20/K-21/K-26).
 
 Bu dosyada: alanlar, varsayılanlar, ilçe (``area_id``) hesaplama, gönderim öncesi doğrulama
-(``_cargo_check_ready``) ve kilitler. Gönder / uzlaştır / iptal akışı sonraki görevdedir; o akış
-sistem alanlarını ``sudo()`` ile yazar.
+(``_cargo_check_ready``), kilitler ve gönder / uzlaştır / iptal akışı (K-21; sistem alanları ``sudo()`` ile).
 
 Kilit modeli (DERSLER: kilit write override'ıyla değil kayıt kuralıyla kurulur):
 * Kullanıcı alanları yalnız ``draft``/``failed`` durumunda yazılabilir: ``security/cargo_security.xml``
   kayıt kuralları (write/create/unlink).
 * Sistem alanları (``_CARGO_SYSTEM_FIELDS``) yalnız ``env.su`` ile yazılır; RPC/form yazımı AccessError verir.
 """
+import base64
+import logging
+import math
 import re
+from datetime import timedelta
+
+from psycopg2 import errors as pg_errors
 
 from odoo import _, api, fields, models
 from odoo.exceptions import AccessError, UserError, ValidationError
 
 from .res_company import _cargo_carrier_domain
 
-# NEDEN: alan sınırları ilk sağlayıcının (UPS) sınırlarıdır.
+_logger = logging.getLogger(__name__)
+
+# NEDEN: alan sınırları ilk sağlayıcının sınırlarıdır (çekirdekte sağlayıcı adı geçmez, KK-30).
 # EKIP-BORC: farklı sınırlı ikinci sağlayıcı gelirse bu sabitler ``<tip>_cargo_limits`` kancasına taşınmalı.
 NAME_MAX = 40
 NAME_MIN = 3
@@ -36,6 +43,18 @@ _CARGO_SYSTEM_FIELDS = frozenset((
     'name', 'state', 'picking_id', 'source_model', 'source_id', 'test_mode', 'tracking_ref',
     'label_pdf_id', 'label_missing', 'error_code', 'error_message', 'sent_at', 'cancelled_at'))
 _EDITABLE_STATES = ('draft', 'failed')
+_SHIPPED_STATES = ('in_transit', 'out_for_delivery', 'delivered', 'returned')
+# NEDEN: sağlayıcıda kaydın sorguda görünme gecikmesi bilinmiyor (CD-6); daha genç "bulunamadı" kesin değildir,
+# yanlış "yok" kararı mükerrer gönderi açar (K-21). Yaş son sending geçişinden (sent_at) ölçülür.
+RECONCILE_MIN_AGE = timedelta(minutes=15)
+# NEDEN: sağlayıcı hata metnini sırlardan temizler (sağlayıcı ``_scrub``); çekirdek yalnız uzunluğu sınırlar.
+ERROR_MESSAGE_MAX = 500
+_PROVIDER_STATUSES = {
+    'send': ('ok', 'error', 'uncertain'),
+    'cancel': ('ok', 'error', 'uncertain'),
+    'find': ('found', 'not_found', 'error'),
+}
+_PNG_MAGIC = b'\x89PNG\r\n\x1a\n'
 
 
 class CargoShipment(models.Model):
@@ -46,6 +65,9 @@ class CargoShipment(models.Model):
     # NEDEN: kargo kullanıcısı kilitli (created vb.) gönderiye de not düşebilmeli; yazma kilidi kayıt
     # kuralındadır, chatter yazımı ise 'read' erişimine bağlanır (sanal_pos ile aynı).
     _mail_post_access = 'read'
+    # NEDEN: çok şirketli veritabanında başka şirketin kargo hesabı/transferi/müşterisi seçilmesin
+    # (güvenlik taraması 2026-10-24); okuma ayrımı security'deki global şirket kuralındadır.
+    _check_company_auto = True
 
     # NEDEN: bir iş referansıyla yalnız tek AKTİF gönderi olur (KK-API-2, picking'den ikinci gönderi yok);
     # iptal/hatalı olanın ardından yenisi açılabilir (K-21).
@@ -62,7 +84,8 @@ class CargoShipment(models.Model):
         ('delivered', 'Teslim edildi'), ('returned', 'İade'), ('exception', 'Sorunlu'),
         ('cancelled', 'İptal'), ('failed', 'Hatalı')],
         string='Durum', default='draft', required=True, readonly=True, copy=False, index=True)
-    picking_id = fields.Many2one('stock.picking', string='Transfer', copy=False, index=True, ondelete='set null')
+    picking_id = fields.Many2one(
+        'stock.picking', string='Transfer', copy=False, index=True, ondelete='set null', check_company=True)
     source_model = fields.Char(string='Kaynak model', copy=False)
     source_id = fields.Integer(string='Kaynak kayıt', copy=False)
     # NEDEN: test_mode gönderim anında not carrier.prod_environment ile yazılır (K-26); taslakta da
@@ -80,14 +103,14 @@ class CargoShipment(models.Model):
     # ------------------------------------------------------------------ kilitli (draft/failed) alanlar
     carrier_id = fields.Many2one(
         'delivery.carrier', string='Kargo firması', required=True, index=True, ondelete='restrict',
-        domain=_cargo_carrier_domain, default=lambda self: self._default_carrier_id())
+        domain=_cargo_carrier_domain, default=lambda self: self._default_carrier_id(), check_company=True)
     # Form alan filtresi (area_id domain'i) için; sağlayıcı kodu = delivery_type.
     carrier_type = fields.Selection(related='carrier_id.delivery_type', string='Firma tipi')
     company_id = fields.Many2one('res.company', string='Şirket', required=True, default=lambda self: self.env.company)
     currency_id = fields.Many2one(related='company_id.currency_id', string='Para birimi')
     origin_ref = fields.Char(string='İş referansı', copy=False, help='Transfer adı ya da çağıranın verdiği referans.')
     invoice_no = fields.Char(string='Fatura no', copy=False)
-    partner_id = fields.Many2one('res.partner', string='Müşteri', ondelete='set null')
+    partner_id = fields.Many2one('res.partner', string='Müşteri', ondelete='set null', check_company=True)
     recipient_name = fields.Char(string='Alıcı adı')
     recipient_phone = fields.Char(string='Alıcı telefonu')
     recipient_email = fields.Char(string='Alıcı e-postası')
@@ -264,7 +287,7 @@ class CargoShipment(models.Model):
         errors += self._cargo_check_cod(carrier)
 
         # Gönderici (şirket adresi) aynı kuralla eşlenir; eşleşmezse çağrı yapılmaz (V-3).
-        if carrier and not self.env['cargo.area']._match(carrier.delivery_type, self.company_id.state_id, self.company_id.city):
+        if carrier and not self._cargo_sender_area():
             errors.append(_(
                 'Şirket adresinin ilçesi eşleşmedi: %(state)s/%(city)s. Şirket adresini düzeltin ya da '
                 'yönetici ilçe için diğer ad eklesin.',
@@ -315,3 +338,298 @@ class CargoShipment(models.Model):
         cut = head.rfind(' ')
         short = name[:cut].rstrip() if cut >= NAME_MIN else name[:NAME_MAX]
         return short
+
+    def _cargo_sender_area(self):
+        """Gönderici (şirket adresi) ilçesi; alıcıyla aynı tam anahtar kuralı (V-3, K-25)."""
+        self.ensure_one()
+        company = self.company_id
+        return self.env['cargo.area']._match(self.sudo().carrier_id.delivery_type, company.state_id, company.city)
+
+    # ------------------------------------------------------------------ gönder / uzlaştır / iptal (K-21)
+    def action_send(self):
+        self.ensure_one()
+        return self._cargo_notification(self._cargo_send())
+
+    def action_reconcile(self):
+        self.ensure_one()
+        return self._cargo_notification(self._cargo_reconcile())
+
+    def action_cancel(self):
+        self.ensure_one()
+        return self._cargo_notification(self._cargo_cancel())
+
+    def _cargo_send(self):
+        """Gönder. ``{'status': 'ok'|'error'|'uncertain', 'message': str}`` döner (G7 ``create_and_send`` çağırır).
+
+        DIKKAT: sıra değiştirilemez (K-21, KK-11): doğrulama → sending + commit → sağlayıcı → sonuç + commit →
+        yan işler + commit. Sağlayıcı çağrısından sonra raise yoktur: gönderi kargo firmasında açılmış olabilir.
+        DIKKAT: ara commit'ler çağıranın (G6 transfer, G7 API) o ana kadarki işlemini de kalıcı yapar.
+        """
+        self.ensure_one()
+        self._cargo_check_user()
+        state = self._cargo_lock()
+        if state not in _EDITABLE_STATES:
+            raise UserError(self._cargo_state_error(state))
+        self._cargo_check_ready()
+        note = self._cargo_area_manual_note()
+        if note:
+            self.message_post(body=note, subtype_xmlid='mail.mt_note')
+        sudo = self.sudo()
+        # NEDEN: test_mode gönderim anındaki firma bayrağıdır (K-26); sağlayıcı ucu buna göre seçer (G9 §2).
+        sudo.write({
+            'state': 'sending', 'sent_at': fields.Datetime.now(), 'test_mode': not sudo.carrier_id.prod_environment,
+            'tracking_ref': False, 'error_code': False, 'error_message': False, 'label_missing': False})
+        self._cargo_commit()
+
+        result = self._cargo_provider_call('send')
+        status, code, message = result['status'], result['error_code'], result['error_message']
+        tracking = result['tracking_ref']
+        if status == 'ok' and not tracking:
+            # NEDEN: takip no'suz "başarı" ile created yazılırsa iptal/takip yapılamaz; kayıt firmada olabilir.
+            status, message = 'uncertain', _('Kargo firması başarı döndü ama takip numarası vermedi.')
+        if status == 'ok':
+            sudo.write({'state': 'created', 'tracking_ref': tracking})
+        elif status == 'error':
+            sudo.write({'state': 'failed', 'error_code': code, 'error_message': message})
+        else:
+            sudo.write({'state': 'uncertain', 'error_message': message})
+        self._cargo_commit()
+
+        if status == 'ok':
+            self._cargo_after_created(result['labels'])
+            text = _('Kargo gönderisi oluşturuldu. Takip no: %s', tracking)
+        elif status == 'error':
+            text = _('Kargo firması gönderiyi reddetti: %s', self._cargo_error_text(code, message))
+            self._cargo_side_job('chatter', self._cargo_post, text)
+        else:
+            text = _('Gönderinin sonucu belirsiz: %s. Kargo firmasında oluşmuş olabilir; yeniden göndermeyin, '
+                     'birkaç dakika sonra "Uzlaştır" ile sorgulayın.', message or _('yanıt alınamadı'))
+            self._cargo_side_job('chatter', self._cargo_post, text)
+        self._cargo_commit()
+        return {'status': status, 'message': text}
+
+    def _cargo_reconcile(self):
+        """Belirsiz (ya da 15 dk'dan eski takılı sending) gönderiyi kargo firmasında referansla sorgular.
+
+        Yeniden gönderim YAPMAZ (K-21). DIKKAT: find çağrısı satır kilidi tutulurken yapılır; aynı gönderiyi
+        iki oturum birden uzlaştıramaz.
+        """
+        self.ensure_one()
+        self._cargo_check_user()
+        state = self._cargo_lock()
+        age = fields.Datetime.now() - self.sent_at if self.sent_at else RECONCILE_MIN_AGE
+        if state == 'sending' and age < RECONCILE_MIN_AGE:
+            raise UserError(_('Gönderi zaten işleniyor; sonucu birkaç saniye içinde görünür. Sayfayı yenileyin.'))
+        # NEDEN (S1): sonucu yazılamadan kalmış (sunucu/DB hatası) sending kaydının başka çıkışı yoktur.
+        if state not in ('uncertain', 'sending'):
+            raise UserError(_('Yalnız sonucu belirsiz gönderi uzlaştırılabilir.'))
+        sudo = self.sudo()
+        result = self._cargo_provider_call('find')
+        status, tracking, message = result['status'], result['tracking_ref'], result['error_message']
+        if status == 'found' and not tracking:
+            status, message = 'error', _('Kargo firması kaydı buldu ama takip numarası vermedi.')
+        if status == 'found':
+            sudo.write({'state': 'created', 'tracking_ref': tracking, 'label_missing': True,
+                        'error_code': False, 'error_message': False})
+            text = _('Uzlaştırma: gönderi kargo firmasında bulundu. Takip no: %s. Etiket alınamadı; etiketi '
+                     'kargo firmasının panelinden alın.', tracking)
+            count = result['count']
+            if count > 1:
+                text += ' ' + _('Kargo firmasında bu referansla %s kayıt var; fazlasını firmanın panelinden iptal edin.',
+                                count)
+        elif status == 'not_found' and age >= RECONCILE_MIN_AGE:
+            text = _('Uzlaştırma: gönderi kargo firmasında bulunamadı. Gönderi hatalı sayıldı; yeniden gönderebilirsiniz.')
+            sudo.write({'state': 'failed', 'error_code': False, 'error_message': text})
+        elif status == 'not_found':
+            minutes = math.ceil((RECONCILE_MIN_AGE - age).total_seconds() / 60)
+            text = _('Gönderi kargo firmasında henüz görünmüyor; kesin karar için %s dk sonra tekrar deneyin.', minutes)
+            status = 'uncertain'
+        else:
+            text = _('Kargo firması sorgulanamadı: %s. Durum belirsiz kaldı; sonra tekrar deneyin.',
+                     message or _('yanıt alınamadı'))
+            sudo.write({'state': 'uncertain', 'error_message': message})
+            status = 'uncertain'
+        self._cargo_commit()
+        if status == 'found':
+            self._cargo_side_job('chatter', self._cargo_post, text)
+            self._cargo_side_job('transfer', self._cargo_write_picking_tracking)
+            status = 'ok'
+        elif status == 'not_found':
+            self._cargo_side_job('chatter', self._cargo_post, text)
+            status = 'error'
+        self._cargo_commit()
+        return {'status': status, 'message': text}
+
+    def _cargo_cancel(self):
+        """Oluşturulmuş gönderiyi kargo firmasında iptal eder (KK-23/24). Hata/belirsizde durum değişmez."""
+        self.ensure_one()
+        self._cargo_check_user()
+        # NEDEN: kargoya verilmiş gönderide kilit/dış çağrı yapılmadan reddedilir (KK-24).
+        if self.state in _SHIPPED_STATES:
+            raise UserError(_('Kargoya verilmiş gönderi iptal edilemez.'))
+        state = self._cargo_lock()
+        if state in _SHIPPED_STATES:
+            raise UserError(_('Kargoya verilmiş gönderi iptal edilemez.'))
+        if state == 'cancelled':
+            raise UserError(_('Gönderi zaten iptal edilmiş.'))
+        if state != 'created':
+            raise UserError(_('Yalnız oluşturulmuş gönderi iptal edilebilir.'))
+        result = self._cargo_provider_call('cancel')
+        status = result['status']
+        reason = self._cargo_error_text(result['error_code'], result['error_message'])
+        if status == 'ok':
+            self.sudo().write({'state': 'cancelled', 'cancelled_at': fields.Datetime.now()})
+            self._cargo_commit()
+            text = _('Kargo gönderisi iptal edildi. Takip no: %s', self.tracking_ref)
+            self._cargo_side_job('transfer', self._cargo_clear_picking_tracking)
+        elif status == 'error':
+            text = _('İptal edilemedi: %s', reason)
+        else:
+            text = _('İptal sonucu belirsiz: %s. Gönderi durumu değişmedi; tekrar deneyin.', reason)
+        self._cargo_side_job('chatter', self._cargo_post, text)
+        self._cargo_commit()
+        return {'status': status, 'message': text}
+
+    # ------------------------------------------------------------------ akış yardımcıları
+    def _cargo_check_user(self):
+        # NEDEN: akış sistem alanlarını sudo() ile yazar; yetki kayıt kuralına bırakılamaz. sudo() altında da
+        # env.user gerçek kullanıcıdır. Okuma denetimi şirket kuralını uygular (SQL kilidi kuralı atlar).
+        if not self.env.user.has_group('cargo.group_cargo_user'):
+            raise AccessError(_('Kargo gönderisi işlemleri için "Kargo / Kullanıcı" yetkisi gerekir.'))
+        self.check_access('read')
+
+    def _cargo_commit(self):
+        """Akışın ara noktasını kalıcı yapar (K-21: sending, sağlayıcıdan ÖNCE başka oturumlarca görülmeli).
+
+        DIKKAT: savepoint içinden çağrılmaz; çağıranın o ana kadarki işlemi de kalıcı olur. Testlerde yamalanır.
+        """
+        self.env.flush_all()
+        self.env.cr.commit()
+
+    def _cargo_lock(self):
+        """Gönderi satırını ``FOR UPDATE NOWAIT`` ile kilitler ve SQL'deki güncel durumu döner (KK-12).
+
+        DIKKAT: kilit/serileştirme hatası yakalanmazsa Odoo ``retrying()`` tüm isteği 5 kez tekrarlar (DERSLER).
+        Kilit ilk commit'te bırakılır; sonrasında koruma commit'li ``sending`` durumudur.
+        """
+        self.ensure_one()
+        self.flush_recordset()
+        cr = self.env.cr
+        try:
+            with cr.savepoint(flush=False):
+                cr.execute('SELECT state FROM cargo_shipment WHERE id = %s FOR UPDATE NOWAIT', [self.id],
+                           log_exceptions=False)
+                row = cr.fetchone()
+        except (pg_errors.LockNotAvailable, pg_errors.SerializationFailure):
+            raise UserError(_('Gönderi zaten işleniyor (başka bir oturumda). Birkaç saniye sonra sayfayı yenileyin.')) from None
+        if not row:
+            raise UserError(_('Gönderi bulunamadı.'))
+        self.invalidate_recordset()
+        return row[0]
+
+    def _cargo_state_error(self, state):
+        if state == 'sending':
+            return _('Gönderi zaten işleniyor; sonucu birkaç saniye içinde görünür. Sayfayı yenileyin.')
+        if state == 'uncertain':
+            return _('Gönderinin sonucu belirsiz; yeniden gönderilemez. Önce "Uzlaştır" ile kargo firmasında sorgulayın.')
+        if state == 'cancelled':
+            return _('Gönderi iptal edilmiş; yeniden gönderilemez. Yeni bir gönderi açın.')
+        return _('Gönderi zaten oluşturuldu; yeniden gönderilemez.')
+
+    def _cargo_provider_call(self, op):
+        """Sağlayıcıyı çağırır; dönüşü her zaman tam anahtarlı ve izinli durumlu bir sözlüktür.
+
+        NEDEN: sağlayıcı istisna fırlatmamalı (G9 §2) ama fırlatırsa send/cancel'da "belirsiz" sayılır (istek
+        firmaya ulaşmış olabilir), find'da "hata". İstisna METNİ log'a/kayda yazılmaz: sır içerebilir (KK-3).
+        """
+        fallback = 'error' if op == 'find' else 'uncertain'
+        try:
+            with self.env.cr.savepoint():
+                result = self.sudo().carrier_id._cargo_call(op, self.sudo())
+        except Exception as error:      # noqa: BLE001 - dış çağrı sonrası raise yok (K-21)
+            _logger.warning('cargo.shipment %s: %s çağrısı istisna verdi (%s)', self.id, op, type(error).__name__)
+            result = {'status': fallback, 'error_message': _('Kargo firması çağrısı beklenmedik biçimde kesildi.')}
+        if not isinstance(result, dict) or result.get('status') not in _PROVIDER_STATUSES[op]:
+            _logger.warning('cargo.shipment %s: %s çağrısı geçersiz yanıt döndü', self.id, op)
+            result = {'status': fallback, 'error_message': _('Kargo firmasından geçersiz yanıt alındı.')}
+        count = result.get('count')
+        return {
+            'status': result['status'],
+            'tracking_ref': str(result.get('tracking_ref') or '').strip(),
+            'labels': list(result.get('labels') or []),
+            'error_code': str(result.get('error_code') or '')[:64],
+            'error_message': str(result.get('error_message') or '')[:ERROR_MESSAGE_MAX],
+            'count': count if isinstance(count, int) else 0,
+        }
+
+    @staticmethod
+    def _cargo_error_text(code, message):
+        return ' '.join(part for part in (code and '[%s]' % code, message) if part) or _('ayrıntı verilmedi')
+
+    def _cargo_side_job(self, label, func, *args):
+        """Yan iş (chatter, ek, transfer): ayrı savepoint; hatası gönderi durumunu bozmaz (K-21)."""
+        try:
+            with self.env.cr.savepoint():
+                return func(*args)
+        except Exception as error:      # noqa: BLE001 - durum zaten commit'li; yan iş kaybı log'lanır
+            _logger.warning('cargo.shipment %s: yan iş "%s" başarısız (%s)', self.id, label, type(error).__name__)
+            return None
+
+    def _cargo_post(self, body):
+        self.message_post(body=body, subtype_xmlid='mail.mt_note')
+
+    def _cargo_after_created(self, labels):
+        """created sonrası yan işler (her biri ayrı savepoint). G5 PDF adımını buraya ekler."""
+        stored = self._cargo_side_job('etiket', self._cargo_store_labels, labels) or 0
+        if not stored:
+            self._cargo_side_job('etiket', self.sudo().write, {'label_missing': True})
+        self._cargo_side_job('chatter', self._cargo_post_created, stored)
+        self._cargo_side_job('transfer', self._cargo_write_picking_tracking)
+
+    def _cargo_store_labels(self, labels):
+        """Geçerli PNG etiketlerini sağlayıcıdan geldiği gibi ``<name>-<n>.png`` eki olarak saklar; sayısını döner."""
+        valid = [data for data in labels if isinstance(data, bytes) and data.startswith(_PNG_MAGIC)]
+        if valid:
+            self.env['ir.attachment'].sudo().create([{
+                'name': '%s-%d.png' % (self.name, index), 'raw': data, 'mimetype': 'image/png',
+                'res_model': self._name, 'res_id': self.id,
+            } for index, data in enumerate(valid, 1)])
+        return len(valid)
+
+    def _cargo_post_created(self, stored):
+        body = _('Kargo gönderisi oluşturuldu. Takip no: %s', self.tracking_ref)
+        if self.test_mode:
+            body += ' ' + _('(Test ortamı: gerçek gönderi değildir.)')
+        if stored < self.package_count:
+            body += ' ' + _('Etiket eksik: %(got)s/%(want)s paket etiketi alındı; eksik etiketi kargo firmasının '
+                            'panelinden alın.', got=stored, want=self.package_count)
+        self._cargo_post(body)
+
+    def _cargo_picking_tracking_allowed(self):
+        """Takip no transfere yazılsın mı? G6 pazaryeri/Shopify koşuluyla genişletir."""
+        self.ensure_one()
+        # NEDEN: test ucu takip no'su gerçek değildir; transfer üzerinden müşteriye/pazaryerine gitmemeli (K-26).
+        return bool(self.sudo().picking_id) and not self.test_mode
+
+    def _cargo_write_picking_tracking(self):
+        if self._cargo_picking_tracking_allowed():
+            self.sudo().picking_id.write({'carrier_id': self.carrier_id.id, 'carrier_tracking_ref': self.tracking_ref})
+
+    def _cargo_clear_picking_tracking(self):
+        # NEDEN: transferdeki takip no başka bir (yeni) gönderiye ait olabilir; yalnız bizimki silinir.
+        picking = self.sudo().picking_id
+        if picking and self.tracking_ref and picking.carrier_tracking_ref == self.tracking_ref:
+            picking.carrier_tracking_ref = False
+
+    def _cargo_notification(self, result):
+        kind = {'ok': 'success', 'error': 'danger'}.get(result['status'], 'warning')
+        return {
+            'type': 'ir.actions.client',
+            'tag': 'display_notification',
+            'params': {
+                'message': result['message'],
+                'type': kind,
+                'sticky': kind != 'success',
+                'next': {'type': 'ir.actions.client', 'tag': 'soft_reload'},
+            },
+        }

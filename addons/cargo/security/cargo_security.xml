@@ -14,8 +14,15 @@
         <field name="implied_ids" eval="[(4, ref('group_cargo_user'))]"/>
     </record>
 
+    <!-- Çok şirket: gönderi yalnız seçili şirketlerde görünür (grupsuz = global kural; tüm işlemler). -->
+    <record id="rule_cargo_shipment_company" model="ir.rule">
+        <field name="name">Kargo gönderisi: şirket ayrımı</field>
+        <field name="model_id" ref="model_cargo_shipment"/>
+        <field name="domain_force">[('company_id', 'in', company_ids)]</field>
+    </record>
+
     <!-- Gönderi kilitleri (DERSLER: kilit write override'ıyla değil kayıt kuralıyla).
-         ACL kullanıcıya tam yetki verir; asıl sınır bu kurallardır. Okuma serbest (kural yok).
+         ACL kullanıcıya tam yetki verir; asıl sınır bu kurallardır. Okuma şirket kuralı dışında serbest.
          Yazma/oluşturma yalnız taslak ve hatalı gönderide; sistem alanları ayrıca modelde env.su ister. -->
     <record id="rule_cargo_shipment_write" model="ir.rule">
         <field name="name">Kargo gönderisi: yalnız taslak/hatalı düzenlenir</field>
