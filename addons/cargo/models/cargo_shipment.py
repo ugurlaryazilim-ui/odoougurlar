@@ -203,6 +203,40 @@ class CargoShipment(models.Model):
                  text=self.recipient_district or '', area=self.area_id.name)
 
     # ------------------------------------------------------------------ create / write kilitleri
+    @api.model
+    def default_get(self, fields):
+        # NEDEN: create'teki sistem alanı denetimi yalnız çağıranın verdiği vals'a bakar; eksik alanlar sonra
+        # default_get ile (default_ bağlamı + kullanıcının kendine yazdığı kişisel ir.default) doldurulur.
+        # Sudo create yollarında (transfer düğmesi, create_and_send) da uid aynıdır: kişisel ir.default ile
+        # label_pdf_id yabancı eke (sudo ile ezilir), picking_id başka transfere (sudo takip yazılır) işaret
+        # ederdi (05-inceleme K1, DERSLER 21). Sistem alanı yalnız alanın kendi varsayılanını alır.
+        # DIKKAT: kaldırılırsa test_system_defaults kırmızı olur; ikinci savunma create'teki sıfırlamadır.
+        system = _CARGO_SYSTEM_FIELDS.intersection(fields)
+        defaults = super().default_get([name for name in fields if name not in system])
+        for name in system:
+            field = self._fields[name]
+            if field.default:
+                defaults[name] = field.default(self)
+        return defaults
+
+    def _cargo_reset_unrequested_system_fields(self, vals_list):
+        """İkinci savunma: vals'ta verilmemiş sistem alanı varsayılanından farklı oluşmuşsa varsayılana döner."""
+        for shipment, vals in zip(self.sudo(), vals_list):
+            reset = {}
+            for name in _CARGO_SYSTEM_FIELDS.difference(vals):
+                field = self._fields[name]
+                if field.relational:
+                    if shipment[name]:
+                        reset[name] = [Command.clear()] if field.type == 'many2many' else False
+                    continue
+                default = (field.default(shipment) if field.default else False) or False
+                if (shipment[name] or False) != default:
+                    reset[name] = default
+            if reset:
+                _logger.warning('cargo.shipment %s: istenmeyen sistem alanı varsayılanı sıfırlandı: %s',
+                                shipment.id, ', '.join(sorted(reset)))
+                shipment.write(reset)
+
     @api.model_create_multi
     def create(self, vals_list):
         su = self.env.su
@@ -229,13 +263,12 @@ class CargoShipment(models.Model):
         # flush edilmeden aynı referansla yeni gönderi eklenirse yanlış ihlal alınır.
         self.flush_model(['state', 'origin_ref'])
         context = dict(self.env.context, mail_create_nosubscribe=True, mail_create_nolog=True)
-        if not su:
-            # DIKKAT: RPC'de with_context(default_state=...) vals süzmesinden SONRA super().create içinde
-            # uygulanır (DERSLER, 3. tekrar); sistem alanlarının default_ bağlamları burada atılır. Test:
-            # test_shipment_model::test_default_baglami_sistem_alanini_degistiremez.
-            context = {key: value for key, value in context.items()
-                       if not (key.startswith('default_') and key[len('default_'):] in _CARGO_SYSTEM_FIELDS)}
-        return super(CargoShipment, self.with_context(context)).create(vals_list)
+        # DIKKAT: default_ bağlamı ve ir.default vals süzmesinden SONRA super().create içinde uygulanır
+        # (DERSLER 21); sistem alanları default_get override'ında atılır. Testler:
+        # test_shipment_model::test_default_baglami_sistem_alanini_degistiremez, test_system_defaults.
+        shipments = super(CargoShipment, self.with_context(context)).create(vals_list)
+        shipments._cargo_reset_unrequested_system_fields(vals_list)
+        return shipments
 
     def write(self, vals):
         if not self.env.su:
@@ -693,7 +726,9 @@ class CargoShipment(models.Model):
             return self.env['ir.attachment']
         data = build_label_pdf([att.raw for att in pngs], self.company_id.cargo_label_size)
         pdf = self.label_pdf_id.sudo()
-        if pdf:
+        # NEDEN: yalnız bu gönderiye bağlı ek yeniden yazılır; label_pdf_id bir yoldan yabancı eke işaret ederse
+        # sudo yazım o eki ezerdi (K1). Yabancı ek bırakılır, yeni ek açılır.
+        if pdf and (pdf.res_model, pdf.res_id) == (self._name, self.id):
             pdf.write({'raw': data})
         else:
             pdf = self.env['ir.attachment'].sudo().create({

@@ -16,3 +16,4 @@ from . import test_shipment_concurrency
 from . import test_label
 from . import test_picking
 from . import test_api
+from . import test_system_defaults
