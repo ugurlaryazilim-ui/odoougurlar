@@ -450,19 +450,28 @@ class CargoShipment(models.Model):
             raise UserError(_('Gerekçe zorunludur: kargo firmasının panelinde nasıl kontrol ettiğinizi yazın.'))
         return reason, self._cargo_lock()
 
+    @staticmethod
+    def _cargo_minutes_left(since):
+        """``since``'tan bu yana RECONCILE_MIN_AGE dolana kadar kalan dakika (yukarı yuvarlı); dolduysa 0.
+
+        NEDEN: uzlaştırma ve iki elle kapatma (K-28/K-29) aynı eşiği bu tek kuraldan alır (05-inceleme tur #2
+        ÖNERİ 1). Yaş son durum geçişinin/isteğin zamanından ölçülür, create_date'ten değil (DERSLER 22): yeniden
+        gönderilen kayıt eskidir ama son isteği gençtir. ``since`` boşsa eski sayılır.
+        """
+        if not since:
+            return 0
+        left = RECONCILE_MIN_AGE - (fields.Datetime.now() - since)
+        return max(math.ceil(left.total_seconds() / 60), 0)
+
     def _cargo_check_min_age(self, since, message):
         """``since``'tan bu yana RECONCILE_MIN_AGE dolmadıysa UserError.
 
         ``message`` yer tutucuları: ``%(minutes)s`` kalan dk, ``%(min_age)s`` eşik dk.
-
-        NEDEN: yaş son durum geçişinin/isteğin zamanından ölçülür, create_date'ten değil (DERSLER 22): yeniden
-        gönderilen kayıt eskidir ama son isteği gençtir. ``since`` boşsa eski sayılır (uzlaştırmayla aynı).
         """
-        age = fields.Datetime.now() - since if since else RECONCILE_MIN_AGE
-        if age < RECONCILE_MIN_AGE:
+        minutes = self._cargo_minutes_left(since)
+        if minutes:
             raise UserError(message % {
-                'minutes': math.ceil((RECONCILE_MIN_AGE - age).total_seconds() / 60),
-                'min_age': int(RECONCILE_MIN_AGE.total_seconds() // 60)})
+                'minutes': minutes, 'min_age': int(RECONCILE_MIN_AGE.total_seconds() // 60)})
 
     def _cargo_mark_missing(self, reason):
         """Belirsiz gönderiyi elle ``failed`` yapar: kargo firmasında olmadığı panelden doğrulandı (K-28).
@@ -658,8 +667,8 @@ class CargoShipment(models.Model):
         self.ensure_one()
         self._cargo_check_user()
         state = self._cargo_lock()
-        age = fields.Datetime.now() - self.sent_at if self.sent_at else RECONCILE_MIN_AGE
-        if state == 'sending' and age < RECONCILE_MIN_AGE:
+        minutes = self._cargo_minutes_left(self.sent_at)
+        if state == 'sending' and minutes:
             raise UserError(_('Gönderi zaten işleniyor; sonucu birkaç saniye içinde görünür. Sayfayı yenileyin.'))
         # NEDEN (S1): sonucu yazılamadan kalmış (sunucu/DB hatası) sending kaydının başka çıkışı yoktur.
         if state not in ('uncertain', 'sending'):
@@ -678,11 +687,10 @@ class CargoShipment(models.Model):
             if count > 1:
                 text += ' ' + _('Kargo firmasında bu referansla %s kayıt var; fazlasını firmanın panelinden iptal edin.',
                                 count)
-        elif status == 'not_found' and age >= RECONCILE_MIN_AGE:
+        elif status == 'not_found' and not minutes:
             text = _('Uzlaştırma: gönderi kargo firmasında bulunamadı. Gönderi hatalı sayıldı; yeniden gönderebilirsiniz.')
             sudo.write({'state': 'failed', 'error_code': False, 'error_message': text})
         elif status == 'not_found':
-            minutes = math.ceil((RECONCILE_MIN_AGE - age).total_seconds() / 60)
             text = _('Gönderi kargo firmasında henüz görünmüyor; kesin karar için %s dk sonra tekrar deneyin.', minutes)
             status = 'uncertain'
         else:
