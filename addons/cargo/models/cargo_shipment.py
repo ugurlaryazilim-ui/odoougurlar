@@ -9,7 +9,6 @@ Kilit modeli (DERSLER: kilit write override'ıyla değil kayıt kuralıyla kurul
   kayıt kuralları (write/create/unlink).
 * Sistem alanları (``_CARGO_SYSTEM_FIELDS``) yalnız ``env.su`` ile yazılır; RPC/form yazımı AccessError verir.
 """
-import base64
 import logging
 import math
 import re
@@ -345,8 +344,7 @@ class CargoShipment(models.Model):
         """``NAME_MAX``'ı aşan adı kelime sınırında keser; sınırda boşluk yoksa ya da sonuç çok kısaysa sert keser."""
         head = name[:NAME_MAX + 1]
         cut = head.rfind(' ')
-        short = name[:cut].rstrip() if cut >= NAME_MIN else name[:NAME_MAX]
-        return short
+        return name[:cut].rstrip() if cut >= NAME_MIN else name[:NAME_MAX]
 
     def _cargo_sender_area(self):
         """Gönderici (şirket adresi) ilçesi; alıcıyla aynı tam anahtar kuralı (V-3, K-25)."""
