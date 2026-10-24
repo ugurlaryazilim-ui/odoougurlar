@@ -156,7 +156,8 @@ class UpsCase(CargoKabulCase):
             self.net.unexpected.append(url)
             raise AssertionError('beklenmeyen UPS ucu: %s' % url)
         op = operation(request)
-        handler = self.plan.get(op) or self.default(op, request)
+        # NEDEN: requests.Response 4xx/5xx'te falsy (__bool__ = .ok); `or` planlı hata yanıtını yutardı.
+        handler = self.plan[op] if op in self.plan else self.default(op, request)
         result = handler(request) if callable(handler) else handler
         if isinstance(result, BaseException):
             raise result
