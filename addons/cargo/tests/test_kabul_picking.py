@@ -160,6 +160,42 @@ class TestKabulTransferTakip(PickingBase):
         self.assertFalse(picking.carrier_tracking_ref, 'test gonderisi picking takibini kirletmemeli')
         self.assertFalse(picking.carrier_id)
 
+    def _pazaryeri_kaydi(self, comodel, derinlik=0):
+        """Pazaryeri siparis kaydi: zorunlu alanlari (varsayilani olmayan) sahte degerle doldurarak olusturur.
+
+        NEDEN: shopify.order gibi modellerde ``store_id`` zorunludur; bos ``create({})`` NotNullViolation verir
+        (shopify kurulu kopyada kosuldugunda bulundu). Olusturulamazsa ``None`` doner (cagiran skip eder).
+        """
+        Model = self.env[comodel]
+        if derinlik > 3:
+            return None
+        defaults = Model.default_get(list(Model._fields))
+        vals = {}
+        for name, field in Model._fields.items():
+            if not field.required or not field.store or name in defaults or field.type == 'boolean':
+                continue
+            if field.type == 'many2one':
+                sub = self._pazaryeri_kaydi(field.comodel_name, derinlik + 1)
+                if not sub:
+                    return None
+                vals[name] = sub.id
+            elif field.type in ('char', 'text'):
+                vals[name] = 'QA-%s' % name
+            elif field.type in ('integer', 'float', 'monetary'):
+                vals[name] = 1
+            elif field.type == 'selection':
+                options = field._description_selection(self.env)
+                vals[name] = options[0][0] if options else False
+            elif field.type == 'datetime':
+                vals[name] = '2026-01-01 10:00:00'
+            elif field.type == 'date':
+                vals[name] = '2026-01-01'
+        try:
+            with self.env.cr.savepoint():
+                return Model.create(vals)
+        except Exception:  # noqa: BLE001 - fikstur kurulamadi: cagiran skip eder
+            return None
+
     def test_pazaryeri_siparisinde_picking_a_yazilmaz(self):
         """KK-15 zemini + S-6: pazaryeri/Shopify siparisinde takip no picking'e yazilmaz (pazaryeri kendi yazar)."""
         self.carrier.prod_environment = True
@@ -170,9 +206,9 @@ class TestKabulTransferTakip(PickingBase):
                 continue
             with self.subTest(alan=fname):
                 comodel = Sale._fields[fname].comodel_name
-                record, error = self.try_call(lambda: self.env[comodel].create({}))
-                if error or not record:
-                    self.skipTest('%s kaydi bos degerlerle olusturulamadi' % comodel)
+                record = self._pazaryeri_kaydi(comodel)
+                if not record:
+                    self.skipTest('%s kaydi olusturulamadi' % comodel)
                 picking = self.make_picking(**{fname: record.id})
                 self.assertTrue(picking.sudo().cargo_marketplace_name, '%s pazaryeri olarak taninmali' % fname)
                 self.open_action(picking)
