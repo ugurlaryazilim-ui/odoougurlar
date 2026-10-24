@@ -1,4 +1,6 @@
 # -*- coding: utf-8 -*-
+from psycopg2 import errors as pg_errors
+
 from odoo import _, api, fields, models
 from odoo.exceptions import AccessError, UserError
 
@@ -52,17 +54,31 @@ class StockPicking(models.Model):
         partner = self.partner_id.sudo()
         # NEDEN: Odoo 19 res.partner'da ``mobile`` alanı yok; telefon yalnız ``phone``.
         street = ' '.join(part for part in (partner.street, partner.street2) if part)
-        return self.env['cargo.shipment'].sudo().with_company(self.company_id).create({
-            'company_id': self.company_id.id,
-            'picking_id': self.id,
-            'source_model': self._name,
-            'source_id': self.id,
-            'origin_ref': self.name,
-            'partner_id': partner.id,
-            'recipient_name': partner.name,
-            'recipient_phone': partner.phone,
-            'recipient_email': partner.email,
-            'recipient_street': street,
-            'recipient_state_id': partner.state_id.id,
-            'recipient_district': partner.city,
-        })
+        Shipment = self.env['cargo.shipment'].sudo().with_company(self.company_id)
+        # NEDEN: iş referansı (transfer adı) tüm şirketlerde tek aktif gönderiye aittir (benzersiz indeks). Aynı
+        # referansla elle/API ile açılmış başka bir gönderi düğmeyi sunucu hatasıyla kilitlemesin; engelleyen
+        # gönderinin adı söylenir (05-guvenlik D-2).
+        blocking = Shipment.search([('origin_ref', '=', self.name), ('state', 'not in', ('cancelled', 'failed'))], limit=1)
+        if blocking:
+            raise UserError(_('"%(ref)s" iş referansıyla başka bir kargo gönderisi açık: %(name)s. Bu transfer için '
+                              'gönderi açmadan önce o gönderiyi iptal edin.', ref=self.name, name=blocking.name))
+        try:
+            with self.env.cr.savepoint():
+                return Shipment.create({
+                    'company_id': self.company_id.id,
+                    'picking_id': self.id,
+                    'source_model': self._name,
+                    'source_id': self.id,
+                    'origin_ref': self.name,
+                    'partner_id': partner.id,
+                    'recipient_name': partner.name,
+                    'recipient_phone': partner.phone,
+                    'recipient_email': partner.email,
+                    'recipient_street': street,
+                    'recipient_state_id': partner.state_id.id,
+                    'recipient_district': partner.city,
+                })
+        except pg_errors.UniqueViolation:
+            # eşzamanlı ikinci tıklama ya da henüz commit'lenmemiş (görünmeyen) kayıt
+            raise UserError(_('Bu transfer adıyla açık bir kargo gönderisi zaten var. Birkaç saniye sonra '
+                              'yeniden deneyin.')) from None

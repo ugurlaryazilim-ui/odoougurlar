@@ -111,7 +111,8 @@ class CargoShipment(models.Model):
     # ------------------------------------------------------------------ kilitli (draft/failed) alanlar
     carrier_id = fields.Many2one(
         'delivery.carrier', string='Kargo firması', required=True, index=True, ondelete='restrict',
-        domain=_cargo_carrier_domain, default=lambda self: self._default_carrier_id(), check_company=True)
+        domain=_cargo_carrier_domain, default=lambda self: self._default_carrier_id(), check_company=True,
+        tracking=True)
     # Form alan filtresi (area_id domain'i) için; sağlayıcı kodu = delivery_type.
     carrier_type = fields.Selection(related='carrier_id.delivery_type', string='Firma tipi')
     company_id = fields.Many2one('res.company', string='Şirket', required=True, default=lambda self: self.env.company)
@@ -119,13 +120,15 @@ class CargoShipment(models.Model):
     origin_ref = fields.Char(string='İş referansı', copy=False, help='Transfer adı ya da çağıranın verdiği referans.')
     invoice_no = fields.Char(string='Fatura no', copy=False)
     partner_id = fields.Many2one('res.partner', string='Müşteri', ondelete='set null', check_company=True)
-    recipient_name = fields.Char(string='Alıcı adı')
-    recipient_phone = fields.Char(string='Alıcı telefonu')
-    recipient_email = fields.Char(string='Alıcı e-postası')
-    recipient_street = fields.Char(string='Alıcı adresi')
+    # NEDEN: tracking=True (alıcı, ODP, firma): taslakta tutarı/adresi değiştiren yalnız write_uid olarak
+    # görünmesin, eski değer chatter'da kalsın (05-guvenlik D-3).
+    recipient_name = fields.Char(string='Alıcı adı', tracking=True)
+    recipient_phone = fields.Char(string='Alıcı telefonu', tracking=True)
+    recipient_email = fields.Char(string='Alıcı e-postası', tracking=True)
+    recipient_street = fields.Char(string='Alıcı adresi', tracking=True)
     recipient_state_id = fields.Many2one(
-        'res.country.state', string='İl', domain="[('country_id.code', '=', 'TR')]")
-    recipient_district = fields.Char(string='İlçe')
+        'res.country.state', string='İl', domain="[('country_id.code', '=', 'TR')]", tracking=True)
+    recipient_district = fields.Char(string='İlçe', tracking=True)
     area_id = fields.Many2one(
         'cargo.area', string='Kargo ilçesi', compute='_compute_area_id', store=True, readonly=False,
         domain="[('provider', '=', carrier_type), ('state_id', '=', recipient_state_id)]",
@@ -138,9 +141,9 @@ class CargoShipment(models.Model):
     description = fields.Char(string='Açıklama')
     # EKIP-BORC: tutar şirket para biriminde (TRY varsayımı) tutulur ve sağlayıcıya TL gider; şirket birimi
     # TRY değilse ODP kontrolü yoktur. Çok para birimi istenirse _cargo_check_ready'ye TRY denetimi eklenmeli.
-    cod_amount = fields.Monetary(string='Kapıda ödeme tutarı', currency_field='currency_id', default=0.0)
+    cod_amount = fields.Monetary(string='Kapıda ödeme tutarı', currency_field='currency_id', default=0.0, tracking=True)
     cod_method = fields.Selection(
-        [('cash', 'Nakit'), ('card', 'Kredi kartı'), ('check', 'Çek')], string='Tahsil şekli')
+        [('cash', 'Nakit'), ('card', 'Kredi kartı'), ('check', 'Çek')], string='Tahsil şekli', tracking=True)
 
     # ------------------------------------------------------------------ varsayılanlar
     @api.model
@@ -275,6 +278,10 @@ class CargoShipment(models.Model):
             denied = _CARGO_SYSTEM_FIELDS & set(vals)
             if denied:
                 raise AccessError(_('Bu alanlar yalnız sistem tarafından yazılır: %s', ', '.join(sorted(denied))))
+            # NEDEN: şirket kuralı yazımdan ÖNCE denetlenir, sonra yeniden denetlenmez; gönderi kullanıcının
+            # erişemediği şirkete taşınıp alıcı verisi o şirkete açılmasın (05-guvenlik D-1).
+            if vals.get('company_id') and vals['company_id'] not in self.env.companies.ids:
+                raise AccessError(_('Gönderi yalnız erişebildiğiniz bir şirkete taşınabilir.'))
         vals = dict(vals)
         if 'origin_ref' in vals:
             vals['origin_ref'] = (vals['origin_ref'] or '').strip() or False
@@ -433,7 +440,8 @@ class CargoShipment(models.Model):
         ``label_pdf_id``): sağlayıcı hatası istisna olmaz, kayıt ``failed``/``uncertain`` döner (KK-API-1).
         Doğrulama hatası UserError'dur ve kayıt bırakmaz; yetkisiz çağrı AccessError'dur (sudo ile bile, KK-API-3).
         ``reference`` aynı olan ``cancelled``/``failed`` dışındaki kayıt varsa YENİ GÖNDERİ AÇILMAZ, o kayıt
-        döner (KK-API-2; durumuna bakılır: ``sending``/``uncertain`` olabilir, yeniden gönderilmez).
+        döner (KK-API-2; durumuna bakılır: ``sending``/``uncertain`` olabilir, yeniden gönderilmez). Dönüş yalnız
+        kayıt aynı ``source`` ile açılmışsa ve taslak değilse yapılır; değilse UserError (referans başkasına ait).
 
         DIKKAT: çağrı ortasında ``cr.commit()`` yapar (``_cargo_send`` ara noktaları): çağıranın o ana kadarki
         açık işlemi de kalıcılaşır ve çağrı savepoint içinden yapılamaz. Çağıran, kendi kaydını bu çağrıdan ÖNCE
@@ -446,6 +454,14 @@ class CargoShipment(models.Model):
         if reference:
             existing = self.search([('origin_ref', '=', reference), ('state', 'not in', ('cancelled', 'failed'))], limit=1)
             if existing:
+                # NEDEN: referansı önceden alan başka bir kayıt (elle açılmış taslak, başka kaynak) çağırana
+                # yabancı adres/ODP ile dönmesin (05-guvenlik D-2). Yalnız aynı kaynağın gönderilmiş kaydı döner.
+                same_source = (existing.source_model, existing.source_id) == (
+                    (source._name, source.id) if source else (False, 0))
+                if not same_source or existing.state == 'draft':
+                    raise UserError(_(
+                        '"%(ref)s" iş referansı başka bir kargo gönderisine ait: %(name)s.',
+                        ref=reference, name=existing.name))
                 return existing
         vals = {
             'recipient_name': recipient_name, 'recipient_phone': phone, 'recipient_email': email,

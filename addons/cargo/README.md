@@ -25,7 +25,7 @@ Bağımlılıklar: `mail`, `stock_delivery` (Odoo çekirdeği). **Mevcut Uğurla
 |---|---|
 | Varsayılan kargo firması | Gönderide firma seçilmezse (ve API'de `carrier` verilmezse) kullanılır. Yalnız kargo çekirdeğinin yönettiği firmalar listelenir. Boşsa "Varsayılan kargo firması ayarlı değil" hatası verilir. |
 | Varsayılan paket ağırlığı (kg) | Gönderide ağırlık verilmezse paket başına kullanılır. |
-| Kapıda ödeme üst sınırı | 0 = sınırsız. Aşan tutarlı ODP gönderisi açılmaz. |
+| Kapıda ödeme üst sınırı | 0 = sınırsız. Aşan tutarlı ODP gönderisi açılmaz. **Canlıya geçmeden önce girin** (taslakta tutarı değiştiren kişi chatter'da izlenir ama sınır yoksa her tutar gider). |
 | Etiket sayfası | `10x15` termal (varsayılan) ya da `A4`. |
 
 Ayar ekranında **sır yoktur**; hesap bilgileri firma kaydındadır (sağlayıcı README'si). Ayarlar şirket başına `res.company` alanlarında tutulur.
@@ -92,6 +92,7 @@ shipment = env['cargo.shipment'].create_and_send(
 ```
 
 - Yalnız anahtar-kelime parametreleri: `recipient_name, phone, street, state, district` (zorunlu), `package_count, weight, reference, invoice_no, cod_amount, cod_method, carrier, source, email, partner`. `@api.private`: RPC'den çağrılamaz.
+- **Aynı referans**: `reference` aynı olan açık kayıt yalnız aynı `source` ile açılmışsa ve taslak değilse döner; başka kaynağın (ya da elle açılmış taslağın) referansı `UserError` verir.
 - **Sağlayıcı hatası istisna değildir**: kayıt `failed` ya da `uncertain` döner. Doğrulama hataları (`UserError`: telefon, ilçe, ODP, paket sayısı, varsayılan firma yok) kayıt bırakmaz ve dış çağrı yapmaz. Yetkisiz çağrı `AccessError`.
 - **Idempotency:** `reference` ile aynı iş referanslı, iptal/hatalı olmayan kayıt varsa **yeni gönderi açılmaz, o kayıt döner** (durumu `sending`/`uncertain` olabilir; yeniden gönderilmez, uzlaştırılır). Eşzamanlı iki çağrıda DB indeksi mükerrerliği engeller; ikincisi "birkaç saniye sonra yeniden deneyin" hatası alır.
 - **DIKKAT:** çağrı ortasında `cr.commit()` yapar. Çağıranın o ana kadarki açık işlemi de kalıcılaşır; **savepoint içinden çağrılmaz**. Çağıran kendi kaydını çağrıdan önce tutarlı bırakmalıdır.
