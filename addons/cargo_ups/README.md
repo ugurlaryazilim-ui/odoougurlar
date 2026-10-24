@@ -23,6 +23,8 @@ Bağımlılık: yalnız `cargo`. Yeni Python paketi yoktur (`requests`, `lxml` i
 | UPS paket türü | Paket / Zarf. |
 | Alıcıya SMS (UPS) | Varsayılan kapalı. |
 
+Hizmet alanları (hizmet, ödeme türü, paket türü, SMS) da faturayı belirlediği için **yalnız Kargo / Yönetici** okur ve yazar. Stok ve satış yöneticisi firma kaydını açabilir ama bu alanları değiştiremez (O-1). Firma kaydı değişiklik izi tutmaz; bu alanları değiştiren kişi kayıtta görünmez.
+
 Ayar ekranına (Ayarlar > Kargo) sır girilmez; yalnız varsayılan firma seçilir. Hangi **tüzel kişiliğin** UPS hesabının girildiği (şirket/hesap eşleşmesi) canlıdan önce yöneticiyle teyit edilmelidir.
 
 ## 3. Test ucu / canlı bayrağı (K-26)

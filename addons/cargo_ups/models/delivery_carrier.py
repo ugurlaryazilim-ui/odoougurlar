@@ -51,16 +51,21 @@ class DeliveryCarrier(models.Model):
     ups_tr_track_password = fields.Char('UPS takip şifre', groups=_MANAGER, copy=False)
 
     # Hizmet seçenekleri sır değildir (UPS WSDL: ServiceLevel/PaymentType/PackageType/SmsToConsignee).
+    # NEDEN (O-1, 05-guvenlik): ödeme türü/hizmet düzeyi faturayı belirler ve değişiklik iz bırakmaz
+    # (delivery.carrier mail.thread değil). delivery.carrier ACL'si stok ve satış yöneticisine yazma verir;
+    # koruma alan groups'udur. Gönderi akışı bu alanları sudo ile okur (_ups_tr_shipment_info).
+    # DIKKAT: groups kaldırılırsa stok yöneticisi "Alıcı öder"/Express seçebilir. Çekirdek alanlar
+    # (prod_environment, delivery_type, active, company_id) cargo'daki write denetimindedir.
     ups_tr_service_level = fields.Selection([
         ('1', 'Domestic Express Plus 09:00'), ('3', 'Domestic Standard'), ('4', 'Domestic Express 10:30'),
         ('5', 'Domestic Express 12:00'), ('6', 'Domestic Express Saver')],
-        string='UPS hizmet', default='3')
+        string='UPS hizmet', default='3', groups=_MANAGER)
     ups_tr_payment_type = fields.Selection([
         ('1', 'Alıcı öder'), ('2', 'Gönderici öder'), ('4', 'Üçüncü taraf öder')],
-        string='UPS ödeme türü', default='2')
+        string='UPS ödeme türü', default='2', groups=_MANAGER)
     ups_tr_package_type = fields.Selection(
-        [('D', 'Zarf'), ('K', 'Paket')], string='UPS paket türü', default='K')
-    ups_tr_sms_to_consignee = fields.Boolean('Alıcıya SMS (UPS)', default=False)
+        [('D', 'Zarf'), ('K', 'Paket')], string='UPS paket türü', default='K', groups=_MANAGER)
+    ups_tr_sms_to_consignee = fields.Boolean('Alıcıya SMS (UPS)', default=False, groups=_MANAGER)
 
     # ------------------------------------------------------------------ Odoo delivery kancaları
     def ups_tr_rate_shipment(self, order):

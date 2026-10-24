@@ -8,6 +8,9 @@ from odoo.tests import TransactionCase, new_test_user, tagged
 
 SECRET_FIELDS = ('ups_tr_customer_number', 'ups_tr_shipper_account', 'ups_tr_username', 'ups_tr_password',
                  'ups_tr_track_username', 'ups_tr_track_password')
+# O-1: sır değil ama faturayı/hizmeti belirler; varsayılandan farklı yazım değerleri.
+SERVICE_VALUES = (('ups_tr_service_level', '1'), ('ups_tr_payment_type', '1'), ('ups_tr_package_type', 'D'),
+                  ('ups_tr_sms_to_consignee', True))
 # NEDEN: sentetik, tanınabilir sırlar; gerçek hesap bilgisi testlerde ve veride yoktur.
 FAKE_SECRET = 'SENTETIK-SIR-G8'
 
@@ -96,9 +99,43 @@ class TestUpsSetup(TransactionCase):
             definition = self.Carrier._fields[field]
             self.assertIn('cargo.group_cargo_manager', str(definition.groups))
             self.assertFalse(definition.copy)
+        for field, _value in SERVICE_VALUES:
+            self.assertEqual(self.Carrier._fields[field].groups, 'cargo.group_cargo_manager', field)
         copy = self.ups.sudo().copy()
         for field in SECRET_FIELDS:
             self.assertFalse(copy[field])
+
+    def test_hizmet_alanlari_yalniz_kargo_yoneticisi_yazar(self):
+        """O-1 (05-guvenlik): faturayi belirleyen hizmet alanlari; ACL'li stok/satis yoneticisi yazamaz.
+        NEDEN: delivery.carrier ACL'si stock/sales yoneticisine 1,1,1,1 verir; koruma alan groups'udur."""
+        stock_manager = new_test_user(self.env, login='o1_stok_yonetici', groups='base.group_user,stock.group_stock_manager')
+        sale_manager = new_test_user(self.env, login='o1_satis_yonetici', groups='base.group_user,sales_team.group_sale_manager')
+        values = dict(SERVICE_VALUES)
+        for user in (stock_manager, sale_manager):
+            carrier = self.ups.with_user(user)
+            carrier.check_access('write')     # ACL var; reddi alan grubu verir
+            for field, value in values.items():
+                with self.subTest(user=user.login, field=field):
+                    with self.assertRaises(AccessError):
+                        carrier.write({field: value})
+                    with self.assertRaises(AccessError):
+                        carrier.read([field])
+            with self.assertRaises(AccessError):
+                self.Carrier.with_user(user).create({
+                    'name': 'O1 sahte', 'delivery_type': 'fixed', 'ups_tr_payment_type': '1',
+                    'product_id': self.env.ref('delivery.product_product_delivery').id})
+        self.assertEqual(tuple(self.ups.sudo()[f] for f in values), ('3', '2', 'K', False), 'deger degismedi')
+        # Kardes yol: UPS disi firma yonetimi stok yoneticisinde bozulmaz (varsayilanlar kullanici degeri sayilmaz).
+        Carrier = self.Carrier.with_user(stock_manager)
+        fixed = Carrier.create({'name': 'O1 sabit', 'delivery_type': 'fixed',
+                                'product_id': self.env.ref('delivery.product_product_delivery').id})
+        fixed.write({'name': 'O1 sabit 2'})
+        self.assertEqual(fixed.sudo().ups_tr_payment_type, '2', 'varsayilan create yolunda yazildi')
+        # NEDEN: copy() burada sinanmaz: stok yoneticisi copy_data'da groups'lu cargo_cod_* alanini okuyamaz
+        # (cargo'da, bu degisiklikten once de var; DT1 raporunda bildirildi).
+        # Kargo yoneticisi yazar.
+        self.ups.with_user(self.cargo_manager).write(values)
+        self.assertEqual(tuple(self.ups.sudo()[f] for f in values), tuple(values.values()))
 
     def test_odoo_kancalari(self):
         order = self.env['sale.order'].create({'partner_id': self.env['res.partner'].create({'name': 'G8 Müşteri'}).id})
