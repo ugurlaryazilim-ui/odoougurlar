@@ -88,7 +88,7 @@ Kullanıcıyla birlikte yapılır; her satır geçince işaretlenir. Önce firma
 | CD-12 | UPS'e sorulacaklar: Hatay/Diyarbakır `MERKEZ`, Antalya Aksu kodu, güncel liste | Açık | Bu README 5. bölüm. |
 
 **G9 ek maddeleri (canlıda bakılacak):**
-- **"Bulunamadı" yanıt biçimi:** referansla sorguda kayıt yokken UPS boş liste mi, `ErrorCode≠0` mı dönüyor? `ErrorCode≠0` dönerse sonuç `error` olur ve gönderi `uncertain` kalır (güvenli; yalnız elle uzlaştırma gerekir). Test ucunda sorgu olmadığından yalnız canlıda görülebilir: ilk gönderiden sonra Uzlaştır'ı bir kez dene, ayrıca olmayan bir referansla.
+- **"Bulunamadı" yanıt biçimi:** referansla sorguda kayıt yokken UPS boş liste mi, `ErrorCode≠0` mı dönüyor? `ErrorCode≠0` dönerse sonuç `error` olur ve gönderi `uncertain` kalır (güvenli; kargo yöneticisi gönderi formundaki "Kargo firmasında yok" eylemiyle gerekçe yazarak kapatır, K-28). Test ucunda sorgu olmadığından yalnız canlıda görülebilir: ilk gönderiden sonra Uzlaştır'ı bir kez dene, ayrıca olmayan bir referansla.
 - **Fault türü** (CD-9: yalnız `soap:Client` işlenmedi sayılır) ve **test ucunun canlı kimliği kabulü** (CD-1, R13).
 - **Barkod PNG:** yanıttaki `BarkodArrayPng` blokundan etiket görüntüsü geliyor mu, paket sayısı kadar mı, PDF doğru mu (CD-5).
 - **Çok paketli sorgu:** 2+ paketli bir gönderi oluştur; takip no tek mi, etiket sayısı paket sayısına eşit mi, referans sorgusu `count>1` uyarısı vermeden doğru mu?
