@@ -9,7 +9,7 @@ import threading
 from unittest.mock import patch
 
 from odoo import SUPERUSER_ID, api, sql_db
-from odoo.exceptions import AccessError, UserError
+from odoo.exceptions import UserError
 from odoo.tests import tagged
 
 from .kabul_taban import CargoKabulCase, make_label_png
@@ -152,7 +152,7 @@ class TestKabulGonderim(CargoKabulCase):
     def test_kullanici_yetkisi(self):
         shipment = self.mk()
         for user in (self.plain, self.plain_sales):
-            with self.assertRaises((AccessError, UserError), msg=user.login):
+            with self.assertRaises(UserError, msg=user.login):
                 shipment.with_user(user).action_send()
         self.no_provider_calls()
         self.assertEqual(shipment.state, 'draft')
@@ -266,7 +266,7 @@ class TestKabulUzlastir(CargoKabulCase):
 
     def test_yetkisiz_kullanici(self):
         shipment = self.uncertain()
-        with self.assertRaises((AccessError, UserError)):
+        with self.assertRaises(UserError):
             shipment.with_user(self.plain).action_reconcile()
 
 
@@ -321,7 +321,7 @@ class TestKabulIptal(CargoKabulCase):
 
     def test_yetkisiz_iptal(self):
         shipment = self.sent()
-        with self.assertRaises((AccessError, UserError)):
+        with self.assertRaises(UserError):
             shipment.with_user(self.plain).action_cancel()
         self.assertEqual(self.provider.count('cancel'), 0)
 

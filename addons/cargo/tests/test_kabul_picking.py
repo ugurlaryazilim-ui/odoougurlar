@@ -6,7 +6,7 @@ kurulu olmayan pazaryeri alanlari atlanir (subTest + skip). Shopify testi shopif
 """
 from unittest.mock import patch
 
-from odoo.exceptions import AccessError, UserError
+from odoo.exceptions import UserError
 from odoo.tests import tagged
 
 from .kabul_taban import CargoKabulCase
@@ -123,7 +123,7 @@ class TestKabulTransferGonderi(PickingBase):
 
     def test_yetkisiz_kullanici(self):
         picking = self.make_picking()
-        with self.assertRaises((AccessError, UserError)):
+        with self.assertRaises(UserError):
             picking.with_user(self.plain).action_cargo_shipment_open()
         self.assertFalse(picking.sudo().cargo_shipment_ids)
 

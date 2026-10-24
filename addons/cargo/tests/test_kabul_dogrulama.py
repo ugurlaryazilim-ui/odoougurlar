@@ -182,7 +182,7 @@ class TestKabulKilitlerVeKurallar(DogrulamaBase):
     def test_kilitli_durumda_tum_alanlar_tek_yazimda(self):
         shipment = self.sent()
         before = {k: shipment[k] for k in self.LOCKED}
-        with self.assertRaises((UserError, AccessError)):
+        with self.assertRaises(UserError):
             shipment.with_user(self.user).write(dict(self.LOCKED))
         shipment.invalidate_recordset()
         self.assertEqual({k: shipment[k] for k in self.LOCKED}, before)
@@ -237,13 +237,13 @@ class TestKabulKilitlerVeKurallar(DogrulamaBase):
         self.assertFalse(draft.exists(), 'kullanici draft kaydi silebilir')
         failed = self.mk()
         failed.sudo().write({'state': 'failed'})
-        with self.assertRaises((UserError, AccessError)):
+        with self.assertRaises(UserError):
             failed.with_user(self.user).unlink()
         failed.with_user(self.manager).unlink()
         self.assertFalse(failed.exists(), 'yonetici failed kaydi silebilir')
         created = self.sent()
         for user in (self.user, self.manager):
-            with self.assertRaises((UserError, AccessError), msg='created gonderi silinemez (%s)' % user.login):
+            with self.assertRaises(UserError, msg='created gonderi silinemez (%s)' % user.login):
                 created.with_user(user).unlink()
         self.assertTrue(created.exists())
 
@@ -303,7 +303,7 @@ class TestKabulFirmaVeOdp(DogrulamaBase):
 
     def test_firma_kilitli_durumda_degismez(self):
         shipment = self.sent()
-        with self.assertRaises((UserError, AccessError)):
+        with self.assertRaises(UserError):
             shipment.with_user(self.user).write({'carrier_id': self.carrier_y.id})
         self.assertEqual(shipment.carrier_id, self.carrier)
 
